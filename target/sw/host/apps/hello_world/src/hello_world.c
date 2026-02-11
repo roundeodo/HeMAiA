@@ -5,14 +5,17 @@
 // #include <stdio.h>
 #include "host.h"
 
-int main() {
+int main()
+{
     uintptr_t address_prefix = (uintptr_t)get_current_chip_baseaddress();
 
     init_uart(address_prefix, 32, 1);
     asm volatile("fence" : : : "memory");
     printf("Hello world from HeMAiA! \r\n");
+    printf("extra test\r\n");
     char uart_rx_buffer[512];
-    while (1) {
+    while (1)
+    {
         scanf("%s", uart_rx_buffer);
         printf("[HeMAiA] What you said is: %s\r\n", uart_rx_buffer);
     }

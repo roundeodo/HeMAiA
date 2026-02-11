@@ -31,6 +31,9 @@ APPS += offload_multichip
 APPS += offload_bingo_multichip
 APPS += offload_bingo_mempool_xdma
 
+# MoE related
+APPS += single_cluster_MoE_host
+
 TARGET ?= all
 
 LIB_BINGO_DIR = runtime/libbingo

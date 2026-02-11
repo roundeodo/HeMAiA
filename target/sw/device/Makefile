@@ -9,6 +9,9 @@
 # Those apps are standalone apps
 # Will be gradually moved to the kernels
 APPDIR  = apps/snax/snax-test-integration
+# For moe
+APPDIR += apps/snax/single_cluster_MoE_device
+
 APPDIR += apps/snax/snax-xdma-maxpool
 APPDIR += apps/snax/snax-xdma-memset
 APPDIR += apps/snax/snax-xdma-multicast
@@ -26,6 +29,8 @@ APPDIR += apps/snax/snax-xdma-reshape-multicast
 APPDIR += apps/snax/snax-versacore-matmul-profile
 # In the future we only need this offload bingo app
 APPDIR += apps/snax/snax-bingo-offload
+
+
 
 TARGET ?= all
 

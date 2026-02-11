@@ -1,8 +1,8 @@
 #include <stdint.h>
 
-uint32_t data_size = 64;
+uint32_t data_size = 8192;
 
-uint8_t data[8192] __attribute__((aligned(8))) = {
+uint8_t data[8192] __attribute__ ((aligned (8))) = {
 	13,
 	194,
 	10,
