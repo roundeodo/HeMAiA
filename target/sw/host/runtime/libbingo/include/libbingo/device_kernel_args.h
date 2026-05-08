@@ -482,3 +482,115 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_gemm_minimal_args {
   uint32_t output_D_addr;            
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_gemm_minimal_args_t;
+
+// BINGO GEMM Minimal-SiLU kernel args: like minimal but updates the SiLU CSR.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_gemm_minimal_silu_args {
+  uint32_t input_A_addr;
+  uint32_t input_B_addr;
+  uint32_t input_C_addr;
+  uint32_t output_D_addr;
+  uint32_t silu_enable;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_gemm_minimal_silu_args_t;
+
+// BINGO Dual-VersaCore GEMM kernel args.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_gemm_full_args {
+  uint32_t input_A_addr;
+  uint32_t input_B0_addr;
+  uint32_t input_B1_addr;
+  uint32_t output_D0_addr;
+  uint32_t output_D1_addr;
+  uint32_t M;
+  uint32_t K;
+  uint32_t N;
+  uint32_t array_shape;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_dual_vc_gemm_full_args_t;
+
+// BINGO Dual-VersaCore SwiGLU kernel args.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_swiglu_full_args {
+  uint32_t input_A_addr;
+  uint32_t input_B_gate_addr;
+  uint32_t input_B_up_addr;
+  uint32_t output_D0_addr;
+  uint32_t output_D1_addr;
+  uint32_t M;
+  uint32_t K;
+  uint32_t N;
+  uint32_t array_shape;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_dual_vc_swiglu_full_args_t;
+
+// Dynamic MoE individual expert slot. A host super-node patches active/task
+// fields before the strict S1/S2/S3/S4/store device nodes consume it.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
+  uint32_t active;
+  uint32_t slot_id;
+  uint32_t expert_id;
+  uint32_t token_start_rank;
+  uint32_t ntokens;
+  uint32_t shape_s1;
+  uint32_t shape_s3;
+  uint32_t skip_dma_s1;
+  uint32_t skip_dma_s3;
+  uint32_t dma_s1;
+  uint32_t dma_s3;
+  uint32_t bw_s1;
+  uint32_t bw_s3;
+  uint32_t runtime_cluster_idx;
+  uint32_t wait_for_peer_slots;
+  uint32_t s1_block_count;
+  uint32_t s3_block_count;
+  uint32_t dma_slot_valid[4];
+  uint32_t dma_slot_kind[4];
+  int32_t dma_slot_expert_id[4];
+  uint32_t dma_slot_shape[4];
+  uint32_t dma_slot_dma[4];
+  uint32_t dma_slot_idma_seq[4];
+  uint32_t dma_slot_xdma_seq[4];
+  uint32_t dma_slot_start_cc[4];
+  uint32_t dma_slot_end_cc[4];
+  uint64_t token_ids_addr;
+  uint64_t input_A_l3_base;
+  uint64_t indiv_gate_B_l3;
+  uint64_t indiv_up_B_l3;
+  uint64_t indiv_down_B_l3;
+  uint64_t output_l3_base;
+  uint64_t runtime_state_addr;
+  uint32_t l1_a_addr;
+  uint32_t l1_b_gate_addr;
+  uint32_t l1_b_up_addr;
+  uint32_t l1_b_down_addr;
+  uint32_t l1_d_addr;
+  uint32_t l1_down_d_addr;
+  uint32_t l1_d1_scratch_addr;
+  uint32_t A_token_bytes;
+  uint32_t indiv_B_expert_stride;
+  uint32_t indiv_down_B_expert_stride;
+  uint32_t indiv_B_tile_bytes;
+  uint32_t indiv_D_tile_bytes;
+  uint32_t indiv_down_B_tile_bytes;
+  uint32_t indiv_down_D_tile_bytes;
+  uint32_t indiv_N2;
+  uint32_t indiv_down_N2;
+  uint32_t indiv_K1;
+  uint32_t indiv_N1;
+  uint32_t indiv_down_K1;
+  uint32_t indiv_down_N1;
+  uint32_t array_shape;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  uint32_t output_expert_stride_bytes;
+  uint32_t max_tokens_per_expert;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_dynamic_expert_args_t;
+
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_block_args {
+  uint64_t task_arg_addr;
+  uint32_t block_idx;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_dynamic_expert_block_args_t;

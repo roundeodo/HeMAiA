@@ -1,0 +1,21 @@
+shared_expert:
+for e in 0 to share_expert_number - 1:
+    for m = 0 to swishglu_M2 - 1:
+        load A[e][m]  
+        for n = 0 to swishglu_N2 - 1:
+            load gate_B[e][n]                          load up_B[e][n]
+            Gemm gate_D[e][m][n]                       Gemm up_D[e][m][n]
+            store gate_D[e][m][n]                      store up_D[e][m][n]
+
+
+            swishglu_M2 gate_D[e][m][n]
+
+            glu activation swishglu_D[e][m][n]
+
+        load down_A[e][m]
+        for n = 0 to down_N2 - 1:
+            load down_B[e][m][n]
+            Gemm down_D[e][m][n]
+            store down_D[e][m][n]
+
+accumulation

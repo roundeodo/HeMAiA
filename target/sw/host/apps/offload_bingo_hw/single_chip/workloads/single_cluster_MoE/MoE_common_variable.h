@@ -1,0 +1,11 @@
+#define input_dimension 1024
+#define shared_swish_glu_dimension 128
+#define individual_swish_glu_dimension 128
+#define down_projection_dimension 1024
+#define expert_number_each_layer 8
+#define individual_expert_number_k 2
+#define shared_expert_number_k 2
+#define final_shift_step 24
+#define swish_glu_scale_in 0.000015258789f
+#define swish_glu_scale_out 32.0f
+#define softmax_scale 65536.0f

@@ -1,0 +1,1817 @@
+# Copyright 2025 KU Leuven.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# multi_cluster_MoE Bingo DFG - Dynamic Scheduling with iDMA + xDMA Parallel
+#
+# Architecture:
+#   Cluster 0 (C0): Shared Expert 0 (gate+up SwiGLU + down proj)
+#   Cluster 1 (C1): Shared Expert 1 (gate+up SwiGLU + down proj)
+#   Cluster 2 (C2): INDIV_A - individual expert slot 0 (dynamic per round)
+#   Cluster 3 (C3): INDIV_B - router GEMM + individual expert slot 1 (dynamic)
+#
+# DMA resource topology (hardware):
+#   System iDMA (ONE per chip): base 0x05000000, triggered by CVA6 via sys_dma_memcpy().
+#     In DFG: HOST lane (cluster=0, core=HOST_CORE_ID=2), kernel __host_bingo_kernel_idma.
+#   Cluster xDMA: triggered by each target cluster DM core via CSR offset 960.
+#     In DFG: target-cluster DM lane (core=DMA_CORE_ID=1), kernel __snax_bingo_kernel_xdma_1d_copy.
+#   iDMA and xDMA are independent hardware engines and can run truly in parallel.
+#   xDMA L3->L1 copies run on the destination cluster so the TCDM endpoint is local.
+#
+# DFG flow:
+#
+#   Phase 0 — 权重预加载（iDMA + xDMA 两路硬件并行）：
+#     iDMA path (HOST lane, serial): 所有 gate_B + router_B (系统 iDMA 读通道)
+#       C0_gate_B → C1_gate_B → C2_gate_B → C3_router_B → C3_gate_B
+#     xDMA path (target DM lane, serial): 所有 up_B + down_B
+#       C0_up_B → C0_down_B → C1_up_B → C1_down_B → C2_up_B → C2_down_B → C3_up_B → C3_down_B
+#     两条 lane 无 cross-dependency → DFG 中真正并行（两套独立硬件）。
+#
+#   Phase 1a — Token 搬运（iDMA + xDMA 两路并行，等两路 Phase 0 全部完成后开始）：
+#     C0_shared_A: HOST lane iDMA;  C1_shared_A: C1_DM lane xDMA（两路并行）
+#     C3_router_A: HOST lane iDMA，等 C0_load_A 完成后串行
+#
+#   Phase 1b — 各 cluster GEMM（B 已驻留，A 就绪后立即执行）：
+#     C0: shared_expert0 gate+up SwiGLU → down proj
+#     C1: shared_expert1 gate+up SwiGLU → down proj  [与 C0 并行]
+#     C3: router GEMM                                  [与 C0/C1 并行]
+#
+#   Phase 2 — CVA6 TopK（router 输出写回 L3 后）
+#   Phase 3 — CVA6 analytical scheduler：读 expert_token_counts 和 CAM 状态，输出
+#              moe_schedule_t，其中 tasks[] 给出 C2/C3 的全局 expert 顺序，dma_ops[]
+#              给出 iDMA/xDMA lane 顺序，tasks[].dma_slots[] 给出固定 DMA 槽语义。
+#   Phase 4 — Individual expert 动态 GEMM：CVA6 一次性将 moe_schedule_t 降低到
+#              C2/C3 的 L1 static slot args；device kernels 通过 L3 runtime counters
+#              严格等待跨 cluster 前置关系和 DMA lane 顺序。
+
+import os
+import sys
+import argparse
+import pathlib
+import hjson
+import re
+import struct
+import networkx as nx
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(
+    os.path.abspath(os.path.join(current_dir, "../../../../../../../../"))
+)
+
+print(f"ROOT_DIR: {ROOT_DIR}")
+sys.path.append(f"{ROOT_DIR}/target/sw/host/runtime/libbingo/mini_compiler")
+
+
+def parse_inorder_completion_core_ids() -> set:
+    raw = os.environ.get("BINGO_INORDER_CORE_IDS", "0").strip().lower()
+    if raw in {"", "none", "off", "false", "no"}:
+        return set()
+    if raw in {"all", "*"}:
+        return {0, 1, 2}
+    return {int(c.strip()) for c in raw.split(",") if c.strip()}
+
+
+INORDER_COMPLETION_CORE_IDS = parse_inorder_completion_core_ids()
+if os.environ.get("BINGO_ENFORCE_INORDER_PER_CORE", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}:
+    if "BINGO_INORDER_CORE_IDS" not in os.environ:
+        INORDER_COMPLETION_CORE_IDS = {0, 1, 2}
+
+print(
+    "BINGO_INORDER_CORE_IDS: "
+    + (
+        ",".join(str(c) for c in sorted(INORDER_COMPLETION_CORE_IDS))
+        if INORDER_COMPLETION_CORE_IDS
+        else "none"
+    )
+)
+
+from bingo_dfg import BingoDFG
+from bingo_node import BingoNode
+from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol
+from bingo_kernel_args import (
+    BingoKernelArgs,
+    SnaxBingoKernelXdma1dCopyArgs,
+    SnaxBingoKernelIdma1dCopyArgs,
+    SnaxBingoKernelIdmaBroadcastArgs,
+    SnaxBingoKernelGemmFullArgs,
+    SnaxBingoKernelDualVcGemmFullArgs,
+    SnaxBingoKernelDualVcSwigluFullArgs,
+    HostBingoKernelIdmaArgs,
+    SnaxBingoKernelGemmMinimalArgs,
+    HostBingoKernelMoERouterScheduleArgs,
+    HostBingoKernelMoEPrepareRequestArgs as LibHostBingoKernelMoEPrepareRequestArgs,
+    HostBingoKernelMoEExecuteArgs as LibHostBingoKernelMoEExecuteArgs,
+    SnaxBingoKernelMoeDynamicExpertArgs,
+    SnaxBingoKernelMoeDynamicExpertBlockArgs,
+)
+from typing import Union, Dict
+
+MOE_DYNAMIC_SLOT_COUNT = 16
+MOE_DYNAMIC_ARG_SLOT_BYTES = 512
+MOE_SCHEDULE_BYTES = 32768
+MOE_RUNTIME_STATE_BYTES = 16
+ENABLE_PHASE3_PHASE4 = False
+
+
+# =========================================================================
+# Custom kernel args: HostBingoKernelMoEPrepareRequestArgs
+# Phase 3：构建 moe_request_t（调度算法的输入参数）。
+# =========================================================================
+
+
+class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
+    """
+    Phase 3：从 TopK 路由结果中构建 moe_request_t。
+    读取 expert_token_counts 和当前 CAM 状态（C2/C3 驻留 expert），
+    写入 L3 的 moe_request_t 供 Phase 4 固件执行循环使用。
+
+    调度算法在 Phase 4 内部调用，DFG 层不感知。
+    接口由 moe_scheduler.c 实现，此处仅为数据准备节点。
+    对应 __host_bingo_kernel_moe_prepare_request。
+    """
+
+    def __init__(
+        self,
+        expert_token_counts_addr: Union[BingoMemAlloc, str, int],
+        cam_state_addr: Union[
+            BingoMemAlloc, str, int
+        ],  # L3: int32_t[2] (cam[0]=C2, cam[1]=C3)
+        request_out_addr: Union[BingoMemAlloc, str, int],  # L3: moe_request_t
+        n_experts: int,
+    ):
+        self.expert_token_counts_addr = expert_token_counts_addr
+        self.cam_state_addr = cam_state_addr
+        self.request_out_addr = request_out_addr
+        self.n_experts = n_experts
+
+    def get_struct_name(self) -> str:
+        return "__host_bingo_kernel_moe_prepare_request_args_t"
+
+    def get_c_field_assignments(self, handle_name_map: Dict) -> Dict:
+        a = {}
+        self._process_addr(
+            self.expert_token_counts_addr,
+            "expert_token_counts_addr",
+            a,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.cam_state_addr,
+            "cam_state_addr",
+            a,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.request_out_addr,
+            "request_out_addr",
+            a,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        a["n_experts"] = str(self.n_experts)
+        return a
+
+
+# =========================================================================
+# Custom kernel args: HostBingoKernelMoEExecuteArgs
+# Phase 4：CVA6 将 Phase 3 的 moe_schedule_t 降低到 C2/C3 static slot args。
+# =========================================================================
+
+
+class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
+    """
+        Phase 4：CVA6 读取 Phase 3 写入的 moe_schedule_t，
+        一次性写入 C2/C3 的 L1 dynamic slot args。后续 static DFG 节点在 device 侧执行。
+    对应 __host_bingo_kernel_moe_execute。
+    """
+
+    def __init__(
+        self,
+        request_addr: Union[BingoMemAlloc, str, int],
+        cam_state_addr: Union[BingoMemAlloc, str, int],
+        input_A_l3_base: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
+        topk_indices_l3: Union[BingoMemAlloc, str, int],
+        indiv_gate_B_l3: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
+        indiv_up_B_l3: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
+        indiv_down_B_l3: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
+        c2_l1_b_gate: Union[BingoMemAlloc, str, int],
+        c2_l1_b_up: Union[BingoMemAlloc, str, int],
+        c2_l1_b_down: Union[BingoMemAlloc, str, int],
+        c2_l1_a: Union[BingoMemAlloc, str, int],
+        c2_l1_d: Union[BingoMemAlloc, str, int],
+        c2_l1_down_d: Union[BingoMemAlloc, str, int],
+        c3_l1_b_gate: Union[BingoMemAlloc, str, int],
+        c3_l1_b_up: Union[BingoMemAlloc, str, int],
+        c3_l1_b_down: Union[BingoMemAlloc, str, int],
+        c3_l1_a: Union[BingoMemAlloc, str, int],
+        c3_l1_d: Union[BingoMemAlloc, str, int],
+        c3_l1_down_d: Union[BingoMemAlloc, str, int],
+        output_l3_addr: Union[BingoMemAlloc, str, int],
+        A_token_bytes: int,
+        indiv_B_expert_stride: int,
+        indiv_down_B_expert_stride: int,
+        down_D_bytes_per_expert: int,
+        M_total: int,
+        top_k: int,
+    ):
+        self.request_addr = request_addr
+        self.cam_state_addr = cam_state_addr
+        self.input_A_l3_base = input_A_l3_base
+        self.topk_indices_l3 = topk_indices_l3
+        self.indiv_gate_B_l3 = indiv_gate_B_l3
+        self.indiv_up_B_l3 = indiv_up_B_l3
+        self.indiv_down_B_l3 = indiv_down_B_l3
+        self.c2_l1_b_gate = c2_l1_b_gate
+        self.c2_l1_b_up = c2_l1_b_up
+        self.c2_l1_b_down = c2_l1_b_down
+        self.c2_l1_a = c2_l1_a
+        self.c2_l1_d = c2_l1_d
+        self.c2_l1_down_d = c2_l1_down_d
+        self.c3_l1_b_gate = c3_l1_b_gate
+        self.c3_l1_b_up = c3_l1_b_up
+        self.c3_l1_b_down = c3_l1_b_down
+        self.c3_l1_a = c3_l1_a
+        self.c3_l1_d = c3_l1_d
+        self.c3_l1_down_d = c3_l1_down_d
+        self.output_l3_addr = output_l3_addr
+        self.A_token_bytes = A_token_bytes
+        self.indiv_B_expert_stride = indiv_B_expert_stride
+        self.indiv_down_B_expert_stride = indiv_down_B_expert_stride
+        self.down_D_bytes_per_expert = down_D_bytes_per_expert
+        self.M_total = M_total
+        self.top_k = top_k
+
+    def get_struct_name(self) -> str:
+        return "__host_bingo_kernel_moe_execute_args_t"
+
+    def _pa(self, val, name, a, hm):
+        self._process_addr(val, name, a, hm, split_64bit=False, as_64bit=True)
+
+    def get_c_field_assignments(self, handle_name_map: Dict) -> Dict:
+        a = {}
+        self._pa(self.request_addr, "request_addr", a, handle_name_map)
+        self._pa(self.cam_state_addr, "cam_state_addr", a, handle_name_map)
+        self._pa(self.input_A_l3_base, "input_A_l3_base", a, handle_name_map)
+        self._pa(self.topk_indices_l3, "topk_indices_l3", a, handle_name_map)
+        self._pa(self.indiv_gate_B_l3, "indiv_gate_B_l3", a, handle_name_map)
+        self._pa(self.indiv_up_B_l3, "indiv_up_B_l3", a, handle_name_map)
+        self._pa(self.indiv_down_B_l3, "indiv_down_B_l3", a, handle_name_map)
+        self._pa(self.c2_l1_b_gate, "c2_l1_b_gate", a, handle_name_map)
+        self._pa(self.c2_l1_b_up, "c2_l1_b_up", a, handle_name_map)
+        self._pa(self.c2_l1_b_down, "c2_l1_b_down", a, handle_name_map)
+        self._pa(self.c2_l1_a, "c2_l1_a", a, handle_name_map)
+        self._pa(self.c2_l1_d, "c2_l1_d", a, handle_name_map)
+        self._pa(self.c2_l1_down_d, "c2_l1_down_d", a, handle_name_map)
+        self._pa(self.c3_l1_b_gate, "c3_l1_b_gate", a, handle_name_map)
+        self._pa(self.c3_l1_b_up, "c3_l1_b_up", a, handle_name_map)
+        self._pa(self.c3_l1_b_down, "c3_l1_b_down", a, handle_name_map)
+        self._pa(self.c3_l1_a, "c3_l1_a", a, handle_name_map)
+        self._pa(self.c3_l1_d, "c3_l1_d", a, handle_name_map)
+        self._pa(self.c3_l1_down_d, "c3_l1_down_d", a, handle_name_map)
+        self._pa(self.output_l3_addr, "output_l3_addr", a, handle_name_map)
+        a["A_token_bytes"] = str(self.A_token_bytes)
+        a["indiv_B_expert_stride"] = str(self.indiv_B_expert_stride)
+        a["indiv_down_B_expert_stride"] = str(self.indiv_down_B_expert_stride)
+        a["down_D_bytes_per_expert"] = str(self.down_D_bytes_per_expert)
+        a["M_total"] = str(self.M_total)
+        a["top_k"] = str(self.top_k)
+        return a
+
+
+# Use the canonical ABI mirror from libbingo. The local legacy classes above
+# are kept only for older generated headers; the current workload needs the
+# extended schedule/token-map/dynamic-slot fields.
+HostBingoKernelMoEPrepareRequestArgs = LibHostBingoKernelMoEPrepareRequestArgs
+HostBingoKernelMoEExecuteArgs = LibHostBingoKernelMoEExecuteArgs
+
+
+# =========================================================================
+# Cluster / Core ID constants
+# =========================================================================
+CLUSTER_INDIV_A = 2  # C2: individual expert DFG copy A
+CLUSTER_INDIV_B = 3  # C3: router GEMM + individual expert DFG copy B
+CLUSTER_SHARED_0 = 0  # C0: Shared Expert 0 (alongside host)
+CLUSTER_SHARED_1 = 1  # C1: Shared Expert 1
+HOST_CLUSTER_ID = 0  # CVA6 host task queue (cluster 0, core 2)
+
+GEMM_CORE_ID = 0  # VersaCore GEMM engine
+DMA_CORE_ID = 1  # Cluster iDMA
+HOST_CORE_ID = 2  # CVA6 Host (always cluster 0)
+
+INDIV_CLUSTERS = [CLUSTER_INDIV_A, CLUSTER_INDIV_B]
+SHARED_CLUSTERS = [CLUSTER_SHARED_0, CLUSTER_SHARED_1]
+
+
+# =========================================================================
+# Helpers
+# =========================================================================
+
+
+def float_to_uint32_bits(f: float) -> int:
+    return struct.unpack("<I", struct.pack("<f", float(f)))[0]
+
+
+def addr_offset(handle, offset: int):
+    """Return handle with added offset (zero-offset returns handle unchanged)."""
+    if offset == 0:
+        return handle
+    if isinstance(handle, BingoMemSymbol):
+        return BingoMemSymbol(handle.symbol_name, offset=handle.offset + offset)
+    return f"{handle.get_c_var_name()} + {offset}"
+
+
+def enforce_in_order_completion_per_core(bingo_dfg: BingoDFG) -> None:
+    if not INORDER_COMPLETION_CORE_IDS:
+        return
+    topo = list(nx.topological_sort(bingo_dfg))
+    normal = [
+        n
+        for n in topo
+        if n.node_type == "normal" and n.assigned_core_id in INORDER_COMPLETION_CORE_IDS
+    ]
+    prev = {}
+    for node in normal:
+        lane = (
+            node.assigned_chiplet_id,
+            node.assigned_cluster_id,
+            node.assigned_core_id,
+        )
+        p = prev.get(lane)
+        if p is not None and not nx.has_path(bingo_dfg, p, node):
+            bingo_dfg.bingo_add_edge(p, node)
+        prev[lane] = node
+
+
+def patch_moe_header_preamble(header_path: str) -> None:
+    with open(header_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    required = (
+        '#include "libbingo/bingo_api.h"\n'
+        '#include "MoE_operator.h"\n'
+        "#define MOE_OPERATOR_CUSTOM\n"
+        "#define MOE_ENABLE_DYNAMIC_BASELINE\n"
+        '#include "host.h"\n'
+    )
+    if required in content:
+        return
+
+    generated = '#include "libbingo/bingo_api.h"\n#include "host.h"\n'
+    if generated not in content:
+        raise RuntimeError("Cannot locate generated host include preamble")
+    content = content.replace(generated, required, 1)
+
+    with open(header_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+# =========================================================================
+# Config parsing
+# =========================================================================
+head_path = os.path.join(current_dir, "MoE_common_variable.h")
+
+
+def parse_header_config(path):
+    cfg = {}
+    pat = re.compile(r"#define\s+(\w+)\s+([-+]?[\d\.]+)")
+    with open(path) as f:
+        for line in f:
+            m = pat.search(line)
+            if m:
+                try:
+                    cfg[m.group(1)] = eval(m.group(2).strip())
+                except Exception:
+                    pass
+    return cfg
+
+
+def get_args():
+    parser = argparse.ArgumentParser(description="Multi-Cluster MoE DFG Generator")
+    parser.add_argument(
+        "--cfg", type=pathlib.Path, default=pathlib.Path(current_dir) / "params.hjson"
+    )
+    parser.add_argument(
+        "--hwcfg",
+        type=pathlib.Path,
+        default=pathlib.Path(ROOT_DIR)
+        / "deps"
+        / "snitch_cluster"
+        / "target"
+        / "snitch_cluster"
+        / "cfg"
+        / "snax_dual_versacore_int16x4_rebalanced_cluster.hjson",
+    )
+    parser.add_argument("--output_dir", type=str, default=".")
+    parser.add_argument(
+        "--output_offload_file_name", type=str, default="offload_bingo_hw.h"
+    )
+    parser.add_argument("--emit_mini_golden", action="store_true")
+    return parser.parse_args()
+
+
+def load_workload_config(args):
+    with args.cfg.open() as f:
+        p = hjson.loads(f.read())
+    with args.hwcfg.open() as f:
+        h = hjson.loads(f.read())
+    return {**p, **h, "emit_mini_golden": args.emit_mini_golden}
+
+
+# =========================================================================
+# Workload parameters
+# =========================================================================
+
+
+def define_workload_params(**kw):
+    moe = parse_header_config(head_path)
+    data_type = 0
+    # Support both old (snax_versacore_core_template) and new (snax_dual_versacore_int16x4_core_template) key
+    core_tmpl = kw.get("snax_versacore_core_template") or kw.get(
+        "snax_dual_versacore_int16x4_core_template"
+    )
+    if core_tmpl is None:
+        raise KeyError("No versacore core template found in hwcfg")
+    acc = core_tmpl["snax_acc_cfg"][0]
+    ashape = kw["array_shape"]
+    meshRow = acc["snax_versacore_spatial_unrolling"][data_type][ashape][0]
+    tileSize = acc["snax_versacore_spatial_unrolling"][data_type][ashape][1]
+    meshCol = acc["snax_versacore_spatial_unrolling"][data_type][ashape][2]
+    meshRow_A = int(kw.get("A_meshRow", meshRow))
+    tileSize_A = int(kw.get("A_tileSize", tileSize))
+
+    p = {
+        "app_name": "multi_cluster_MoE",
+        "array_shape": ashape,
+        "meshRow": meshRow,
+        "tileSize": tileSize,
+        "meshCol": meshCol,
+        # Router GEMM
+        "router_M1": kw["router_M1"],
+        "router_N1": kw["router_N1"],
+        "router_K1": kw["router_K1"],
+        "router_M2": kw["router_M2"],
+        "router_N2": kw["router_N2"],
+        "router_K2": kw["router_K2"],
+        # Individual expert gate+up SwiGLU (Mode 0)
+        "indiv_M1": kw["indiv_M1"],
+        "indiv_N1": kw["indiv_N1"],
+        "indiv_K1": kw["indiv_K1"],
+        "indiv_M2": kw["indiv_M2"],
+        "indiv_N2": kw["indiv_N2"],
+        "indiv_K2": kw["indiv_K2"],
+        # Individual expert down projection (Mode 1)
+        "indiv_down_M1": kw.get("indiv_down_M1", kw["indiv_M1"]),
+        "indiv_down_N1": kw.get("indiv_down_N1", kw["indiv_N1"]),
+        "indiv_down_K1": kw.get("indiv_down_K1", 4),
+        "indiv_down_M2": kw.get("indiv_down_M2", kw["indiv_M2"]),
+        "indiv_down_N2": kw.get("indiv_down_N2", kw["indiv_N2"]),
+        "indiv_down_K2": kw.get("indiv_down_K2", 1),
+        # MoE config from header
+        "num_indiv_experts": int(moe["expert_number_each_layer"]),
+        "top_k": int(moe["individual_expert_number_k"]),
+        "M_total": kw["router_M2"] * kw["router_M1"] * meshRow_A,
+        "max_dispatch_rounds": kw.get("max_dispatch_rounds", 4),
+        "dynamic_slot_count": int(
+            kw.get("moe_dynamic_slot_count", MOE_DYNAMIC_SLOT_COUNT)
+        ),
+        "dynamic_arg_slot_bytes": int(
+            kw.get("moe_dynamic_arg_slot_bytes", MOE_DYNAMIC_ARG_SLOT_BYTES)
+        ),
+        # Shared expert gate+up SwiGLU (C0=expert0, C1=expert1)
+        "shared_M1": kw["shared_M1"],
+        "shared_N1": kw["shared_N1"],
+        "shared_K1": kw["shared_K1"],
+        "shared_M2": kw["shared_M2"],
+        "shared_N2": kw["shared_N2"],
+        "shared_K2": kw["shared_K2"],
+        # Shared expert down projection
+        "shared_down_M1": kw.get("shared_down_M1", kw["shared_M1"]),
+        "shared_down_N1": kw.get("shared_down_N1", kw["shared_N1"]),
+        "shared_down_K1": kw.get("shared_down_K1", 4),
+        "shared_down_M2": kw.get("shared_down_M2", kw["shared_M2"]),
+        "shared_down_N2": kw.get("shared_down_N2", kw["shared_N2"]),
+        "shared_down_K2": kw.get("shared_down_K2", 1),
+        "num_shared_experts": int(moe["shared_expert_number_k"]),
+        # GEMM mode
+        "addNonZeroC": kw["addNonZeroC"],
+        "addZeroC": kw["addZeroC"],
+        "accumPrevC": kw["accumPrevC"],
+    }
+
+    # Tile byte sizes
+    # A: INT16 → 2 bytes/element
+    # B: INT4 packed → tileSize*meshCol/2 bytes
+    # D: INT32 → 4 bytes/element
+    p["router_A_tilesize"] = p["router_M1"] * p["router_K1"] * meshRow * tileSize * 2
+    p["router_B_tilesize"] = p["router_K1"] * p["router_N1"] * tileSize * meshCol // 2
+    p["router_D_tilesize"] = p["router_M1"] * p["router_N1"] * meshRow * meshCol * 4
+    p["indiv_A_tilesize"] = p["indiv_M1"] * p["indiv_K1"] * meshRow * tileSize * 2
+    p["indiv_B_tilesize"] = p["indiv_K1"] * p["indiv_N1"] * tileSize * meshCol // 2
+    p["indiv_D_tilesize"] = p["indiv_M1"] * p["indiv_N1"] * meshRow * meshCol * 4
+    k_total_input = p["router_K2"] * p["router_K1"] * tileSize
+    if k_total_input % tileSize_A != 0:
+        raise ValueError("input K_total must be divisible by A_tileSize")
+    k1_a = k_total_input // tileSize_A
+    # A_token_bytes is one logical token vector (K_total INT16 elements).
+    # input_A is token-contiguous in L3; gather_s1 packs selected token rows
+    # into the K-block-major L1_A layout required by the streamer.
+    meshCol_down = int(kw.get("down_meshCol", meshCol))
+    down_vc_meshCol = meshCol
+    if meshCol_down != 2 * down_vc_meshCol:
+        raise ValueError(
+            "dual-VC down projection expects down_meshCol == 2 * hw meshCol"
+        )
+    p["A_token_bytes"] = k1_a * tileSize_A * 2
+    p["A_total_bytes"] = p["M_total"] * p["A_token_bytes"]
+    # Down projection tile sizes are per VC half. The logical output width is
+    # meshCol_down, but B0/B1 are stored as two contiguous hw-meshCol halves.
+    p["indiv_down_A_tilesize"] = (
+        p["indiv_down_M1"] * p["indiv_down_K1"] * meshRow_A * tileSize_A * 2
+    )
+    p["indiv_down_B_tilesize"] = (
+        p["indiv_down_K1"] * p["indiv_down_N1"] * tileSize * down_vc_meshCol // 2
+    )
+    p["indiv_down_D_tilesize"] = (
+        p["indiv_down_M1"] * p["indiv_down_N1"] * meshRow_A * down_vc_meshCol * 4
+    )
+    p["shared_down_A_tilesize"] = (
+        p["shared_down_M1"] * p["shared_down_K1"] * meshRow_A * tileSize_A * 2
+    )
+    p["shared_down_B_tilesize"] = (
+        p["shared_down_K1"] * p["shared_down_N1"] * tileSize * down_vc_meshCol // 2
+    )
+    p["shared_down_D_tilesize"] = (
+        p["shared_down_M1"] * p["shared_down_N1"] * meshRow_A * down_vc_meshCol * 4
+    )
+
+    # L3 stride constants (INT4 packed → ÷2)
+    p["indiv_B_expert_stride"] = (
+        p["indiv_N2"]
+        * p["indiv_K2"]
+        * p["indiv_K1"]
+        * p["indiv_N1"]
+        * tileSize
+        * meshCol
+        // 2
+    )
+    p["indiv_B_n2_stride"] = (
+        p["indiv_K2"] * p["indiv_K1"] * p["indiv_N1"] * tileSize * meshCol // 2
+    )
+    p["indiv_down_B_expert_stride"] = (
+        2
+        * p["indiv_down_N2"]
+        * p["indiv_down_K2"]
+        * p["indiv_down_K1"]
+        * p["indiv_down_N1"]
+        * tileSize
+        * down_vc_meshCol
+        // 2
+    )
+    p["indiv_down_B_n2_stride"] = (
+        p["indiv_down_K2"]
+        * p["indiv_down_K1"]
+        * p["indiv_down_N1"]
+        * tileSize
+        * down_vc_meshCol
+        // 2
+    )
+    p["shared_A_tilesize"] = (
+        p["shared_M1"] * p["shared_K1"] * meshRow_A * tileSize_A * 2
+    )
+    p["shared_B_tilesize"] = p["shared_K1"] * p["shared_N1"] * tileSize * meshCol // 2
+    p["shared_D_tilesize"] = p["shared_M1"] * p["shared_N1"] * meshRow_A * meshCol * 4
+    p["shared_B_expert_stride"] = (
+        p["shared_N2"]
+        * p["shared_K2"]
+        * p["shared_K1"]
+        * p["shared_N1"]
+        * tileSize
+        * meshCol
+        // 2
+    )
+    p["shared_B_n2_stride"] = (
+        p["shared_K2"] * p["shared_K1"] * p["shared_N1"] * tileSize * meshCol // 2
+    )
+    p["shared_down_B_expert_stride"] = (
+        2
+        * p["shared_down_N2"]
+        * p["shared_down_K2"]
+        * p["shared_down_K1"]
+        * p["shared_down_N1"]
+        * tileSize
+        * down_vc_meshCol
+        // 2
+    )
+    p["shared_down_B_n2_stride"] = (
+        p["shared_down_K2"]
+        * p["shared_down_K1"]
+        * p["shared_down_N1"]
+        * tileSize
+        * down_vc_meshCol
+        // 2
+    )
+    router_total_n_groups = p["router_N2"] * p["router_N1"]
+    if router_total_n_groups % 2 != 0:
+        raise ValueError(
+            "dual-VC router split expects router_N2 * router_N1 to be even"
+        )
+    p["router_vc_N"] = router_total_n_groups // 2
+    p["router_B_total_bytes"] = p["router_N2"] * p["router_B_tilesize"]
+    p["router_D_total_bytes"] = p["router_N2"] * p["router_D_tilesize"]
+    p["router_B_vc_stride"] = (
+        p["router_vc_N"] * p["router_K2"] * p["router_K1"] * tileSize * meshCol // 2
+    )
+    p["router_D_vc_stride"] = p["router_vc_N"] * p["router_M1"] * meshRow * meshCol * 4
+    hidden_indiv = p["indiv_N2"] * p["indiv_N1"] * meshCol
+    hidden_shared = p["shared_N2"] * p["shared_N1"] * meshCol
+    k_indiv_down = p["indiv_down_K2"] * p["indiv_down_K1"] * tileSize
+    k_shared_down = p["shared_down_K2"] * p["shared_down_K1"] * tileSize
+    if k_indiv_down != hidden_indiv:
+        raise ValueError("individual down K must match individual gate/up hidden width")
+    if k_shared_down != hidden_shared:
+        raise ValueError("shared down K must match shared gate/up hidden width")
+    # Max tokens any single expert can receive = M_total (worst case all tokens to one expert)
+    p["max_tokens_per_expert"] = p["M_total"]
+    return p
+
+
+# =========================================================================
+# Memory handles
+# =========================================================================
+
+
+def define_memory_handles(params):
+    mh = {}
+    E = params["num_indiv_experts"]
+    K = params["top_k"]
+    M = params["M_total"]
+    N2 = params["indiv_N2"]
+    chip = 0
+
+    # ------------------------------------------------------------------
+    # L3 static data symbols (loaded from DRAM by build system)
+    # ------------------------------------------------------------------
+    # Router
+    for m in range(params["router_M2"]):
+        mh[f"L3_Sym_Router_A_tile_{m}"] = BingoMemSymbol(
+            "input_A_tiled", offset=m * params["router_A_tilesize"]
+        )
+    for n in range(params["router_N2"]):
+        mh[f"L3_Sym_Router_B_tile_{n}"] = BingoMemSymbol(
+            "router_B", offset=n * params["router_B_tilesize"]
+        )
+
+    # Individual expert weights (gate + up for SwiGLU, down for projection)
+    # Address = base + E * expert_stride + n2 * n2_stride
+    mh["L3_Sym_Indiv_Gate_B"] = BingoMemSymbol("indiv_gate_B")
+    mh["L3_Sym_Indiv_Up_B"] = BingoMemSymbol("indiv_up_B")
+    mh["L3_Sym_Indiv_Down_B"] = BingoMemSymbol("indiv_down_B")
+
+    # input_A: token-contiguous physical layout. Dynamic gather_s1 maps token ids
+    # to contiguous logical vectors, then packs them into K-block-major L1_A.
+    mh["L3_Sym_Input_A"] = BingoMemSymbol("input_A")
+
+    # Shared expert weight symbols (2 shared experts: C0=expert0, C1=expert1)
+    mh["L3_Sym_Shared_Gate_B"] = BingoMemSymbol("shared_gate_B")
+    mh["L3_Sym_Shared_Up_B"] = BingoMemSymbol("shared_up_B")
+    mh["L3_Sym_Shared_Down_B"] = BingoMemSymbol("shared_down_B")
+    # Shared expert A: same logical values as input_A, pre-tiled for static GEMMs.
+    for m in range(params["shared_M2"]):
+        mh[f"L3_Sym_Shared_A_tile_{m}"] = BingoMemSymbol(
+            "input_A_tiled", offset=m * params["shared_A_tilesize"]
+        )
+
+    # ------------------------------------------------------------------
+    # L3 dynamic allocations
+    # ------------------------------------------------------------------
+    mh["L3_Alloc_Router_Output"] = BingoMemAlloc(
+        "l3_router_out",
+        size=params["router_M2"] * params["router_D_total_bytes"],
+        mem_level="L3",
+    )
+    mh["L3_Alloc_TopK_Indices"] = BingoMemAlloc(
+        "l3_topk_idx",
+        size=M * K * 2,  # uint16_t[M][K]
+        mem_level="L3",
+    )
+    mh["L3_Alloc_TopK_Scores"] = BingoMemAlloc(
+        "l3_topk_scores",
+        size=M * K * 4,  # int32_t[M][K]
+        mem_level="L3",
+    )
+    mh["L3_Alloc_Expert_Counts"] = BingoMemAlloc(
+        "l3_expert_counts",
+        size=E * 4,  # uint32_t[E]
+        mem_level="L3",
+    )
+    # CAM state: 每个 indiv slot 当前驻留的 expert_id (int32_t, -1 = 无驻留)
+    mh["L3_Alloc_CAM_State"] = BingoMemAlloc(
+        "l3_cam_state",
+        size=2 * 4,  # int32_t[num_indiv_slots=2]
+        mem_level="L3",
+    )
+    # moe_request_t：Phase 3 构建，Phase 4 读取（调度器的输入参数结构体）
+    # 按 moe_scheduler.h 估算 ≤ 128 bytes，保守分配 256 字节
+    mh["L3_Alloc_MoE_Request"] = BingoMemAlloc(
+        "l3_moe_request",
+        size=256,
+        mem_level="L3",
+    )
+    mh["L3_Alloc_MoE_Schedule"] = BingoMemAlloc(
+        "l3_moe_schedule",
+        size=MOE_SCHEDULE_BYTES,
+        mem_level="L3",
+    )
+    mh["L3_Alloc_MoE_Runtime_State"] = BingoMemAlloc(
+        "l3_moe_runtime_state",
+        size=MOE_RUNTIME_STATE_BYTES,
+        mem_level="L3",
+    )
+    mh["L3_Alloc_Expert_Token_Offsets"] = BingoMemAlloc(
+        "l3_expert_token_offsets",
+        size=(E + 1) * 4,
+        mem_level="L3",
+    )
+    mh["L3_Alloc_Expert_Token_Ids"] = BingoMemAlloc(
+        "l3_expert_token_ids",
+        size=M * K * 2,
+        mem_level="L3",
+    )
+    mh["L3_Alloc_Expert_Token_Kpos"] = BingoMemAlloc(
+        "l3_expert_token_kpos",
+        size=M * K * 2,
+        mem_level="L3",
+    )
+    # SwiGLU output: [E][N2] tiles, INT16 each (replaces separate gate/up outputs)
+    mh["L3_Alloc_SwiGLU_Output"] = BingoMemAlloc(
+        "l3_swiglu_out",
+        size=E * N2 * params["indiv_D_tilesize"],
+        mem_level="L3",
+    )
+    # Shared expert SwiGLU output (indexed [se_id][n2_idx])
+    num_se = params["num_shared_experts"]
+    N2s = params["shared_N2"]
+    mh["L3_Alloc_Shared_SwiGLU_Output"] = BingoMemAlloc(
+        "l3_shared_swiglu_out",
+        size=num_se * N2s * params["shared_D_tilesize"],
+        mem_level="L3",
+    )
+    # Down projection outputs
+    N2d = params["indiv_down_N2"]
+    N2sd = params["shared_down_N2"]
+    mh["L3_Alloc_Indiv_Down_Output"] = BingoMemAlloc(
+        "l3_indiv_down_out",
+        size=2 * E * N2d * params["indiv_down_D_tilesize"],
+        mem_level="L3",
+    )
+    mh["L3_Alloc_Shared_Down_Output"] = BingoMemAlloc(
+        "l3_shared_down_out",
+        size=2 * num_se * N2sd * params["shared_down_D_tilesize"],
+        mem_level="L3",
+    )
+
+    # ------------------------------------------------------------------
+    # L1 buffers
+    # Phase 0 preloads all gate+up+down weight tiles for each resident expert.
+    # SwiGLU uses L1_B_gate + L1_B_up simultaneously; down proj uses L1_B_down.
+    # L1_D is reused as scratch for both SwiGLU and down GEMM outputs.
+    # L1_down_D is a dedicated output buffer for down projection.
+    #
+    # Each individual slot (C2=slot0, C3=slot1) also has:
+    #   L1_EDT:  Expert Dispatch Table written by host at runtime.
+    #            Contains expert_id, token_count, and per-token L3 offsets.
+    #            Size = sizeof(slot_edt_t) = 4 + 4 + MAX_TOKENS*4 bytes.
+    #   L1_A:    Compact A tile for dynamic GEMM. It stores up to
+    #            max_tokens_per_expert logical token vectors.
+    # ------------------------------------------------------------------
+
+    # EDT size: expert_id(4) + token_count(4) + token_l3_offsets[max_tokens](4 each)
+    max_tok = params["max_tokens_per_expert"]
+    edt_size = 4 + 4 + max_tok * 4  # bytes
+
+    # C2/C3 individual expert weight + scratch buffers
+    for prefix, cid in [("C2_indiv", CLUSTER_INDIV_A), ("C3_indiv", CLUSTER_INDIV_B)]:
+        # EDT: written by host ExpertDispatch kernel at runtime
+        mh[f"{prefix}_L1_EDT"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_edt",
+            size=edt_size,
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_Dyn_Args"] = BingoMemAlloc(
+            f"{prefix.lower()}_dyn_args",
+            size=params["dynamic_slot_count"] * params["dynamic_arg_slot_bytes"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_A: sized for max_tokens tokens (runtime fetch fills 1..max_tok tokens)
+        mh[f"{prefix}_L1_A"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_a",
+            size=max_tok * params["A_token_bytes"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_L1_B_gate"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_b_gate",
+            size=N2 * params["indiv_B_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_L1_B_up"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_b_up",
+            size=N2 * params["indiv_B_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_B_down: left-half tiles (N2d) + right-half tiles (N2d) contiguous
+        mh[f"{prefix}_L1_B_down"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_b_down",
+            size=2 * N2d * params["indiv_down_B_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_D: holds ALL N2 SwiGLU output tiles contiguously → used as A for down GEMM
+        mh[f"{prefix}_L1_D"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_d",
+            size=N2 * params["indiv_D_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_D1_scratch: Mode 0 D1 is a hardware-replicated copy of D0 (same SwiGLU result).
+        # Use a separate 1-tile scratch buffer so the two writer ports never alias the same
+        # TCDM address (avoids bank conflicts). This buffer is never read by SW.
+        mh[f"{prefix}_L1_D1_scratch"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_d1_scratch",
+            size=params["indiv_D_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_down_D: D0 (VC0, left N cols) + D1 (VC1, right N cols) side by side
+        mh[f"{prefix}_L1_down_D"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_down_d",
+            size=2 * N2d * params["indiv_down_D_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+
+    # C3 router buffers (router_B is a single tile; separate from indiv buffers)
+    mh["C3_router_L1_A"] = BingoMemAlloc(
+        "c3_router_l1_a",
+        size=params["router_A_tilesize"],
+        mem_level="L1",
+        chip_id=chip,
+        cluster_id=CLUSTER_INDIV_B,
+    )
+    mh["C3_router_L1_B"] = BingoMemAlloc(
+        "c3_router_l1_b",
+        size=params["router_B_total_bytes"],
+        mem_level="L1",
+        chip_id=chip,
+        cluster_id=CLUSTER_INDIV_B,
+    )
+    mh["C3_router_L1_D"] = BingoMemAlloc(
+        "c3_router_l1_d",
+        size=params["router_D_total_bytes"],
+        mem_level="L1",
+        chip_id=chip,
+        cluster_id=CLUSTER_INDIV_B,
+    )
+
+    # C0/C1 shared expert buffers (gate+up for SwiGLU, down for projection)
+    for prefix, cid in [
+        ("C0_shared", CLUSTER_SHARED_0),
+        ("C1_shared", CLUSTER_SHARED_1),
+    ]:
+        mh[f"{prefix}_L1_A"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_a",
+            size=params["shared_A_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_L1_B_gate"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_b_gate",
+            size=N2s * params["shared_B_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_L1_B_up"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_b_up",
+            size=N2s * params["shared_B_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_L1_B_down"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_b_down",
+            size=2 * N2sd * params["shared_down_B_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_D: holds ALL N2s SwiGLU output tiles contiguously → used as A for down GEMM
+        mh[f"{prefix}_L1_D"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_d",
+            size=N2s * params["shared_D_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_D1_scratch: Mode 0 D1 replicated output sink (separate from D0 to avoid bank conflicts)
+        mh[f"{prefix}_L1_D1_scratch"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_d1_scratch",
+            size=params["shared_D_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        # L1_down_D: D0 (VC0, left N cols) + D1 (VC1, right N cols) side by side
+        mh[f"{prefix}_L1_down_D"] = BingoMemAlloc(
+            f"{prefix.lower()}_l1_down_d",
+            size=2 * params["shared_down_D_tilesize"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+
+    return mh
+
+
+# =========================================================================
+# DFG construction
+# =========================================================================
+
+
+def create_dfg(params, mh):
+    bingo_dfg = BingoDFG(
+        num_chiplets=1,
+        num_clusters_per_chiplet=4,
+        num_cores_per_cluster=2,
+        is_host_as_acc=True,
+        chiplet_ids=[0x00],
+    )
+
+    E = params["num_indiv_experts"]  # 8
+    N2 = params["indiv_N2"]  # 2
+    N2s = params["shared_N2"]  # 2
+    N2d = params["indiv_down_N2"]  # down projection N2
+    N2sd = params["shared_down_N2"]  # shared down projection N2
+
+    # =====================================================================
+    # Phase 0: Weight preload — 系统 iDMA (HOST lane) + cluster xDMA 真并行
+    #
+    # 硬件资源：
+    #   系统 iDMA (ONE): 由 CVA6 通过 sys_dma_memcpy 触发，HOST lane 独占。
+    #   cluster xDMA: 由目标集群 DM core 通过 CSR 960 触发，目标 L1/TCDM 为本地端点。
+    #   两条 lane 分属独立硬件，DFG 中无 cross-edge → 真正并行执行。
+    #
+    # iDMA path (HOST lane, 串行): 加载所有 gate_B 权重 + router_B
+    #   C0_gate_B → C1_gate_B → C2_gate_B → C3_router_B → C3_gate_B
+    #
+    # xDMA path (target DM lane, 串行): 加载所有 up_B + down_B 权重
+    #   C0_up_B → C0_down_B → C1_up_B → C1_down_B → C2_up_B → C2_down_B
+    #   → C3_up_B → C3_down_B
+    # =====================================================================
+
+    # ---- iDMA PATH: gate_B for all clusters + router_B ----
+    # 全部使用 __snax_bingo_kernel_idma_1d_copy，在目标 cluster DM core 上触发。
+
+    node_idma_c0_gate = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_0,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Shared_Gate_B"],  # expert0, offset=0
+            dst_addr=mh["C0_shared_L1_B_gate"],
+            size=N2s * params["shared_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_idma_c0_gate)
+
+    node_idma_c1_gate = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_1,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=addr_offset(
+                mh["L3_Sym_Shared_Gate_B"], params["shared_B_expert_stride"]
+            ),  # expert1
+            dst_addr=mh["C1_shared_L1_B_gate"],
+            size=N2s * params["shared_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_idma_c1_gate)
+    bingo_dfg.bingo_add_edge(node_idma_c0_gate, node_idma_c1_gate)  # 系统 iDMA 串行
+
+    node_idma_c2_gate = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_A,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Indiv_Gate_B"],  # expert0, offset=0
+            dst_addr=mh["C2_indiv_L1_B_gate"],
+            size=N2 * params["indiv_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_idma_c2_gate)
+    bingo_dfg.bingo_add_edge(node_idma_c1_gate, node_idma_c2_gate)
+
+    node_idma_c3_router = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_B,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Router_B_tile_0"],
+            dst_addr=mh["C3_router_L1_B"],
+            size=params["router_B_total_bytes"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_idma_c3_router)
+    bingo_dfg.bingo_add_edge(node_idma_c2_gate, node_idma_c3_router)
+
+    node_idma_c3_gate = BingoNode(  # iDMA Phase 0 最后一个节点
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_B,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=addr_offset(
+                mh["L3_Sym_Indiv_Gate_B"], 7 * params["indiv_B_expert_stride"]
+            ),  # expert7
+            dst_addr=mh["C3_indiv_L1_B_gate"],
+            size=N2 * params["indiv_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_idma_c3_gate)
+    bingo_dfg.bingo_add_edge(node_idma_c3_router, node_idma_c3_gate)
+
+    # ---- xDMA PATH (target DM lane): up_B + down_B for all clusters ----
+    # 全部使用 __snax_bingo_kernel_xdma_1d_copy，在目标 cluster DM core 上触发。
+    # L3->L1/TCDM 搬运必须让目标 TCDM 作为本地端点，避免双远端 xDMA 事务。
+
+    node_xdma_c0_up = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_0,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Shared_Up_B"],
+            dst_addr=mh["C0_shared_L1_B_up"],
+            size=N2s * params["shared_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c0_up)
+
+    node_xdma_c0_down = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_0,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Shared_Down_B"],
+            dst_addr=mh["C0_shared_L1_B_down"],
+            size=2 * N2sd * params["shared_down_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c0_down)
+    bingo_dfg.bingo_add_edge(node_xdma_c0_up, node_xdma_c0_down)  # xDMA 串行
+
+    node_xdma_c1_up = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_1,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=addr_offset(
+                mh["L3_Sym_Shared_Up_B"], params["shared_B_expert_stride"]
+            ),
+            dst_addr=mh["C1_shared_L1_B_up"],
+            size=N2s * params["shared_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c1_up)
+    bingo_dfg.bingo_add_edge(node_xdma_c0_down, node_xdma_c1_up)
+
+    node_xdma_c1_down = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_1,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=addr_offset(
+                mh["L3_Sym_Shared_Down_B"], params["shared_down_B_expert_stride"]
+            ),
+            dst_addr=mh["C1_shared_L1_B_down"],
+            size=2 * N2sd * params["shared_down_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c1_down)
+    bingo_dfg.bingo_add_edge(node_xdma_c1_up, node_xdma_c1_down)
+
+    node_xdma_c2_up = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_A,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Indiv_Up_B"],
+            dst_addr=mh["C2_indiv_L1_B_up"],
+            size=N2 * params["indiv_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c2_up)
+    bingo_dfg.bingo_add_edge(node_xdma_c1_down, node_xdma_c2_up)
+
+    node_xdma_c2_down = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_A,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Indiv_Down_B"],
+            dst_addr=mh["C2_indiv_L1_B_down"],
+            size=2 * N2d * params["indiv_down_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c2_down)
+    bingo_dfg.bingo_add_edge(node_xdma_c2_up, node_xdma_c2_down)
+
+    node_xdma_c3_up = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_B,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=addr_offset(
+                mh["L3_Sym_Indiv_Up_B"], 7 * params["indiv_B_expert_stride"]
+            ),
+            dst_addr=mh["C3_indiv_L1_B_up"],
+            size=N2 * params["indiv_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c3_up)
+    bingo_dfg.bingo_add_edge(node_xdma_c2_down, node_xdma_c3_up)
+
+    node_xdma_c3_down = BingoNode(  # xDMA Phase 0 最后一个节点
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_B,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=addr_offset(
+                mh["L3_Sym_Indiv_Down_B"], 7 * params["indiv_down_B_expert_stride"]
+            ),
+            dst_addr=mh["C3_indiv_L1_B_down"],
+            size=2 * N2d * params["indiv_down_B_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_xdma_c3_down)
+    bingo_dfg.bingo_add_edge(node_xdma_c3_up, node_xdma_c3_down)
+
+    # =====================================================================
+    # Phase 1a: A token 加载（iDMA + xDMA 两路并行）
+    # 必须等待两路 Phase 0 全部完成后才开始：
+    #   node_idma_c3_gate (iDMA path 最后) AND node_xdma_c3_down (xDMA path 最后)
+    # 三个 A 加载串行在系统 iDMA 上（只有一个物理引擎）。
+    # =====================================================================
+
+    node_c0_load_A = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_0,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Shared_A_tile_0"],
+            dst_addr=mh["C0_shared_L1_A"],
+            size=params["shared_A_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_c0_load_A)
+    bingo_dfg.bingo_add_edge(node_idma_c3_gate, node_c0_load_A)  # iDMA path 全部完成
+    bingo_dfg.bingo_add_edge(node_xdma_c3_down, node_c0_load_A)  # xDMA path 全部完成
+
+    node_c1_load_A = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_SHARED_1,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_xdma_1d_copy",
+        kernel_args=SnaxBingoKernelXdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Shared_A_tile_0"],
+            dst_addr=mh["C1_shared_L1_A"],
+            size=params["shared_A_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_c1_load_A)
+    # xDMA 与 Phase 0 xDMA 串行（同一引擎），iDMA 无关，故只等 Phase 0 两路都完成
+    bingo_dfg.bingo_add_edge(node_xdma_c3_down, node_c1_load_A)  # xDMA Phase 0 结束
+    bingo_dfg.bingo_add_edge(node_idma_c3_gate, node_c1_load_A)  # iDMA Phase 0 结束
+
+    node_c3_load_A = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_B,
+        assigned_core_id=DMA_CORE_ID,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mh["L3_Sym_Router_A_tile_0"],
+            dst_addr=mh["C3_router_L1_A"],
+            size=params["router_A_tilesize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_c3_load_A)
+    bingo_dfg.bingo_add_edge(node_c0_load_A, node_c3_load_A)  # 系统 iDMA 串行
+
+    # =====================================================================
+    # Phase 1b: GEMM (starts as soon as each cluster's token arrives)
+    # B already preloaded in L1_B_gate/L1_B_up — no B loading nodes needed.
+    # C0/C1 shared expert GEMMs run in parallel with C3 router GEMM.
+    # =====================================================================
+
+    # --- C0: shared_expert0 SwiGLU (N2s tiles) then down projection ---
+    prev_c0 = node_c0_load_A
+    for n in range(N2s):
+        swiglu_c0_args = SnaxBingoKernelDualVcSwigluFullArgs(
+            input_A_addr=mh["C0_shared_L1_A"],
+            input_B_gate_addr=addr_offset(
+                mh["C0_shared_L1_B_gate"], n * params["shared_B_tilesize"]
+            ),
+            input_B_up_addr=addr_offset(
+                mh["C0_shared_L1_B_up"], n * params["shared_B_tilesize"]
+            ),
+            # Write each tile to its own slot in L1_D (full hidden_dim buffer)
+            output_D0_addr=addr_offset(
+                mh["C0_shared_L1_D"], n * params["shared_D_tilesize"]
+            ),
+            # D1 is a hardware-replicated copy of D0 in Mode 0; sink to scratch (never read)
+            output_D1_addr=mh["C0_shared_L1_D1_scratch"],
+            M=params["shared_M1"],
+            K=params["shared_K1"],
+            N=params["shared_N1"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+        )
+        node_c0_swiglu = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=CLUSTER_SHARED_0,
+            assigned_core_id=GEMM_CORE_ID,
+            kernel_name="__snax_bingo_kernel_dual_vc_swiglu_full",
+            kernel_args=swiglu_c0_args,
+        )
+        bingo_dfg.bingo_add_node(node_c0_swiglu)
+        bingo_dfg.bingo_add_edge(prev_c0, node_c0_swiglu)
+        sh_swiglu_D_off = n * params["shared_D_tilesize"]
+        node_c0_store_swiglu = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=HOST_CLUSTER_ID,
+            assigned_core_id=HOST_CORE_ID,
+            kernel_name="__host_bingo_kernel_idma",
+            kernel_args=HostBingoKernelIdmaArgs(
+                src_addr=addr_offset(
+                    mh["C0_shared_L1_D"], n * params["shared_D_tilesize"]
+                ),
+                dst_addr=addr_offset(
+                    mh["L3_Alloc_Shared_SwiGLU_Output"], sh_swiglu_D_off
+                ),
+                size=params["shared_D_tilesize"],
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_c0_store_swiglu)
+        bingo_dfg.bingo_add_edge(node_c0_swiglu, node_c0_store_swiglu)
+        prev_c0 = node_c0_store_swiglu
+
+    # C0 down projection (N2sd tiles per VC, uses L1_B_down preloaded in Phase 0)
+    for n in range(N2sd):
+        down_c0_args = SnaxBingoKernelDualVcGemmFullArgs(
+            input_A_addr=mh["C0_shared_L1_D"],  # reuse as A buffer (last SwiGLU tile)
+            input_B0_addr=addr_offset(
+                mh["C0_shared_L1_B_down"], n * params["shared_down_B_tilesize"]
+            ),
+            input_B1_addr=addr_offset(
+                mh["C0_shared_L1_B_down"], (N2sd + n) * params["shared_down_B_tilesize"]
+            ),
+            output_D0_addr=mh["C0_shared_L1_down_D"],
+            output_D1_addr=addr_offset(
+                mh["C0_shared_L1_down_D"], params["shared_down_D_tilesize"]
+            ),
+            M=params["shared_down_M1"],
+            K=params["shared_down_K1"],
+            N=params["shared_down_N1"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+        )
+        node_c0_down = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=CLUSTER_SHARED_0,
+            assigned_core_id=GEMM_CORE_ID,
+            kernel_name="__snax_bingo_kernel_dual_vc_gemm_full",
+            kernel_args=down_c0_args,
+        )
+        bingo_dfg.bingo_add_node(node_c0_down)
+        bingo_dfg.bingo_add_edge(prev_c0, node_c0_down)
+        # D0 → left half of L3 (se=0, tiles 0..N2sd-1)
+        sh_down_D0_off = n * params["shared_down_D_tilesize"]
+        node_c0_store_down_D0 = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=HOST_CLUSTER_ID,
+            assigned_core_id=HOST_CORE_ID,
+            kernel_name="__host_bingo_kernel_idma",
+            kernel_args=HostBingoKernelIdmaArgs(
+                src_addr=mh["C0_shared_L1_down_D"],
+                dst_addr=addr_offset(mh["L3_Alloc_Shared_Down_Output"], sh_down_D0_off),
+                size=params["shared_down_D_tilesize"],
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_c0_store_down_D0)
+        bingo_dfg.bingo_add_edge(node_c0_down, node_c0_store_down_D0)
+        # D1 → right half of L3 (se=0, tiles N2sd..2*N2sd-1)
+        sh_down_D1_off = (N2sd + n) * params["shared_down_D_tilesize"]
+        node_c0_store_down_D1 = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=HOST_CLUSTER_ID,
+            assigned_core_id=HOST_CORE_ID,
+            kernel_name="__host_bingo_kernel_idma",
+            kernel_args=HostBingoKernelIdmaArgs(
+                src_addr=addr_offset(
+                    mh["C0_shared_L1_down_D"], params["shared_down_D_tilesize"]
+                ),
+                dst_addr=addr_offset(mh["L3_Alloc_Shared_Down_Output"], sh_down_D1_off),
+                size=params["shared_down_D_tilesize"],
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_c0_store_down_D1)
+        bingo_dfg.bingo_add_edge(node_c0_down, node_c0_store_down_D1)
+        bingo_dfg.bingo_add_edge(node_c0_store_down_D0, node_c0_store_down_D1)
+        prev_c0 = node_c0_store_down_D1
+
+    # --- C1: shared_expert1 SwiGLU + down projection (PARALLEL with C0) ---
+    prev_c1 = node_c1_load_A
+    for n in range(N2s):
+        swiglu_c1_args = SnaxBingoKernelDualVcSwigluFullArgs(
+            input_A_addr=mh["C1_shared_L1_A"],
+            input_B_gate_addr=addr_offset(
+                mh["C1_shared_L1_B_gate"], n * params["shared_B_tilesize"]
+            ),
+            input_B_up_addr=addr_offset(
+                mh["C1_shared_L1_B_up"], n * params["shared_B_tilesize"]
+            ),
+            output_D0_addr=addr_offset(
+                mh["C1_shared_L1_D"], n * params["shared_D_tilesize"]
+            ),
+            # D1 is a hardware-replicated copy of D0 in Mode 0; sink to scratch (never read)
+            output_D1_addr=mh["C1_shared_L1_D1_scratch"],
+            M=params["shared_M1"],
+            K=params["shared_K1"],
+            N=params["shared_N1"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+        )
+        node_c1_swiglu = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=CLUSTER_SHARED_1,
+            assigned_core_id=GEMM_CORE_ID,
+            kernel_name="__snax_bingo_kernel_dual_vc_swiglu_full",
+            kernel_args=swiglu_c1_args,
+        )
+        bingo_dfg.bingo_add_node(node_c1_swiglu)
+        bingo_dfg.bingo_add_edge(prev_c1, node_c1_swiglu)
+        sh_swiglu_D_off = (N2s + n) * params["shared_D_tilesize"]  # se=1
+        node_c1_store_swiglu = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=HOST_CLUSTER_ID,
+            assigned_core_id=HOST_CORE_ID,
+            kernel_name="__host_bingo_kernel_idma",
+            kernel_args=HostBingoKernelIdmaArgs(
+                src_addr=addr_offset(
+                    mh["C1_shared_L1_D"], n * params["shared_D_tilesize"]
+                ),
+                dst_addr=addr_offset(
+                    mh["L3_Alloc_Shared_SwiGLU_Output"], sh_swiglu_D_off
+                ),
+                size=params["shared_D_tilesize"],
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_c1_store_swiglu)
+        bingo_dfg.bingo_add_edge(node_c1_swiglu, node_c1_store_swiglu)
+        prev_c1 = node_c1_store_swiglu
+
+    for n in range(N2sd):
+        down_c1_args = SnaxBingoKernelDualVcGemmFullArgs(
+            input_A_addr=mh["C1_shared_L1_D"],
+            input_B0_addr=addr_offset(
+                mh["C1_shared_L1_B_down"], n * params["shared_down_B_tilesize"]
+            ),
+            input_B1_addr=addr_offset(
+                mh["C1_shared_L1_B_down"], (N2sd + n) * params["shared_down_B_tilesize"]
+            ),
+            output_D0_addr=mh["C1_shared_L1_down_D"],
+            output_D1_addr=addr_offset(
+                mh["C1_shared_L1_down_D"], params["shared_down_D_tilesize"]
+            ),
+            M=params["shared_down_M1"],
+            K=params["shared_down_K1"],
+            N=params["shared_down_N1"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+        )
+        node_c1_down = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=CLUSTER_SHARED_1,
+            assigned_core_id=GEMM_CORE_ID,
+            kernel_name="__snax_bingo_kernel_dual_vc_gemm_full",
+            kernel_args=down_c1_args,
+        )
+        bingo_dfg.bingo_add_node(node_c1_down)
+        bingo_dfg.bingo_add_edge(prev_c1, node_c1_down)
+        # D0 → left half of L3 (se=1, tiles 2*N2sd..3*N2sd-1)
+        sh_down_D0_off = (2 * N2sd + n) * params["shared_down_D_tilesize"]  # se=1
+        node_c1_store_down_D0 = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=HOST_CLUSTER_ID,
+            assigned_core_id=HOST_CORE_ID,
+            kernel_name="__host_bingo_kernel_idma",
+            kernel_args=HostBingoKernelIdmaArgs(
+                src_addr=mh["C1_shared_L1_down_D"],
+                dst_addr=addr_offset(mh["L3_Alloc_Shared_Down_Output"], sh_down_D0_off),
+                size=params["shared_down_D_tilesize"],
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_c1_store_down_D0)
+        bingo_dfg.bingo_add_edge(node_c1_down, node_c1_store_down_D0)
+        # D1 → right half of L3 (se=1, tiles 3*N2sd..4*N2sd-1)
+        sh_down_D1_off = (3 * N2sd + n) * params["shared_down_D_tilesize"]
+        node_c1_store_down_D1 = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=HOST_CLUSTER_ID,
+            assigned_core_id=HOST_CORE_ID,
+            kernel_name="__host_bingo_kernel_idma",
+            kernel_args=HostBingoKernelIdmaArgs(
+                src_addr=addr_offset(
+                    mh["C1_shared_L1_down_D"], params["shared_down_D_tilesize"]
+                ),
+                dst_addr=addr_offset(mh["L3_Alloc_Shared_Down_Output"], sh_down_D1_off),
+                size=params["shared_down_D_tilesize"],
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_c1_store_down_D1)
+        bingo_dfg.bingo_add_edge(node_c1_down, node_c1_store_down_D1)
+        bingo_dfg.bingo_add_edge(node_c1_store_down_D0, node_c1_store_down_D1)
+        prev_c1 = node_c1_store_down_D1
+
+    # --- C3: router GEMM (Mode 1: split total N groups across two VCs) ---
+    router_B_half_stride = params["router_B_vc_stride"]
+    router_D_half = params["router_D_vc_stride"]
+    node_c3_router_gemm = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=CLUSTER_INDIV_B,
+        assigned_core_id=GEMM_CORE_ID,
+        kernel_name="__snax_bingo_kernel_dual_vc_gemm_full",
+        kernel_args=SnaxBingoKernelDualVcGemmFullArgs(
+            input_A_addr=mh["C3_router_L1_A"],
+            input_B0_addr=mh["C3_router_L1_B"],  # N1-tile[0]
+            input_B1_addr=addr_offset(
+                mh["C3_router_L1_B"], router_B_half_stride
+            ),  # N1-tile[1]
+            output_D0_addr=mh["C3_router_L1_D"],  # left cols
+            output_D1_addr=addr_offset(
+                mh["C3_router_L1_D"], router_D_half
+            ),  # right cols
+            M=params["router_M1"],
+            K=params["router_K1"],
+            N=params["router_vc_N"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_c3_router_gemm)
+    bingo_dfg.bingo_add_edge(node_c3_load_A, node_c3_router_gemm)
+
+    node_c3_store_D = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=HOST_CLUSTER_ID,
+        assigned_core_id=HOST_CORE_ID,
+        kernel_name="__host_bingo_kernel_idma",
+        kernel_args=HostBingoKernelIdmaArgs(
+            src_addr=mh["C3_router_L1_D"],
+            dst_addr=mh["L3_Alloc_Router_Output"],
+            size=params["router_D_total_bytes"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_c3_store_D)
+    bingo_dfg.bingo_add_edge(node_c3_router_gemm, node_c3_store_D)
+
+    # =====================================================================
+    # Phase 2: Host TopK (depends only on router output; shared expert
+    # computation is independent and finishes in parallel)
+    # =====================================================================
+    node_topk = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=HOST_CLUSTER_ID,
+        assigned_core_id=HOST_CORE_ID,
+        kernel_name="__host_bingo_kernel_moe_router_schedule",
+        kernel_args=HostBingoKernelMoERouterScheduleArgs(
+            total_tokens=params["M_total"],
+            hardware_output_buffer_addr=mh["L3_Alloc_Router_Output"],
+            global_indices_out_addr=mh["L3_Alloc_TopK_Indices"],
+            global_scores_out_addr=mh["L3_Alloc_TopK_Scores"],
+            expert_number_each_layer=params["num_indiv_experts"],
+            individual_expert_number_k=params["top_k"],
+            mesh_row=params["meshRow"],
+            mesh_col=params["meshCol"],
+            router_m1=params["router_M1"],
+            router_n1=params["router_N1"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_topk)
+    bingo_dfg.bingo_add_edge(node_c3_store_D, node_topk)
+
+    if not ENABLE_PHASE3_PHASE4:
+        enforce_in_order_completion_per_core(bingo_dfg)
+        return bingo_dfg
+
+    # =====================================================================
+    # Phase 3: 构建调度请求 (moe_request_t)
+    #
+    # 从 TopK 路由结果（expert_token_counts）和当前 CAM 状态中构建
+    # moe_request_t，同时调用 moe_schedule() 生成完整 moe_schedule_t 写入 L3。
+    # Phase 4 只读取这个确定的全局顺序表并做 static slot lowering。
+    # =====================================================================
+    node_prepare = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=HOST_CLUSTER_ID,
+        assigned_core_id=HOST_CORE_ID,
+        kernel_name="__host_bingo_kernel_moe_prepare_request",
+        kernel_args=HostBingoKernelMoEPrepareRequestArgs(
+            expert_token_counts_addr=mh["L3_Alloc_Expert_Counts"],
+            cam_state_addr=mh["L3_Alloc_CAM_State"],
+            request_out_addr=mh["L3_Alloc_MoE_Request"],
+            schedule_out_addr=mh["L3_Alloc_MoE_Schedule"],
+            expert_token_offsets_addr=mh["L3_Alloc_Expert_Token_Offsets"],
+            expert_token_ids_addr=mh["L3_Alloc_Expert_Token_Ids"],
+            expert_token_kpos_addr=mh["L3_Alloc_Expert_Token_Kpos"],
+            n_experts=params["num_indiv_experts"],
+            topk_indices_l3=mh["L3_Alloc_TopK_Indices"],
+            M_total=params["M_total"],
+            top_k=params["top_k"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_prepare)
+    bingo_dfg.bingo_add_edge(node_topk, node_prepare)
+
+    # =====================================================================
+    # Phase 4: CVA6 schedule lowering + static slot execution
+    #
+    # node_execute 只负责把 moe_schedule_t 降低到 C2/C3 的 L1 dynamic args。
+    # 后续 static slot graph 真正执行 S1/S2/S3/S4/store。跨 cluster 启动顺序
+    # 和 iDMA/xDMA lane 顺序由每个 slot 参数中的 runtime counters 强制执行。
+    # =====================================================================
+    node_execute = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=HOST_CLUSTER_ID,
+        assigned_core_id=HOST_CORE_ID,
+        kernel_name="__host_bingo_kernel_moe_execute",
+        kernel_args=HostBingoKernelMoEExecuteArgs(
+            request_addr=mh["L3_Alloc_MoE_Request"],
+            schedule_addr=mh["L3_Alloc_MoE_Schedule"],
+            runtime_state_addr=mh["L3_Alloc_MoE_Runtime_State"],
+            expert_token_offsets_addr=mh["L3_Alloc_Expert_Token_Offsets"],
+            expert_token_ids_addr=mh["L3_Alloc_Expert_Token_Ids"],
+            expert_token_kpos_addr=mh["L3_Alloc_Expert_Token_Kpos"],
+            cam_state_addr=mh["L3_Alloc_CAM_State"],
+            input_A_l3_base=mh["L3_Sym_Input_A"],
+            topk_indices_l3=mh["L3_Alloc_TopK_Indices"],
+            indiv_gate_B_l3=mh["L3_Sym_Indiv_Gate_B"],
+            indiv_up_B_l3=mh["L3_Sym_Indiv_Up_B"],
+            indiv_down_B_l3=mh["L3_Sym_Indiv_Down_B"],
+            c2_l1_b_gate=mh["C2_indiv_L1_B_gate"],
+            c2_l1_b_up=mh["C2_indiv_L1_B_up"],
+            c2_l1_b_down=mh["C2_indiv_L1_B_down"],
+            c2_l1_a=mh["C2_indiv_L1_A"],
+            c2_l1_d=mh["C2_indiv_L1_D"],
+            c2_l1_down_d=mh["C2_indiv_L1_down_D"],
+            c3_l1_b_gate=mh["C3_indiv_L1_B_gate"],
+            c3_l1_b_up=mh["C3_indiv_L1_B_up"],
+            c3_l1_b_down=mh["C3_indiv_L1_B_down"],
+            c3_l1_a=mh["C3_indiv_L1_A"],
+            c3_l1_d=mh["C3_indiv_L1_D"],
+            c3_l1_down_d=mh["C3_indiv_L1_down_D"],
+            output_l3_addr=mh["L3_Alloc_Indiv_Down_Output"],
+            A_token_bytes=params["A_token_bytes"],
+            indiv_B_expert_stride=params["indiv_B_expert_stride"],
+            indiv_down_B_expert_stride=params["indiv_down_B_expert_stride"],
+            down_D_bytes_per_expert=2 * N2d * params["indiv_down_D_tilesize"],
+            M_total=params["M_total"],
+            top_k=params["top_k"],
+            c2_dynamic_args_base=mh["C2_indiv_Dyn_Args"],
+            c3_dynamic_args_base=mh["C3_indiv_Dyn_Args"],
+            dynamic_arg_slot_bytes=params["dynamic_arg_slot_bytes"],
+            dynamic_num_slots=params["dynamic_slot_count"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_execute)
+    bingo_dfg.bingo_add_edge(node_prepare, node_execute)
+
+    def make_dyn_args(prefix: str, slot: int):
+        return SnaxBingoKernelMoeDynamicExpertArgs(
+            arg_storage_addr=addr_offset(
+                mh[f"{prefix}_Dyn_Args"], slot * params["dynamic_arg_slot_bytes"]
+            ),
+            slot_id=slot,
+            token_ids_addr=mh["L3_Alloc_Expert_Token_Ids"],
+            input_A_l3_base=mh["L3_Sym_Input_A"],
+            indiv_gate_B_l3=mh["L3_Sym_Indiv_Gate_B"],
+            indiv_up_B_l3=mh["L3_Sym_Indiv_Up_B"],
+            indiv_down_B_l3=mh["L3_Sym_Indiv_Down_B"],
+            output_l3_base=mh["L3_Alloc_Indiv_Down_Output"],
+            runtime_state_addr=mh["L3_Alloc_MoE_Runtime_State"],
+            l1_a_addr=mh[f"{prefix}_L1_A"],
+            l1_b_gate_addr=mh[f"{prefix}_L1_B_gate"],
+            l1_b_up_addr=mh[f"{prefix}_L1_B_up"],
+            l1_b_down_addr=mh[f"{prefix}_L1_B_down"],
+            l1_d_addr=mh[f"{prefix}_L1_D"],
+            l1_down_d_addr=mh[f"{prefix}_L1_down_D"],
+            l1_d1_scratch_addr=mh[f"{prefix}_L1_D1_scratch"],
+            A_token_bytes=params["A_token_bytes"],
+            indiv_B_expert_stride=params["indiv_B_expert_stride"],
+            indiv_down_B_expert_stride=params["indiv_down_B_expert_stride"],
+            indiv_B_tile_bytes=params["indiv_B_tilesize"],
+            indiv_D_tile_bytes=params["indiv_D_tilesize"],
+            indiv_down_B_tile_bytes=params["indiv_down_B_tilesize"],
+            indiv_down_D_tile_bytes=params["indiv_down_D_tilesize"],
+            indiv_N2=N2,
+            indiv_down_N2=N2d,
+            s1_block_count=N2,
+            s3_block_count=N2d,
+            indiv_K1=params["indiv_K1"],
+            indiv_N1=params["indiv_N1"],
+            indiv_down_K1=params["indiv_down_K1"],
+            indiv_down_N1=params["indiv_down_N1"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+            output_expert_stride_bytes=2 * N2d * params["indiv_down_D_tilesize"],
+            max_tokens_per_expert=params["max_tokens_per_expert"],
+        )
+
+    def add_dynamic_slot_chain(prefix: str, cluster_id: int, slot: int, deps):
+        args = make_dyn_args(prefix, slot)
+        dyn_arg_addr = addr_offset(
+            mh[f"{prefix}_Dyn_Args"], slot * params["dynamic_arg_slot_bytes"]
+        )
+
+        def add_node(core_id, kernel_name, kernel_args):
+            node = BingoNode(
+                assigned_chiplet_id=0,
+                assigned_cluster_id=cluster_id,
+                assigned_core_id=core_id,
+                kernel_name=kernel_name,
+                kernel_args=kernel_args,
+            )
+            bingo_dfg.bingo_add_node(node)
+            return node
+
+        gather_s1 = add_node(
+            DMA_CORE_ID,
+            "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
+            args,
+        )
+        for dep in deps:
+            bingo_dfg.bingo_add_edge(dep, gather_s1)
+
+        s1_loads = []
+        s2_computes = []
+        for block in range(N2):
+            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(dyn_arg_addr, block)
+            load = add_node(
+                DMA_CORE_ID,
+                "__snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block",
+                block_args,
+            )
+            compute = add_node(
+                GEMM_CORE_ID,
+                "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_block",
+                block_args,
+            )
+            bingo_dfg.bingo_add_edge(gather_s1, load)
+            if block > 0:
+                bingo_dfg.bingo_add_edge(s1_loads[block - 1], load)
+                bingo_dfg.bingo_add_edge(s2_computes[block - 1], compute)
+            bingo_dfg.bingo_add_edge(load, compute)
+            s1_loads.append(load)
+            s2_computes.append(compute)
+
+        prefetch_s2_down = add_node(
+            DMA_CORE_ID,
+            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down",
+            args,
+        )
+        bingo_dfg.bingo_add_edge(s1_loads[-1], prefetch_s2_down)
+
+        s3_loads = []
+        s4_computes = []
+        for block in range(N2d):
+            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(dyn_arg_addr, block)
+            load = add_node(
+                DMA_CORE_ID,
+                "__snax_bingo_kernel_moe_dynamic_expert_load_down_block",
+                block_args,
+            )
+            compute = add_node(
+                GEMM_CORE_ID,
+                "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block",
+                block_args,
+            )
+            bingo_dfg.bingo_add_edge(s2_computes[-1], load)
+            bingo_dfg.bingo_add_edge(prefetch_s2_down, load)
+            if block > 0:
+                bingo_dfg.bingo_add_edge(s3_loads[block - 1], load)
+                bingo_dfg.bingo_add_edge(s4_computes[block - 1], compute)
+            bingo_dfg.bingo_add_edge(load, compute)
+            s3_loads.append(load)
+            s4_computes.append(compute)
+
+        prefetch_s4_next_s1 = add_node(
+            DMA_CORE_ID,
+            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1",
+            args,
+        )
+        bingo_dfg.bingo_add_edge(s3_loads[-1], prefetch_s4_next_s1)
+
+        store = add_node(
+            DMA_CORE_ID,
+            "__snax_bingo_kernel_moe_dynamic_expert_store",
+            args,
+        )
+        bingo_dfg.bingo_add_edge(s4_computes[-1], store)
+        bingo_dfg.bingo_add_edge(prefetch_s4_next_s1, store)
+        return store
+
+    prev_c2_stores = [node_execute]
+    prev_c3_stores = [node_execute]
+    for slot in range(params["dynamic_slot_count"]):
+        c2_store = add_dynamic_slot_chain(
+            "C2_indiv", CLUSTER_INDIV_A, slot, prev_c2_stores
+        )
+        c3_store = add_dynamic_slot_chain(
+            "C3_indiv", CLUSTER_INDIV_B, slot, prev_c3_stores
+        )
+        prev_c2_stores = [c2_store]
+        prev_c3_stores = [c3_store]
+
+    enforce_in_order_completion_per_core(bingo_dfg)
+    return bingo_dfg
+
+
+# =========================================================================
+# Main
+# =========================================================================
+
+
+def main():
+    args = get_args()
+    os.makedirs(args.output_dir, exist_ok=True)
+    cfg = load_workload_config(args)
+    params = define_workload_params(**cfg)
+    mh = define_memory_handles(params)
+    dfg = create_dfg(params, mh)
+    data_header_name = f"{params['app_name']}_data.h"
+    dfg.bingo_compile_dfg(
+        params["app_name"],
+        args.output_dir,
+        args.output_offload_file_name,
+        extra_include_header_list=[data_header_name],
+    )
+    patch_moe_header_preamble(
+        os.path.join(args.output_dir, args.output_offload_file_name)
+    )
+
+
+if __name__ == "__main__":
+    main()

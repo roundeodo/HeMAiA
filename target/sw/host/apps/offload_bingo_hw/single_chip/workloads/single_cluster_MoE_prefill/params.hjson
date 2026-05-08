@@ -1,0 +1,67 @@
+# Copyright 2025 KU Leuven.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Xiaoling Yi <xiaoling.yi@kuleuven.be>
+
+{
+    array_shape: 1
+    transposed_A: 0
+    transposed_B: 0
+    
+    //router matrix dimension
+        // inner loop, data all inside inside the TCDM
+            router_K1: 128 // used to be 256
+            router_N1: 1
+            router_M1: 8
+        // out loop, pure software loop
+            router_K2: 1
+            router_N2: 1
+            router_M2: 1
+
+    //share_swish_glu matrix dimension
+        // inner loop, data all inside inside the TCDM
+            shared_swish_glu_K1: 128 // used to be 256
+            shared_swish_glu_N1: 1
+            shared_swish_glu_M1: 8
+        // out loop, pure software loop
+            shared_swish_glu_K2: 1
+            shared_swish_glu_N2: 2 // used to be 44
+            shared_swish_glu_M2: 1    
+    
+    //shared_down_projection matrix dimension
+        // inner loop, data all inside inside the TCDM
+            shared_down_projection_K1: 16 // used to be 352
+            shared_down_projection_N1: 1
+            shared_down_projection_M1: 8
+        // out loop, pure software loop
+            shared_down_projection_K2: 1
+            shared_down_projection_N2: 2 // used to be 32
+            shared_down_projection_M2: 1
+
+    //individual_swish_glu matrix dimension
+        // inner loop, data all inside inside the TCDM
+            individual_swish_glu_K1: 128 // used to be 256
+            individual_swish_glu_N1: 1
+            individual_swish_glu_M1: 8
+        // out loop, pure software loop
+            individual_swish_glu_K2: 1
+            individual_swish_glu_N2: 2 // used to be 22
+            individual_swish_glu_M2: 1
+
+    //individual_down_projection matrix dimension
+        // inner loop, data all inside inside the TCDM
+            individual_down_projection_K1: 16 // used to be 176
+            individual_down_projection_N1: 1
+            individual_down_projection_M1: 8
+        // out loop, pure software loop
+            individual_down_projection_K2: 1
+            individual_down_projection_N2: 2 // used to be 32
+            individual_down_projection_M2: 1
+   
+    // these two will config the addNewC = 1
+    addNonZeroC: 0
+    addZeroC: 1
+    // these two will config the addNewC = 0, but need to make sure M=M=1
+    accumPrevC: 0
+}
