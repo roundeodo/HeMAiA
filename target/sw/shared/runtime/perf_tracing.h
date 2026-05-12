@@ -104,6 +104,9 @@
 // HOST ROUTER SCHED
 #define BINGO_TRACE_HOST_ROUTER_SCHED_START 0x2D0
 #define BINGO_TRACE_HOST_ROUTER_SCHED_END   0x2D1
+// DUAL DMA (iDMA + xDMA concurrent) — outer wrapper for the entire kernel
+#define BINGO_TRACE_DUAL_DMA_CFG_START      0x2E0
+#define BINGO_TRACE_DUAL_DMA_CFG_END        0x2E1
 
 // Computation Kernels: Compute/Run Phase
 // IDMA

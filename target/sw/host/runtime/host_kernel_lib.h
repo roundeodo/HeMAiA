@@ -692,8 +692,12 @@ static inline void __host_moe_program_task_arg(__snax_bingo_kernel_moe_dynamic_e
     arg->ntokens = task->ntokens;
     arg->shape_s1 = (uint32_t)task->shape_s1;
     arg->shape_s3 = (uint32_t)task->shape_s3;
-    arg->skip_dma_s1 = task->skip_dma_s1;
-    arg->skip_dma_s3 = task->skip_dma_s3;
+    arg->skip_s1 = task->skip_s1;
+    arg->skip_s3 = task->skip_s3;
+    arg->skip_s2 = task->skip_s2;
+    arg->skip_s4 = task->skip_s4;
+    arg->m_s2_exec = task->m_s2_exec;
+    arg->m_s4_exec = task->m_s4_exec;
     arg->dma_s1 = (uint32_t)task->dma_s1;
     arg->dma_s3 = (uint32_t)task->dma_s3;
     arg->bw_s1 = task->bw_s1;
@@ -861,6 +865,8 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
 // Uses RISC-V Vector (RVV) intrinsics following the Ara softmax/exp patterns.
 // Requires: enable_vec() called once at startup.
 // ============================================================
+
+#ifdef BINGO_ENABLE_HOST_RVV_KERNELS
 
 #include "riscv_vector.h"
 
@@ -1404,6 +1410,8 @@ static inline uint64_t __host_bingo_kernel_dequantize_i32f32(void *arg){
     sp->num_return_values = num_elements;
     return BINGO_RET_SUCC;
 }
+
+#endif
 // ================================================================
 // DARTS Unified CERF Gating Kernel
 // ================================================================

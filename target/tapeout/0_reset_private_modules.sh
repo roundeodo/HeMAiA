@@ -20,10 +20,39 @@ rm -rf "$repo_root/hw/hemaia/hemaia_clk_rst_controller"
 # Reset Bender.local entries to empty paths
 # Path to Bender.local in the repo root
 bender_local_file="$repo_root/Bender.local"
-# Use safe substitutions to replace matching lines in-place without adding blank lines
-sed -i '/^[[:space:]]*hemaia_d2d_link:/d' "$bender_local_file"
-sed -i 's|^[[:space:]]*tech_cells_generic:.*$|  tech_cells_generic: { git: https://github.com/KULeuven-MICAS/tech_cells_generic.git, rev    : master }|' "$bender_local_file"
-sed -i '/^[[:space:]]*hemaia_clk_rst_controller:/d'  "$bender_local_file"
+
+upsert_bender_local_path() {
+	local key="$1"
+	local path="$2"
+	sed -i "/^[[:space:]]*$key:/d" "$bender_local_file"
+	printf '  %s: { path: %s }\n' "$key" "$path" >> "$bender_local_file"
+}
+
+upsert_bender_local_git() {
+	local key="$1"
+	local git="$2"
+	local rev="$3"
+	sed -i "/^[[:space:]]*$key:/d" "$bender_local_file"
+	printf '  %s: { git: %s, rev    : %s }\n' "$key" "$git" "$rev" >> "$bender_local_file"
+}
+
+if [ -d "$repo_root/local_mirrors/hemaia_d2d_link" ]; then
+	upsert_bender_local_path "hemaia_d2d_link" "local_mirrors/hemaia_d2d_link"
+else
+	sed -i '/^[[:space:]]*hemaia_d2d_link:/d' "$bender_local_file"
+fi
+
+if [ -d "$repo_root/local_mirrors/tech_cells_generic" ]; then
+	upsert_bender_local_path "tech_cells_generic" "local_mirrors/tech_cells_generic"
+else
+	upsert_bender_local_git "tech_cells_generic" "https://github.com/KULeuven-MICAS/tech_cells_generic.git" "master"
+fi
+
+if [ -d "$repo_root/local_mirrors/hemaia_clk_rst_controller" ]; then
+	upsert_bender_local_path "hemaia_clk_rst_controller" "local_mirrors/hemaia_clk_rst_controller"
+else
+	sed -i '/^[[:space:]]*hemaia_clk_rst_controller:/d' "$bender_local_file"
+fi
 
 # Remove the Bender.lock
 rm -f "$repo_root/Bender.lock"

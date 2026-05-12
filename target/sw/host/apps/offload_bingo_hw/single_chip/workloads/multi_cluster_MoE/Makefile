@@ -18,7 +18,6 @@ CHIP_TYPE     = single_chip
 WORKLOAD      = multi_cluster_MoE
 DEV_APP       = snax-bingo-offload
 SRCS = ../../src/offload_bingo_hw.c
-SRCS += $(MK_DIR)/moe_scheduler.c
 BINGO_HOST ?= 1 # True to include the bingo runtime
 INCL_DEVICE_BINARY ?= 1 # True to include the device binary
 
@@ -43,6 +42,9 @@ $(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(DATA_CFG) $(HW_CFG)
 ###############
 # Build settings
 ############### 
+# 启用 O(E) 快速调度路径（去掉此行则退回原版 O(E³×N⁴) 完整搜索）
+USER_FLAGS += -DMOE_SCHEDULE_FAST
+SRCS += $(MK_DIR)/moe_scheduler.c
 INCDIRS += $(MK_DIR)
 # Add the DATA_H to partial outputs
 PARTIAL_OUTPUTS += $(DATA_H)

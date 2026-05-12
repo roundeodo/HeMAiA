@@ -35,6 +35,7 @@
 #include "offload_hw_kernels/basic.h"
 #include "offload_hw_kernels/idma.h"
 #include "offload_hw_kernels/xdma.h"
+#include "offload_hw_kernels/dual_dma.h"
 #include "offload_hw_kernels/gemm.h"
 #include "offload_hw_kernels/moe_dynamic.h"
 
@@ -61,6 +62,7 @@ SNAX_SYMTAB_SECTION const snax_symbol_t __snax_symtab[] = {
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_exit),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_idma_1d_copy),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_idma_broadcast),
+    SNAX_EXPORT_FUNC(__snax_bingo_kernel_dual_dma),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_gemm_full),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_gemm_minimal),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_gemm_minimal_silu),
@@ -73,6 +75,8 @@ SNAX_SYMTAB_SECTION const snax_symbol_t __snax_symtab[] = {
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_moe_dynamic_expert_compute_down_block),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1),
+    SNAX_EXPORT_FUNC(__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full),
+    SNAX_EXPORT_FUNC(__snax_bingo_kernel_moe_dynamic_expert_compute_down_full),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_moe_dynamic_expert_store),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_xdma_1d_copy),
     SNAX_EXPORT_FUNC(__snax_bingo_kernel_xdma_6d),

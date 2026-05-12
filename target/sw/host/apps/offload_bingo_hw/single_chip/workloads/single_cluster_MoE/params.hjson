@@ -2,75 +2,75 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# single_cluster_MoE workload parameters (dual-VC INT16×INT4)
+# single_cluster_MoE workload parameters — xDMA/iDMA/dual-VC OVERLAP TEST
 #
 # Hardware: snax_dual_versacore_int16x4_rebalanced_cluster
 #   array_shape=0: meshRow=8, tileSize=8, meshCol=4
-#   down_meshCol=8 (two VCs concatenated for down projection)
+#   down_meshCol=8
 #
-# 两套参数分工：
-#   构造参数（K1/N1/M1）：硬件阵列内 tile 大小，决定 TCDM 驻留数据量
-#   计算参数（K2/N2/M2）：软件外循环次数，决定遍历完整维度所需迭代数
+# 简化验证目标：
+#   只做一次 iDMA(gate_B) + xDMA(up_B) + dual-VC SwiGLU，
+#   通过大 tile 放大 DMA 传输时间，观察三者能否在时间上重叠。
 #
-# Derived dimensions (with A_meshRow=8, A_tileSize=8, meshCol=4, down_meshCol=8):
-#   K_input  = K1 × tileSize        = 128 × 8 = 1024  (input_dimension)
-#   N_hidden = N1 × N2 × meshCol    = 1 × 32 × 4 = 128 (hidden_dimension)
-#   N_out    = N1 × N2 × down_meshCol = 1 × 128 × 8 = 1024 (output_dimension)
-#   K_down   = K1_down × tileSize   = 16 × 8 = 128    (hidden_dimension)
-#   N_router = N1 × N2 × meshCol    = 1 × 2 × 4 = 8   (expert_number_each_layer)
-#   M_total  = M1 × meshRow         = 1 × 8 = 8 tokens
+# Tile 尺寸推导 (N1=256):
+#   A tile = M1 × K1 × meshRow_A × tileSize_A × 2
+#          = 1 × 128 × 8 × 8 × 2 = 16384 bytes  ≈ (K_total×M_total)×2
+#   B tile = K1 × N1 × tileSize × meshCol / 2
+#          = 128 × 256 × 8 × 4 / 2 = 524288 bytes ≈ (1024×8)×64
+#   N_hidden = N1 × N2 × meshCol = 256 × 1 × 4 = 1024
+#   TCDM 需求: gate_B(512KB) + up_B(512KB) + A(16KB) + D(16KB) ≈ 1056KB
+#   TCDM 容量: 8192KB (充裕)
 
 {
     array_shape: 0
 
-    // 硬件 tile 口径（不随 workload 尺寸变化）
+    // 硬件 tile 口径（固定）
     A_meshRow: 8
     A_tileSize: 8
     down_meshCol: 8
 
-    // Router: K_total=1024 (input_dim), N_total=8 (expert_number_each_layer)
-    // 注意：Router DFG 只支持 N2=1（单个 B tile），
-    // 用 N1=2 来覆盖 8 个 expert：N = N1 × N2 × meshCol = 2 × 1 × 4 = 8
+    // Router: 保持最小合法值（router_N2 必须为 1）
     router_M1: 1
-    router_K1: 128      // K = 128 × tileSize(8) = 1024
-    router_N1: 2        // N = 2 × 1 × meshCol(4) = 8 (expert_number_each_layer)
+    router_K1: 128
+    router_N1: 2
     router_M2: 1
     router_K2: 1
-    router_N2: 1        // Router DFG 固定为 1（不支持 N2 > 1）
+    router_N2: 1
 
-    // Shared gate+up SwiGLU: K_total=1024 (input_dim), N_total=128 (hidden_dim)
+    // =========================================================
+    // 核心测试目标：大 tile SwiGLU（单次 iDMA + xDMA + 计算）
+    // B_tile = 128 × 256 × 8 × 4 / 2 = 524288 bytes ≈ 512KB
+    // =========================================================
     shared_swish_glu_M1: 1
-    shared_swish_glu_K1: 128    // K = 128 × 8 = 1024
-    shared_swish_glu_N1: 1
+    shared_swish_glu_K1: 128    // K = 1024 (input_dim)
+    shared_swish_glu_N1: 256    // N = 1024, B_tile = 512KB/DMA
     shared_swish_glu_M2: 1
     shared_swish_glu_K2: 1
-    shared_swish_glu_N2: 32     // N = 1 × 32 × meshCol(4) = 128
+    shared_swish_glu_N2: 1      // 单次传输+单次计算
 
-    // Shared down projection: K_total=128 (hidden_dim), N_total=1024 (output_dim)
+    // 下面各阶段不参与简化 DFG，设为最小值以减少生成数据量
     shared_down_projection_M1: 1
-    shared_down_projection_K1: 16   // K = 16 × tileSize(8) = 128
+    shared_down_projection_K1: 16
     shared_down_projection_N1: 1
     shared_down_projection_M2: 1
     shared_down_projection_K2: 1
-    shared_down_projection_N2: 128  // N = 1 × 128 × down_meshCol(8) = 1024
+    shared_down_projection_N2: 1
 
-    // Individual gate+up SwiGLU: 与 shared 相同维度
     individual_swish_glu_M1: 1
     individual_swish_glu_K1: 128
     individual_swish_glu_N1: 1
     individual_swish_glu_M2: 1
     individual_swish_glu_K2: 1
-    individual_swish_glu_N2: 32
+    individual_swish_glu_N2: 1
 
-    // Individual down projection: 与 shared 相同维度
     individual_down_projection_M1: 1
     individual_down_projection_K1: 16
     individual_down_projection_N1: 1
     individual_down_projection_M2: 1
     individual_down_projection_K2: 1
-    individual_down_projection_N2: 128
+    individual_down_projection_N2: 1
 
-    // addZeroC=1: 累加器清零（无 C bias 输入）
+    // 累加器清零
     addNonZeroC: 0
     addZeroC: 1
     accumPrevC: 0

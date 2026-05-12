@@ -259,7 +259,10 @@ static inline void wakeup_snitch(uint8_t chip_id,
  *         and start executing its binary
  */
 // TODO: implement in a more robust manner
-void wait_snitches_parked(uint32_t timeout) { delay_ns(100000); }
+void wait_snitches_parked(uint32_t timeout) {
+    (void)timeout;
+    delay_ns(100000);
+}
 
 /**
  * @brief Programs the Snitches with the Snitch binary
@@ -299,7 +302,8 @@ static inline void wakeup_cluster(uint8_t chip_id, uint32_t cluster_id) {
  *         sends a SW interrupt to all Snitches.
  */
 void wakeup_snitches(uint8_t chip_id, volatile comm_buffer_t* comm_buffer_ptr) {
-    volatile uint32_t* lock = get_shared_lock(comm_buffer_ptr);
+    (void)comm_buffer_ptr;
+    volatile uint32_t* lock = get_shared_lock();
 
     mutex_ttas_acquire(lock);
     set_sw_interrupts_unsafe(chip_id, 1, N_SNITCHES, 1);
@@ -326,7 +330,8 @@ void wakeup_snitches_selective(uint8_t chip_id,
                                volatile comm_buffer_t* comm_buffer_ptr,
                                uint32_t base_hartid, uint32_t num_harts,
                                uint32_t stride) {
-    volatile uint32_t* lock = get_shared_lock(comm_buffer_ptr);
+    (void)comm_buffer_ptr;
+    volatile uint32_t* lock = get_shared_lock();
 
     mutex_ttas_acquire(lock);
     set_sw_interrupts_unsafe(chip_id, base_hartid, num_harts, stride);
@@ -431,7 +436,8 @@ static inline void clear_sw_interrupt_unsafe(uint8_t chip_id, uint32_t hartid) {
 static inline void clear_sw_interrupt(uint8_t chip_id,
                                       volatile comm_buffer_t* comm_buffer_ptr,
                                       uint32_t hartid) {
-    volatile uint32_t* shared_lock = get_shared_lock(comm_buffer_ptr);
+    (void)comm_buffer_ptr;
+    volatile uint32_t* shared_lock = get_shared_lock();
 
     mutex_tas_acquire(shared_lock);
     clear_sw_interrupt_unsafe(chip_id, hartid);
@@ -468,7 +474,8 @@ static inline void set_sw_interrupt_unsafe(uint8_t chip_id, uint32_t hartid) {
 
 void set_sw_interrupt(uint8_t chip_id, volatile comm_buffer_t* comm_buffer_ptr,
                       uint32_t hartid) {
-    volatile uint32_t* shared_lock = get_shared_lock(comm_buffer_ptr);
+    (void)comm_buffer_ptr;
+    volatile uint32_t* shared_lock = get_shared_lock();
     mutex_ttas_acquire(shared_lock);
     set_sw_interrupt_unsafe(chip_id, hartid);
     mutex_release(shared_lock);

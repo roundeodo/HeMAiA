@@ -115,7 +115,7 @@ MOE_DYNAMIC_SLOT_COUNT = 16
 MOE_DYNAMIC_ARG_SLOT_BYTES = 512
 MOE_SCHEDULE_BYTES = 32768
 MOE_RUNTIME_STATE_BYTES = 16
-ENABLE_PHASE3_PHASE4 = False
+ENABLE_PHASE3_PHASE4 = True
 
 
 # =========================================================================
@@ -512,12 +512,16 @@ def define_workload_params(**kw):
     # A: INT16 → 2 bytes/element
     # B: INT4 packed → tileSize*meshCol/2 bytes
     # D: INT32 → 4 bytes/element
-    p["router_A_tilesize"] = p["router_M1"] * p["router_K1"] * meshRow * tileSize * 2
+    # Note: A tiles use meshRow_A/tileSize_A (may differ from hardware defaults);
+    #       D tiles also use meshRow_A since A's row count determines D's row count.
+    p["router_A_tilesize"] = (
+        p["router_M1"] * p["router_K1"] * meshRow_A * tileSize_A * 2
+    )
     p["router_B_tilesize"] = p["router_K1"] * p["router_N1"] * tileSize * meshCol // 2
-    p["router_D_tilesize"] = p["router_M1"] * p["router_N1"] * meshRow * meshCol * 4
-    p["indiv_A_tilesize"] = p["indiv_M1"] * p["indiv_K1"] * meshRow * tileSize * 2
+    p["router_D_tilesize"] = p["router_M1"] * p["router_N1"] * meshRow_A * meshCol * 4
+    p["indiv_A_tilesize"] = p["indiv_M1"] * p["indiv_K1"] * meshRow_A * tileSize_A * 2
     p["indiv_B_tilesize"] = p["indiv_K1"] * p["indiv_N1"] * tileSize * meshCol // 2
-    p["indiv_D_tilesize"] = p["indiv_M1"] * p["indiv_N1"] * meshRow * meshCol * 4
+    p["indiv_D_tilesize"] = p["indiv_M1"] * p["indiv_N1"] * meshRow_A * meshCol * 4
     k_total_input = p["router_K2"] * p["router_K1"] * tileSize
     if k_total_input % tileSize_A != 0:
         raise ValueError("input K_total must be divisible by A_tileSize")
@@ -631,7 +635,9 @@ def define_workload_params(**kw):
     p["router_B_vc_stride"] = (
         p["router_vc_N"] * p["router_K2"] * p["router_K1"] * tileSize * meshCol // 2
     )
-    p["router_D_vc_stride"] = p["router_vc_N"] * p["router_M1"] * meshRow * meshCol * 4
+    p["router_D_vc_stride"] = (
+        p["router_vc_N"] * p["router_M1"] * meshRow_A * meshCol * 4
+    )
     hidden_indiv = p["indiv_N2"] * p["indiv_N1"] * meshCol
     hidden_shared = p["shared_N2"] * p["shared_N1"] * meshCol
     k_indiv_down = p["indiv_down_K2"] * p["indiv_down_K1"] * tileSize
@@ -981,11 +987,11 @@ def create_dfg(params, mh):
     # Phase 0: Weight preload — 系统 iDMA (HOST lane) + cluster xDMA 真并行
     #
     # 硬件资源：
-    #   系统 iDMA (ONE): 由 CVA6 通过 sys_dma_memcpy 触发，HOST lane 独占。
+    #   系统 iDMA (ONE): 有目标cluster DM core 通过对应api触发。
     #   cluster xDMA: 由目标集群 DM core 通过 CSR 960 触发，目标 L1/TCDM 为本地端点。
     #   两条 lane 分属独立硬件，DFG 中无 cross-edge → 真正并行执行。
     #
-    # iDMA path (HOST lane, 串行): 加载所有 gate_B 权重 + router_B
+    # iDMA path (target DM lane, 串行): 加载所有 gate_B 权重 + router_B
     #   C0_gate_B → C1_gate_B → C2_gate_B → C3_router_B → C3_gate_B
     #
     # xDMA path (target DM lane, 串行): 加载所有 up_B + down_B 权重
@@ -1705,6 +1711,8 @@ def create_dfg(params, mh):
         for dep in deps:
             bingo_dfg.bingo_add_edge(dep, gather_s1)
 
+        # S1: N2 个 load+compute 节点对，边搬边算流水线
+        # skip_s1=1(cache hit) 时：所有 load/compute 节点直接跳过，token 由 compute_gate_up_full(S2) 处理
         s1_loads = []
         s2_computes = []
         for block in range(N2):
@@ -1734,6 +1742,17 @@ def create_dfg(params, mh):
         )
         bingo_dfg.bingo_add_edge(s1_loads[-1], prefetch_s2_down)
 
+        # S2: gate+up 全量 GEMM 节点
+        # cache hit(skip_s1=1)：处理所有 token；否则处理 ntokens-shape_M 尾部 token
+        compute_gate_up_full = add_node(
+            GEMM_CORE_ID,
+            "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full",
+            args,
+        )
+        bingo_dfg.bingo_add_edge(s2_computes[-1], compute_gate_up_full)
+
+        # S3+S4: N2d 个 load+compute 节点对，边搬边算流水线
+        # skip_s3=1(cache hit) 时：load/compute 节点全部跳过，所有 token 由 compute_down_full 处理
         s3_loads = []
         s4_computes = []
         for block in range(N2d):
@@ -1748,7 +1767,7 @@ def create_dfg(params, mh):
                 "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block",
                 block_args,
             )
-            bingo_dfg.bingo_add_edge(s2_computes[-1], load)
+            bingo_dfg.bingo_add_edge(compute_gate_up_full, load)
             bingo_dfg.bingo_add_edge(prefetch_s2_down, load)
             if block > 0:
                 bingo_dfg.bingo_add_edge(s3_loads[block - 1], load)
@@ -1764,12 +1783,21 @@ def create_dfg(params, mh):
         )
         bingo_dfg.bingo_add_edge(s3_loads[-1], prefetch_s4_next_s1)
 
+        # S4: down 全量 GEMM 节点
+        # cache hit(skip_s3=1)：处理所有 token；否则处理 ntokens-shape_M 尾部 token
+        compute_down_full = add_node(
+            GEMM_CORE_ID,
+            "__snax_bingo_kernel_moe_dynamic_expert_compute_down_full",
+            args,
+        )
+        bingo_dfg.bingo_add_edge(s4_computes[-1], compute_down_full)
+
         store = add_node(
             DMA_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_store",
             args,
         )
-        bingo_dfg.bingo_add_edge(s4_computes[-1], store)
+        bingo_dfg.bingo_add_edge(compute_down_full, store)
         bingo_dfg.bingo_add_edge(prefetch_s4_next_s1, store)
         return store
 

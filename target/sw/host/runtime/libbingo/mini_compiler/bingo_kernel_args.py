@@ -194,6 +194,38 @@ class SnaxBingoKernelIdmaBroadcastArgs(BingoKernelArgs):
         return assignments
 
 
+# BINGO DUAL DMA (iDMA + xDMA concurrent)
+# Launches both DMA engines in the same Bingo node so they overlap in hardware.
+class SnaxBingoKernelDualDmaArgs(BingoKernelArgs):
+    def __init__(
+        self,
+        idma_src_addr: Union[BingoMemAlloc, int],
+        idma_dst_addr: Union[BingoMemAlloc, int],
+        idma_size: int,
+        xdma_src_addr: Union[BingoMemAlloc, int],
+        xdma_dst_addr: Union[BingoMemAlloc, int],
+        xdma_size: int,
+    ):
+        self.idma_src_addr = idma_src_addr
+        self.idma_dst_addr = idma_dst_addr
+        self.idma_size = idma_size
+        self.xdma_src_addr = xdma_src_addr
+        self.xdma_dst_addr = xdma_dst_addr
+        self.xdma_size = xdma_size
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_dual_dma_args_t"
+
+    def get_c_field_assignments(self, handle_name_map: Dict[BingoMemAlloc, str]) -> Dict[str, str]:
+        assignments = {}
+        self._process_addr(self.idma_src_addr, "idma_src_addr", assignments, handle_name_map)
+        self._process_addr(self.idma_dst_addr, "idma_dst_addr", assignments, handle_name_map)
+        assignments["idma_size"] = str(self.idma_size)
+        self._process_addr(self.xdma_src_addr, "xdma_src_addr", assignments, handle_name_map)
+        self._process_addr(self.xdma_dst_addr, "xdma_dst_addr", assignments, handle_name_map)
+        assignments["xdma_size"] = str(self.xdma_size)
+        return assignments
+
 
 # BINGO GEMM FULL
 class SnaxBingoKernelGemmFullArgs(BingoKernelArgs):
@@ -513,8 +545,12 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
             "ntokens": "0",
             "shape_s1": "0",
             "shape_s3": "0",
-            "skip_dma_s1": "0",
-            "skip_dma_s3": "0",
+            "skip_s1": "0",
+            "skip_s3": "0",
+            "skip_s2": "0",
+            "skip_s4": "0",
+            "m_s2_exec": "0",
+            "m_s4_exec": "0",
             "dma_s1": "0",
             "dma_s3": "0",
             "bw_s1": "0",

@@ -339,7 +339,19 @@ inline int32_t bingo_hw_offload_manager(){
                cur_global_task_id);
         // 3. Execute the function
         BINGO_TRACE_MARKER(BINGO_TRACE_MGR_RUN_KERNEL_START);
+#ifdef BINGO_NODE_TIMING
+        uint32_t _bingo_t_start = snrt_mcycle();
+        printf_safe("[C%d c%d] Task %d Start: %u\r\n",
+            snrt_cluster_idx(), snrt_cluster_core_idx(),
+            cur_global_task_id, _bingo_t_start);
+#endif
         kernel_return_value = ((uint32_t (*)(uint32_t))cur_kernel_ptr)(cur_arg_ptr);
+#ifdef BINGO_NODE_TIMING
+        uint32_t _bingo_t_end = snrt_mcycle();
+        printf_safe("[C%d c%d] Task %d End: %u\r\n",
+            snrt_cluster_idx(), snrt_cluster_core_idx(),
+            cur_global_task_id, _bingo_t_end);
+#endif
         BINGO_TRACE_MARKER(BINGO_TRACE_MGR_RUN_KERNEL_END);
 
         // 4. Write the Done queue to notify the bingo hw scheduler

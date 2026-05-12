@@ -98,8 +98,12 @@ typedef struct {
     uint16_t  bw_s3;          /* allocated S3 DMA BW in B/cc             */
     moe_dma_binding_t dma_s1; /* DMA lane(s) assigned to S1              */
     moe_dma_binding_t dma_s3; /* DMA lane(s) assigned to S3              */
-    uint8_t   skip_dma_s1;    /* 1 if weight already in cluster L1       */
-    uint8_t   skip_dma_s3;    /* 1 if down weight already in cluster L1  */
+    uint8_t   skip_s1;        /* 1 if S1 load+compute skipped (cache hit) */
+    uint8_t   skip_s3;        /* 1 if S3 load+compute skipped (cache hit) */
+    uint8_t   skip_s2;        /* 1 if S2 full compute skipped (ntokens<=shape_M, non-hit) */
+    uint8_t   skip_s4;        /* 1 if S4 full compute skipped */
+    uint32_t  m_s2_exec;      /* token count for S2 (0 when skip_s2=1)  */
+    uint32_t  m_s4_exec;      /* token count for S4 (0 when skip_s4=1)  */
     int16_t   prefetch_eid;   /* expert id to prefetch during S4, -1=none */
     moe_task_dma_slot_t dma_slots[MOE_TASK_DMA_SLOTS];
     uint32_t  est_start_cc;   /* analytical estimate, dispatch hint only */

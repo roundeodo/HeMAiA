@@ -244,6 +244,22 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_xdma_1d_copy_args {
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_xdma_1d_copy_args_t;
 
+// BINGO Dual DMA (iDMA + xDMA concurrent) kernel args
+// iDMA and xDMA are launched simultaneously, then waited in parallel.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_dma_args {
+  uint32_t idma_src_addr_hi;
+  uint32_t idma_src_addr_lo;
+  uint32_t idma_dst_addr_hi;
+  uint32_t idma_dst_addr_lo;
+  uint32_t idma_size;       // in Bytes
+  uint32_t xdma_src_addr_hi;
+  uint32_t xdma_src_addr_lo;
+  uint32_t xdma_dst_addr_hi;
+  uint32_t xdma_dst_addr_lo;
+  uint32_t xdma_size;       // in Bytes
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_dual_dma_args_t;
+
 // BINGO XDMA 6D kernel args (fixed-size, max 5 temporal dims = 6 total dims)
 // Exposes full AGU strides/bounds to the user. Unused dims: stride=0, bound=1.
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_xdma_6d_args {
@@ -535,8 +551,12 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   uint32_t ntokens;
   uint32_t shape_s1;
   uint32_t shape_s3;
-  uint32_t skip_dma_s1;
-  uint32_t skip_dma_s3;
+  uint32_t skip_s1;      /* 1 = S1 load+compute 全跳过 (cache hit) */
+  uint32_t skip_s3;      /* 1 = S3 load+compute 全跳过 (cache hit) */
+  uint32_t skip_s2;      /* 1 = S2 full compute 跳过 (ntokens<=shape_M 且非cache-hit) */
+  uint32_t skip_s4;      /* 1 = S4 full compute 跳过 */
+  uint32_t m_s2_exec;    /* S2 处理的 token 数 (0 when skip_s2=1) */
+  uint32_t m_s4_exec;    /* S4 处理的 token 数 (0 when skip_s4=1) */
   uint32_t dma_s1;
   uint32_t dma_s3;
   uint32_t bw_s1;

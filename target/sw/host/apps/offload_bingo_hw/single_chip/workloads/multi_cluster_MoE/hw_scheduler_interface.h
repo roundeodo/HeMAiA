@@ -110,8 +110,8 @@ static inline void moe_dynamic_task_desc_pack(
     uint32_t bw_s3,
     uint32_t dma_s1,
     uint32_t dma_s3,
-    uint32_t skip_dma_s1,
-    uint32_t skip_dma_s3,
+    uint32_t skip_s1,
+    uint32_t skip_s3,
     int32_t prefetch_eid,
     uint32_t est_start_cc,
     uint32_t est_end_cc,
@@ -130,8 +130,8 @@ static inline void moe_dynamic_task_desc_pack(
     (void)bw_s3;
     (void)dma_s1;
     (void)dma_s3;
-    (void)skip_dma_s1;
-    (void)skip_dma_s3;
+    (void)skip_s1;
+    (void)skip_s3;
     (void)prefetch_eid;
     (void)est_start_cc;
     (void)est_end_cc;

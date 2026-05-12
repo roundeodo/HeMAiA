@@ -1,0 +1,14 @@
+ID,Chiplet,Cluster,Core,Type,Kernel
+0,00,0,1,normal,__snax_bingo_kernel_idma_1d_copy
+1,00,0,1,normal,__snax_bingo_kernel_dual_dma
+2,00,0,0,normal,__snax_bingo_kernel_dual_vc_swiglu_full
+3,00,0,2,normal,__host_bingo_kernel_entry
+4,00,0,0,normal,__snax_bingo_kernel_exit
+5,00,0,1,normal,__snax_bingo_kernel_exit
+6,00,1,0,normal,__snax_bingo_kernel_exit
+7,00,1,1,normal,__snax_bingo_kernel_exit
+8,00,2,0,normal,__snax_bingo_kernel_exit
+9,00,2,1,normal,__snax_bingo_kernel_exit
+10,00,3,0,normal,__snax_bingo_kernel_exit
+11,00,3,1,normal,__snax_bingo_kernel_exit
+12,00,0,2,normal,__host_bingo_kernel_exit
