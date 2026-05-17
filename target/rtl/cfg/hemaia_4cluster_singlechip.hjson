@@ -97,10 +97,10 @@
     },
     // 4 clusters: C0=shared_up, C1=shared_gate, C2=indiv_A, C3=router+indiv_B
     clusters:[
-      "snax_dual_versacore_int16x4_rebalanced_cluster",
-      "snax_dual_versacore_int16x4_rebalanced_cluster",
-      "snax_dual_versacore_int16x4_rebalanced_cluster",
-      "snax_dual_versacore_int16x4_rebalanced_cluster",
+      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
+      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
+      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
+      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
       ],
 
     hemaia_xdma_cfg: {

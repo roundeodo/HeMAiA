@@ -473,6 +473,321 @@ def emit_MoE_data(**kwargs):
         ]:
             data_str += [format_scalar_definition("int32_t *", name, "(int32_t *)NULL")]
 
+    # =========================================================================
+    # L15 layout data generation
+    # For __snax_bingo_kernel_dual_vc_l15_moe_full, S2 shape, M-direction batching
+    # S2: meshRow=2, tileSize=8, meshCol=16
+    # Each L15 call = full MoE FFN (Mode-0 SwiGLU + Mode-1 down) for 2 tokens
+    # sM2 batches of 2 tokens each = 2*sM2 total tokens
+    # =========================================================================
+    log_progress("generating L15 layout data for single-cluster S2 overlap test")
+
+    S0_MESHCOL = 4
+    S0_TILESIZE = 8
+
+    # L15 globals derived from current shape params
+    l15_k0_total = sK1 * tileSize  # 128*8 = 1024
+    l15_n0_total = sN1 * meshCol  # sN1*16 = N_hidden
+    l15_k1_total = l15_n0_total  # = N_hidden (down K = gate/up N output)
+    l15_n1_total = sdN1 * meshCol  # sdN1*16 = down output cols per VC
+    l15_m_total = meshRow  # 2 tokens per batch
+    l15_k0_bytes = l15_k0_total * 2  # 2048
+    l15_k0_s0_tiles = l15_k0_total // S0_TILESIZE  # = 1024/8 = 128  (K方向S0子tile数)
+    l15_k1_s0_tiles = (
+        l15_k1_total // S0_TILESIZE
+    )  # = 512/8  = 64   (down K方向, K_down=N_hidden=512)
+    l15_n0_s0_tiles = (
+        l15_n0_total // S0_MESHCOL
+    )  # = 512/4  = 128  (N方向S0子tile数, N_hidden=sN1*meshCol=32*16=512)
+    l15_n1_s0_tiles = (
+        l15_n1_total // S0_MESHCOL
+    )  # = 256/4  = 64   (down N方向, N_down_vc=sdN1*meshCol=16*16=256)
+
+    L15_LAYOUT_COLORS = {
+        "b0_color": 0,
+        "b1_color": 272,
+        "w2l_color": 128,
+        "w2r_color": 0,
+        "a_color": 0,
+        "d0_color": 0,
+        "m1d0_color": 256,
+    }
+    L15_A_PAD = 32
+
+    def _l15_align_up(v, a=1024):
+        return ((int(v) + int(a) - 1) // int(a)) * int(a)
+
+    def _l15_col(off, color=0):
+        return _l15_align_up(off) + int(color)
+
+    # Tensor sizes
+    _l15_w_bytes = (
+        l15_k0_s0_tiles * l15_n0_s0_tiles * 16
+    )  # = 128*128*16 = 262144 = 256KB (B0 gate / B1 up 各自, INT4 packed: K=1024×N=512÷2)
+    _l15_w2_bytes = (
+        l15_k1_s0_tiles * l15_n1_s0_tiles * 16
+    )  # = 64*64*16   = 65536  = 64KB  (W2l/W2r 各自, INT4 packed: K_down=512×N_down=256÷2)
+    _l15_a_row_stride = l15_k0_bytes + L15_A_PAD  # 2080
+    _l15_a_bytes = l15_m_total * _l15_a_row_stride  # 4160
+    _l15_mode0_d_bytes = l15_m_total * l15_n0_total * 2  # 1024
+    _l15_mode1_pad_bytes = l15_m_total * _l15_a_row_stride  # 4160
+
+    # TCDM placement (matches place_tensors from multi_cluster datagen)
+    _l15_delta_b0 = _l15_col(0, L15_LAYOUT_COLORS["b0_color"])
+    _l15_delta_b1 = _l15_col(
+        _l15_delta_b0 + _l15_w_bytes, L15_LAYOUT_COLORS["b1_color"]
+    )
+    _l15_delta_w2l = _l15_col(
+        _l15_delta_b1 + _l15_w_bytes, L15_LAYOUT_COLORS["w2l_color"]
+    )
+    _l15_delta_w2r = _l15_col(
+        _l15_delta_w2l + _l15_w2_bytes, L15_LAYOUT_COLORS["w2r_color"]
+    )
+    _l15_delta_a = _l15_col(
+        _l15_delta_w2r + _l15_w2_bytes, L15_LAYOUT_COLORS["a_color"]
+    )
+    _l15_delta_d0 = _l15_col(_l15_delta_a + _l15_a_bytes, L15_LAYOUT_COLORS["d0_color"])
+    _l15_delta_m1d0 = _l15_col(
+        _l15_delta_d0 + _l15_mode0_d_bytes, L15_LAYOUT_COLORS["m1d0_color"]
+    )
+    _l15_delta_m1d1 = _l15_delta_m1d0 + l15_n1_total * 2
+    _l15_tcdm_end = _l15_delta_m1d0 + _l15_mode1_pad_bytes
+    # cfg 结构体（moe_l15_shape_cfg_t，91 个 int32 = 364 bytes）紧接张量数据之后
+    _l15_delta_cfg = _l15_tcdm_end
+    _l15_cfg_bytes = 91 * 4  # 364 bytes
+
+    l15_placement = {
+        "delta_local_a": _l15_delta_a,
+        "delta_local_b0": _l15_delta_b0,
+        "delta_local_b1": _l15_delta_b1,
+        "delta_local_d0": _l15_delta_d0,
+        "delta_local_w2l": _l15_delta_w2l,
+        "delta_local_w2r": _l15_delta_w2r,
+        "delta_local_mode1_d0": _l15_delta_m1d0,
+        "delta_local_mode1_d1": _l15_delta_m1d1,
+        "tcdm_end": _l15_tcdm_end,
+    }
+
+    log_progress(
+        f"L15 S2 placement: b0={_l15_delta_b0}, b1={_l15_delta_b1}, "
+        f"w2l={_l15_delta_w2l}, w2r={_l15_delta_w2r}, a={_l15_delta_a}, "
+        f"d0={_l15_delta_d0}, m1d0={_l15_delta_m1d0}, tcdm_end={_l15_tcdm_end}"
+    )
+
+    # ---- L15 S2 shape config (91 int32_t values matching moe_l15_shape_cfg_t) ----
+    # Ported from multi_cluster_MoE_datagen.py build_shape_cfg_flat_vals()
+    _l15_k_tiles = l15_k0_total // tileSize  # 128
+    _l15_k1_tiles = l15_k1_total // tileSize  # 32
+    _l15_n0_tiles = l15_n0_total // meshCol  # 16
+    _l15_n1_tiles = l15_n1_total // meshCol  # 1
+
+    _l15_mode0_b_n_stride = (meshCol // 4) * l15_k0_s0_tiles * 16  # 4*128*16 = 8192
+    _l15_mode1_b_n_stride = (meshCol // 4) * l15_k1_s0_tiles * 16  # 4*32*16  = 2048
+    _l15_mode0_b_sstride = l15_k0_s0_tiles * 16  # 2048
+    _l15_mode1_b_sstride = l15_k1_s0_tiles * 16  # 512
+
+    _l15_a_channel_en = {0: 0xFFFF, 1: 0x00FF, 2: 0x000F}[array_shape]
+    _l15_b_channel_en = {0: 0x03, 1: 0x0F, 2: 0xFF}[array_shape]
+
+    _l15_d_stride1 = 64
+    _l15_mode0_d_m_stride = _l15_n0_tiles * _l15_d_stride1  # 16*64 = 1024
+    _l15_d_bound0 = 8
+    _l15_beats_per_row = meshCol // 4  # 4
+    _l15_mode1_a_sstride = {0: [64, 8], 1: [8, 16], 2: [8, 32]}[array_shape]
+    _l15_mode1_a_k_stride = {0: 128, 1: 64, 2: 16}[array_shape]
+
+    l15_dev_s2_cfg_vals = [
+        # uint32: array_shape, meshRow, tileSize, meshCol, tokens_used
+        array_shape,
+        meshRow,
+        tileSize,
+        meshCol,
+        meshRow,
+        # uint32: M_tiles, K_tiles, N_tiles, K1, N1
+        1,
+        _l15_k_tiles,
+        _l15_n0_tiles,
+        _l15_k1_tiles,
+        _l15_n1_tiles,
+        # int32: mode0_A_sstride[2]
+        8,
+        _l15_a_row_stride,
+        # int32: mode1_A_sstride[2]
+        _l15_mode1_a_sstride[0],
+        _l15_mode1_a_sstride[1],
+        # int32: mode0_B_sstride[2]
+        8,
+        _l15_mode0_b_sstride,
+        # int32: mode1_B_sstride[2]
+        8,
+        _l15_mode1_b_sstride,
+        # int32: D_sstride[1]
+        8,
+        # int32: mode0_A_tbound[6]
+        _l15_k_tiles,
+        _l15_n0_tiles,
+        1,
+        1,
+        1,
+        1,
+        # int32: mode0_A_tstride[6]
+        tileSize * 2,
+        0,
+        meshRow * _l15_a_row_stride,
+        0,
+        0,
+        0,
+        # int32: mode1_A_tbound[6]
+        _l15_k1_tiles,
+        _l15_n1_tiles,
+        1,
+        1,
+        1,
+        1,
+        # int32: mode1_A_tstride[6]
+        _l15_mode1_a_k_stride,
+        0,
+        _l15_mode0_d_m_stride,
+        0,
+        0,
+        0,
+        # int32: mode0_B_tbound[4]
+        _l15_k_tiles,
+        _l15_n0_tiles,
+        1,
+        1,
+        # int32: mode0_B_tstride[4]
+        16,
+        _l15_mode0_b_n_stride,
+        0,
+        0,
+        # int32: mode1_B_tbound[4]
+        _l15_k1_tiles,
+        _l15_n1_tiles,
+        1,
+        1,
+        # int32: mode1_B_tstride[4]
+        16,
+        _l15_mode1_b_n_stride,
+        0,
+        0,
+        # int32: mode0_D_tbound[4]
+        _l15_d_bound0,
+        _l15_n0_tiles,
+        1,
+        1,
+        # int32: mode0_D_tstride[4]
+        8,
+        _l15_d_stride1,
+        _l15_mode0_d_m_stride,
+        0,
+        # int32: mode1_D_tbound[4]
+        _l15_beats_per_row,
+        meshRow,
+        _l15_n1_tiles,
+        1,
+        # int32: mode1_D_tstride[4]
+        8,
+        _l15_a_row_stride,
+        meshCol * 2,
+        0,
+        # int32: A_channel_en[1], B_channel_en[1], D_channel_en[1]
+        _l15_a_channel_en,
+        _l15_b_channel_en,
+        1,
+        # int32: delta_local_a, b0, b1, d0, w2l, w2r, mode1_d0, mode1_d1
+        _l15_delta_a,
+        _l15_delta_b0,
+        _l15_delta_b1,
+        _l15_delta_d0,
+        _l15_delta_w2l,
+        _l15_delta_w2r,
+        _l15_delta_m1d0,
+        _l15_delta_m1d1,
+        # int32: tcdm_end, mode0_output_elems, mode1_output_elems
+        _l15_tcdm_end,
+        meshRow * l15_n0_total,
+        meshRow * l15_n1_total,
+        # int32: mode1_output_row_stride_bytes, mode1_padded_output_elems
+        _l15_a_row_stride,
+        meshRow * (_l15_a_row_stride // 2),
+    ]
+    assert (
+        len(l15_dev_s2_cfg_vals) == 91
+    ), f"Expected 91 cfg vals, got {len(l15_dev_s2_cfg_vals)}"
+    cfg_vals_str = ", ".join(str(v) for v in l15_dev_s2_cfg_vals)
+    data_str += [
+        f"// L15 device shape config for S2 — matches moe_l15_shape_cfg_t (91 int32_t values)\n"
+        f"static const int32_t l15_dev_s2_cfg[91] = {{\n    {cfg_vals_str}\n}};"
+    ]
+
+    # ---- B0 (gate) and B1 (up) weights: S0-tile format, constant values ----
+    # INT4 packed: B0 = all 1s (0x11 per byte), B1 = all 2s (0x22 per byte)
+    _l15_num_b_tiles = l15_k0_s0_tiles * l15_n0_s0_tiles  # 128*64 = 8192 tiles
+    _l15_b0_packed = np.full(
+        _l15_num_b_tiles * 16, 0x11, dtype=np.uint8
+    )  # 131072 bytes
+    _l15_b1_packed = np.full(
+        _l15_num_b_tiles * 16, 0x22, dtype=np.uint8
+    )  # 131072 bytes
+    data_str += [format_vector_definition("uint8_t", "l15_weights_b0", _l15_b0_packed)]
+    data_str += [format_vector_definition("uint8_t", "l15_weights_b1", _l15_b1_packed)]
+
+    # ---- W2l / W2r：Mode-1 down projection 权重（各 2048 bytes，单份，所有 batch 共用）----
+    # iDMA: W2l → TCDM[base + delta_w2l=263296], size=2048
+    # xDMA: W2r → TCDM[base + delta_w2r=266240], size=2048（与 W2l 并行，dual_dma）
+    _l15_num_w2_tiles = (
+        l15_k1_s0_tiles * l15_n1_s0_tiles
+    )  # 32×4 = 128 tiles × 16B = 2048B
+    _l15_w2l_data = np.full(_l15_num_w2_tiles * 16, 0x11, dtype=np.uint8)  # INT4 packed
+    _l15_w2r_data = np.full(_l15_num_w2_tiles * 16, 0x22, dtype=np.uint8)  # INT4 packed
+    data_str += [format_vector_definition("uint8_t", "l15_weights_w2l", _l15_w2l_data)]
+    data_str += [format_vector_definition("uint8_t", "l15_weights_w2r", _l15_w2r_data)]
+
+    # ---- A_padded：输入激活（单份，所有 batch 共用，pre-load 进 ping/pong） ----
+    # idma: A → TCDM[base + delta_a=268288], size=4160（pipeline 开始前各 buffer 预加载一次）
+    # A 区域不被 dma_B（写 [0..262416]）或 dma_W2（写 [263296..268288]）覆盖，
+    # 因此 pre-load 后整个 pipeline 期间保持有效。
+    K_total = l15_k0_total  # 1024
+    _a_row_elems = _l15_a_row_stride // 2  # 1040 int16 per row
+    _a_logical = A_phys[0, 0].reshape(meshRow, K_total)  # (2, 1024) int16，用第一份数据
+    _a_padded_arr = np.zeros((meshRow, _a_row_elems), dtype=np.int16)
+    _a_padded_arr[:, :K_total] = _a_logical
+    _l15_a_data = _a_padded_arr.view(np.uint8).flatten()  # 4160 bytes
+    data_str += [format_vector_definition("uint8_t", "l15_input_a", _l15_a_data)]
+
+    log_progress(
+        f"L15 separate arrays: B0/B1={_l15_w_bytes}B each, "
+        f"W2l/W2r={_l15_num_w2_tiles * 16}B each, "
+        f"A_padded={len(_l15_a_data)}B; TCDM offsets: "
+        f"b0={_l15_delta_b0}, b1={_l15_delta_b1}, "
+        f"w2l={_l15_delta_w2l}, w2r={_l15_delta_w2r}, a={_l15_delta_a}"
+    )
+
+    # ---- Scalar constants for main_bingo.py L15 handles/DFG ----
+    for _nm, _val in [
+        ("l15_w_bytes", _l15_w_bytes),  # 131072 = B0/B1 各自大小
+        ("l15_delta_b1", _l15_delta_b1),  # 131344 = B1 TCDM 偏移
+        ("l15_delta_w2l", _l15_delta_w2l),  # 263296 = W2l TCDM 偏移
+        (
+            "l15_delta_w2r",
+            _l15_delta_w2r,
+        ),  # 266240 = W2r TCDM 偏移（第二次 dual_dma xDMA 目标）
+        ("l15_delta_a", _l15_delta_a),  # 268288 = A   TCDM 偏移（pre-load idma 目标）
+        ("l15_w2_bytes", _l15_w2_bytes),  # 2048   = W2l/W2r 各自大小
+        ("l15_a_bytes", _l15_a_bytes),  # 4160   = A_padded 大小
+        (
+            "l15_delta_cfg",
+            _l15_delta_cfg,
+        ),  # cfg 结构体在 TCDM 中的偏移（紧接张量数据之后）
+        ("l15_cfg_bytes", _l15_cfg_bytes),  # moe_l15_shape_cfg_t 大小 = 364 bytes
+        (
+            "l15_tcdm_size",
+            _l15_tcdm_end + _l15_cfg_bytes,
+        ),  # 总 TCDM 大小（含 cfg 区域）
+    ]:
+        data_str += [format_scalar_definition("uint32_t", _nm, _val)]
+
     if not full_golden_data:
         log_progress("skipping golden tensors — emitting placeholder layer_output")
         data_str += [

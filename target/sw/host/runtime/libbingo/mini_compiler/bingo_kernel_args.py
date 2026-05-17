@@ -2077,6 +2077,14 @@ class HostBingoKernelAraDequantizeI32F32Args(BingoKernelArgs):
         return a
 
 
+# Backward-compatible class names used by older local workloads. They map to
+# the unified ARA ABI instead of reintroducing the old per-kernel structs.
+HostBingoKernelFp32QuantizeArgs = HostBingoKernelAraQuantizeF32I8Args
+HostBingoKernelInt32DequantizeArgs = HostBingoKernelAraDequantizeI32F32Args
+HostBingoKernelInt32AddArgs = HostBingoKernelAraAddI32Args
+HostBingoKernelFp32SoftmaxArgs = HostBingoKernelAraSoftmaxF32Args
+
+
 # ================================================================
 # DARTS Tier 1: MoE Gating Kernels
 # ================================================================

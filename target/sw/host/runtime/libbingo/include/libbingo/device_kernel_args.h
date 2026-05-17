@@ -541,39 +541,56 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_swiglu_full_args {
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_dual_vc_swiglu_full_args_t;
 
-// Dynamic MoE individual expert slot. A host super-node patches active/task
-// fields before the strict S1/S2/S3/S4/store device nodes consume it.
+// BINGO Dual-VersaCore L15 MoE full kernel args (SwiGLU + down-proj in one pass).
+// arg[0] shape_cfg_addr: uint32_t L3 address of l15_dev_sX_cfg[] (moe_l15_shape_cfg_t).
+// arg[1] tcdm_base:      uint32_t TCDM base of the L15 layout region.
+// arg[2] rescale_mult, arg[3] rescale_shift: post-scale factors.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_l15_moe_full_args {
+  uint32_t shape_cfg_addr;
+  uint32_t tcdm_base;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_dual_vc_l15_moe_full_args_t;
+
+// Split-kernel variants: same arg layout as _full.
+typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
+        __snax_bingo_kernel_dual_vc_l15_moe_swiglu_args_t;
+typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
+        __snax_bingo_kernel_dual_vc_l15_moe_down_args_t;
+
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
-  uint32_t active;
-  uint32_t slot_id;
+  /* ── ctrl: packed control word (16 bits used, written every round by Phase4) ──────
+   * bit  0:      active             (1 = slot valid, Snitch will execute)
+   * bit  1:      skip_s1            (1 = S1 load+compute 全跳过, cache hit)
+   * bit  2:      skip_s3            (1 = S3 load+compute 全跳过, cache hit)
+   * bit  3:      skip_s2            (1 = S2 full GEMM skipped)
+   * bit  4:      skip_s4            (1 = S4 full GEMM skipped)
+   * bits [6:5]:  shape_s1           (0=M8/ShapeA, 1=M4/ShapeB, 2=M2/ShapeC)
+   * bits [8:7]:  shape_s3
+   * bits [10:9]: dma_s1             (0=NONE, 1=IDMA, 2=XDMA, 3=BOTH)
+   * bits [12:11]:dma_s3
+   * bit  13:     runtime_cluster_idx (0=C2, 1=C3)
+   * bits [15:14]:slot_id            (0-3, local slot index)
+   * ──────────────────────────────────────────────────────────────────────────── */
+  uint32_t ctrl;
   uint32_t expert_id;
   uint32_t token_start_rank;
   uint32_t ntokens;
-  uint32_t shape_s1;
-  uint32_t shape_s3;
-  uint32_t skip_s1;      /* 1 = S1 load+compute 全跳过 (cache hit) */
-  uint32_t skip_s3;      /* 1 = S3 load+compute 全跳过 (cache hit) */
-  uint32_t skip_s2;      /* 1 = S2 full compute 跳过 (ntokens<=shape_M 且非cache-hit) */
-  uint32_t skip_s4;      /* 1 = S4 full compute 跳过 */
   uint32_t m_s2_exec;    /* S2 处理的 token 数 (0 when skip_s2=1) */
   uint32_t m_s4_exec;    /* S4 处理的 token 数 (0 when skip_s4=1) */
-  uint32_t dma_s1;
-  uint32_t dma_s3;
-  uint32_t bw_s1;
-  uint32_t bw_s3;
-  uint32_t runtime_cluster_idx;
   uint32_t wait_for_peer_slots;
-  uint32_t s1_block_count;
-  uint32_t s3_block_count;
-  uint32_t dma_slot_valid[4];
-  uint32_t dma_slot_kind[4];
-  int32_t dma_slot_expert_id[4];
-  uint32_t dma_slot_shape[4];
-  uint32_t dma_slot_dma[4];
-  uint32_t dma_slot_idma_seq[4];
-  uint32_t dma_slot_xdma_seq[4];
-  uint32_t dma_slot_start_cc[4];
-  uint32_t dma_slot_end_cc[4];
+  /* ── dma_slot_vd: packed valid + DMA binding for all 4 DMA slots ───────────
+   * For slot i (i=0..3), bits at offset i*3:
+   *   bit[i*3+0]: valid      (1 = slot carries a DMA operation)
+   *   bit[i*3+2:i*3+1]: dma  (0=NONE, 1=IDMA, 2=XDMA, 3=BOTH)
+   * Replaces: dma_slot_valid[4] (16B) + dma_slot_dma[4] (16B) → 1 word (4B)
+   * ──────────────────────────────────────────────────────────────────────────── */
+  uint32_t dma_slot_vd;
+  int32_t  dma_slot_expert_id[4];   /* prefetch target expert, -1 = none */
+  uint32_t dma_slot_idma_seq[4];    /* iDMA sequence number for ordering  */
+  uint32_t dma_slot_xdma_seq[4];    /* xDMA sequence number for ordering  */
+  /* ── static fields: pre-filled at DFG init, never written by Phase4 ─────── */
   uint64_t token_ids_addr;
   uint64_t input_A_l3_base;
   uint64_t indiv_gate_B_l3;
@@ -606,6 +623,8 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   uint32_t rescale_shift;
   uint32_t output_expert_stride_bytes;
   uint32_t max_tokens_per_expert;
+  uint32_t s1_block_count;
+  uint32_t s3_block_count;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_args_t;
 

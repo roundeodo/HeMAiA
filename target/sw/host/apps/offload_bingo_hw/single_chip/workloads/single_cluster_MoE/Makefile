@@ -21,7 +21,7 @@ DATAGEN_FLAGS ?=
 
 BENDER   = bender
 SNITCH_ROOT = $(shell $(BENDER) path snitch_cluster)
-HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_rebalanced_cluster.hjson
+HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane.hjson
 
 $(DATA_H): $(MK_DIR)/single_cluster_MoE_datagen.py $(DATA_CFG) $(HW_CFG)
 	python3 $< -c $(DATA_CFG) --hwcfg $(HW_CFG) $(DATAGEN_FLAGS) > $@

@@ -14,8 +14,9 @@
     array_shape: 0
 
     // Dynamic expert task slots per individual-expert cluster.
-    // M_total=8 and top_k=2 give at most 16 token-to-expert assignments.
-    moe_dynamic_slot_count: 16
+    // Reduced from 16→4: new struct is 256B (vs 512B), so 4×256=1024B per cluster.
+    // Scheduler guarantees ≤4 tasks per cluster per MoE layer (top_k=2, M_total=8).
+    moe_dynamic_slot_count: 4
 
     // Router: K_total=1024, N_router=8, M=1x8=8 tokens
     router_K1: 128

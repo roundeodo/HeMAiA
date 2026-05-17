@@ -33,8 +33,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_xdma_1d_copy(void *arg)
         bingo_kernel_scratchpad_t* sp = BINGO_GET_SP(arg, __snax_bingo_kernel_xdma_1d_copy_args_t);
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_CFG_START);
-        xdma_disable_all_extensions();
-        BINGO_XDMA_TRY(xdma_memcpy_1d_full_addr(src_addr, dst_addr, data_size), "xdma_1d_copy");
+        // xdma_memcpy_1d_fast_full_addr: 30 CSR writes (vs 60 for
+        // xdma_disable_all_extensions+xdma_memcpy_1d_full_addr).
+        // Skips clearing 15 unused multicast dst slots (saves 30 writes).
+        xdma_memcpy_1d_fast_full_addr(src_addr, dst_addr, data_size);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_CFG_END);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_RUN_START);
         int task_id = xdma_start();
@@ -1638,4 +1640,3 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_xdma_row_major_to_d(void *arg)
     sp->num_return_values = 0;
     return BINGO_RET_SUCC;
 }
-

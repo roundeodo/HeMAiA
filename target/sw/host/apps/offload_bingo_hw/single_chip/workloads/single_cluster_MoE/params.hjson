@@ -2,34 +2,31 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# single_cluster_MoE workload parameters — xDMA/iDMA/dual-VC OVERLAP TEST
+# single_cluster_MoE workload parameters — M=2 BASELINE MEASUREMENT
 #
-# Hardware: snax_dual_versacore_int16x4_rebalanced_cluster
-#   array_shape=0: meshRow=8, tileSize=8, meshCol=4
-#   down_meshCol=8
+# Hardware: snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane
+#   array_shape=2 (S2): meshRow=2, tileSize=8, meshCol=16
+#   down_meshCol=32  (= 2 × meshCol)
 #
-# 简化验证目标：
-#   只做一次 iDMA(gate_B) + xDMA(up_B) + dual-VC SwiGLU，
-#   通过大 tile 放大 DMA 传输时间，观察三者能否在时间上重叠。
-#
-# Tile 尺寸推导 (N1=256):
-#   A tile = M1 × K1 × meshRow_A × tileSize_A × 2
-#          = 1 × 128 × 8 × 8 × 2 = 16384 bytes  ≈ (K_total×M_total)×2
-#   B tile = K1 × N1 × tileSize × meshCol / 2
-#          = 128 × 256 × 8 × 4 / 2 = 524288 bytes ≈ (1024×8)×64
-#   N_hidden = N1 × N2 × meshCol = 256 × 1 × 4 = 1024
-#   TCDM 需求: gate_B(512KB) + up_B(512KB) + A(16KB) + D(16KB) ≈ 1056KB
-#   TCDM 容量: 8192KB (充裕)
+# 测试目标：M=2 token 基线，验证 compute 时间 vs DMA 时间
+#   M=2 tokens = 1 M-tile (meshRow=2)
+#   Mode-0: 2×2×1024×512 = 2,097,152 MACs per VC, ideal T = MACs/512 = 4096 cc
+#   Mode-1: 2×2×512×256  =   524,288 MACs per VC, ideal T = MACs/512 = 1024 cc
+#   Total compute (ideal) = 5120 cc
+#   B0+B1: 2×256KB = 512KB, ideal DMA (128 B/cc) = 4096 cc
+#   W2l+W2r: 2×64KB = 128KB, ideal DMA = 1024 cc
+#   Total DMA (ideal) = 5120 cc → 理论完全平衡
 
 {
-    array_shape: 0
+    array_shape: 2
 
-    // 硬件 tile 口径（固定）
-    A_meshRow: 8
+    // 硬件 tile 口径 (S2=[2,8,16], 4-lane postproc)
+    // S2: meshRow=2, tileSize=8, meshCol=16
+    A_meshRow: 2
     A_tileSize: 8
-    down_meshCol: 8
+    down_meshCol: 32  // 必须 = 2 × meshCol = 2 × 16
 
-    // Router: 保持最小合法值（router_N2 必须为 1）
+    // Router: 8 tokens (meshRow_A=2, M1=1, M2=4) — 4 batches × 2 tokens each
     router_M1: 1
     router_K1: 128
     router_N1: 2
@@ -37,21 +34,20 @@
     router_K2: 1
     router_N2: 1
 
-    // =========================================================
-    // 核心测试目标：大 tile SwiGLU（单次 iDMA + xDMA + 计算）
-    // B_tile = 128 × 256 × 8 × 4 / 2 = 524288 bytes ≈ 512KB
-    // =========================================================
+    // M=2 baseline: M=2 tokens total (router_M2=1 → M = 1×1×2 = 2)
+    // N_hidden=512 per VC (N1×meshCol = 32×16), N2=4 kept for DFG compat
+    // Mode-1: K=512, N1_per_vc=256 (sdN1×meshCol = 16×16)
     shared_swish_glu_M1: 1
     shared_swish_glu_K1: 128    // K = 1024 (input_dim)
-    shared_swish_glu_N1: 256    // N = 1024, B_tile = 512KB/DMA
-    shared_swish_glu_M2: 1
+    shared_swish_glu_N1: 32     // N per tile = 32 meshCol-groups × 16 = 512 cols (N_hidden)
+    shared_swish_glu_M2: 1      // M=2 tokens (M1×M2×meshRow = 1×1×2 = 2)
     shared_swish_glu_K2: 1
-    shared_swish_glu_N2: 1      // 单次传输+单次计算
+    shared_swish_glu_N2: 4      // 4 outer tiles (保留用于旧 DFG compat)
 
     // 下面各阶段不参与简化 DFG，设为最小值以减少生成数据量
     shared_down_projection_M1: 1
-    shared_down_projection_K1: 16
-    shared_down_projection_N1: 1
+    shared_down_projection_K1: 64   // L15 down K = N_hidden/tileSize = 512/8
+    shared_down_projection_N1: 16   // L15 down N per VC = 16 groups × 16 = 256 cols/VC = 512 total
     shared_down_projection_M2: 1
     shared_down_projection_K2: 1
     shared_down_projection_N2: 1

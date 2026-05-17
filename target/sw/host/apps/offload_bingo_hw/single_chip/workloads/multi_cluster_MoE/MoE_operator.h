@@ -62,7 +62,7 @@ void find_top_k_expert(
 // 拆分 API 1: 仅提取 Top-K 索引和对应的原始分数
 // ==============================================
 void extract_top_k_indices_and_scores(
-    int32_t *sram_raw_score_buffer,
+    int16_t *sram_raw_score_buffer,  // INT16 output from dual_vc_gemm_full (8 bytes/beat = 4×INT16)
     uint16_t *global_top_k_indices_ptr,
     int32_t *global_top_k_scores_ptr,
     uint32_t valid_tokens_in_block,
@@ -88,7 +88,7 @@ void extract_top_k_indices_and_scores(
                                (c >> mc_shift) * col_stride +
                                (r & mr_mask) * cfg->mesh_col +
                                (c & mc_mask);
-            local_score[c] = sram_raw_score_buffer[mem_idx];
+            local_score[c] = (int32_t)sram_raw_score_buffer[mem_idx];  // sign-extend INT16→INT32
         }
 
         find_top_k_expert(local_score, local_top_k_indices, cfg);
@@ -121,7 +121,8 @@ void moe_router_global_schedule(
             break;
 
         uint32_t hw_buffer_offset = m2 * (cfg->router_m1 * cfg->router_n1 * cfg->mesh_row * cfg->mesh_col);
-        int32_t *current_sram_hw_buffer = hardware_output_buffer + hw_buffer_offset;
+        // Cast to int16_t*: hw_buffer_offset elements × 2 bytes = correct byte skip for INT16 M2-groups
+        int16_t *current_sram_hw_buffer = (int16_t *)hardware_output_buffer + hw_buffer_offset;
         uint32_t write_offset = tokens_processed * cfg->individual_expert_number_k;
 
         // 【修正】调用拆分后的纯提取函数
@@ -144,8 +145,8 @@ void moe_router_global_schedule(
 //          output in same tiled format (for golden comparison)
 // ============================================================================
 void experts_result_accumulate_tiled(
-    int32_t *shared_hw_out, // all shared experts' down outputs, tiled
-    int32_t *indiv_hw_out,  // all individual experts' down outputs, tiled
+    int16_t *shared_hw_out, // all shared experts' down outputs, tiled (INT16 from RescaleDown)
+    int16_t *indiv_hw_out,  // all individual experts' down outputs, tiled (INT16 from RescaleDown)
     uint32_t *expert_token_counts,
     uint32_t *expert_memory_offsets,
     uint32_t *reverse_original_token_flat_idx,
@@ -172,14 +173,14 @@ void experts_result_accumulate_tiled(
 
     for (uint32_t s = 0; s < S; s++)
     {
-        int32_t *se_base = &shared_hw_out[s * expert_region];
+        int16_t *se_base = &shared_hw_out[s * expert_region];
         for (uint32_t n = 0; n < N2_out; n++)
         {
-            int32_t *src_tile = &se_base[n * tile_elems];
+            int16_t *src_tile = &se_base[n * tile_elems];
             int32_t *dst_tile = &final_layer_output[n * out_tile_elems];
             for (uint32_t t = 0; t < actual_total_tokens; t++)
             {
-                int32_t *src_row = &src_tile[t * ptc];
+                int16_t *src_row = &src_tile[t * ptc];
                 int32_t *dst_row = &dst_tile[t * ptc];
                 for (uint32_t c = 0; c < ptc; c++)
                 {
@@ -204,7 +205,7 @@ void experts_result_accumulate_tiled(
         if (actual_tok_e > max_tok)
             actual_tok_e = max_tok;
 
-        int32_t *ie_base = &indiv_hw_out[e * expert_region];
+        int16_t *ie_base = &indiv_hw_out[e * expert_region];
         uint32_t mem_offset_e = expert_memory_offsets[e];
 
         for (uint32_t slot = 0; slot < actual_tok_e; slot++)
@@ -215,7 +216,7 @@ void experts_result_accumulate_tiled(
 
             for (uint32_t n = 0; n < N2_out; n++)
             {
-                int32_t *src_row = &ie_base[n * tile_elems + slot * ptc];
+                int16_t *src_row = &ie_base[n * tile_elems + slot * ptc];
                 int32_t *dst_row = &final_layer_output[n * out_tile_elems + original_t * ptc];
                 for (uint32_t c = 0; c < ptc; c++)
                 {
@@ -233,8 +234,8 @@ void experts_result_accumulate_tiled(
 static inline uint64_t __host_bingo_kernel_prefill_accumulate(void *arg)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_ACCUMULATE_START);
-    int32_t *shared_hw = (int32_t *)(((uint64_t *)arg)[0]);
-    int32_t *indiv_hw = (int32_t *)(((uint64_t *)arg)[1]);
+    int16_t *shared_hw = (int16_t *)(((uint64_t *)arg)[0]);  // INT16 output from RescaleDown
+    int16_t *indiv_hw = (int16_t *)(((uint64_t *)arg)[1]);   // INT16 output from RescaleDown
     uint32_t *rev_idx = (uint32_t *)(((uint64_t *)arg)[2]);
     uint32_t *prob = (uint32_t *)(((uint64_t *)arg)[3]);
     uint32_t *exp_counts = (uint32_t *)(((uint64_t *)arg)[4]);

@@ -78,6 +78,7 @@ from bingo_kernel_args import (
     SnaxBingoKernelGemmMinimalArgs,
     SnaxBingoKernelDualVcGemmFullArgs,
     SnaxBingoKernelDualVcSwigluFullArgs,
+    SnaxBingoKernelDualVcL15MoeFullArgs,
     HostBingoKernelMoERouterScheduleArgs,  # 补充
     HostBingoKernelComputeDelayedSoftmaxArgs,  # 补充
     HostBingoKernelBuildScatterMetadataArgs,  # 补充
@@ -353,6 +354,99 @@ def define_workload_params(**kwargs):
     params["swish_glu_scale_in"] = MoE_config["swish_glu_scale_in"]
     params["swish_glu_scale_out"] = MoE_config["swish_glu_scale_out"]
     params["softmax_scale"] = MoE_config["softmax_scale"]
+
+    # =========================================================================
+    # L15 TCDM placement (must exactly match single_cluster_MoE_datagen.py)
+    # S2 shape: meshRow=2, tileSize=8, meshCol=16
+    # S0 sub-tile: S0_TS=8 (K方向), S0_MC=4 (N方向), 每个S0 tile = S0_TS×S0_MC/2 = 16 bytes (INT4 packed)
+    # TCDM颜色（bank offset）: b0=0, b1=272, w2l=128, w2r=0, a=0, d0=0, m1d0=256
+    #
+    # 矩阵规模（当前参数）:
+    #   Gate/Up (Mode-0): K = sK1*tileSize = 128*8 = 1024, N_hidden = sN1*meshCol = 32*16 = 512 per VC
+    #   Down   (Mode-1): K_down = N_hidden = 512, N_down = sdN1*meshCol = 16*16 = 256 per VC
+    #
+    # B tile(B0 gate / B1 up) 大小推导:
+    #   k0st = K / S0_TS = 1024/8 = 128  (K方向S0子tile数)
+    #   n0st = N_hidden / S0_MC = 512/4 = 128  (N方向S0子tile数)
+    #   wb   = k0st * n0st * 16B = 128*128*16 = 262144 = 256KB  (INT4 packed: K×N/2 = 1024×512/2)
+    #
+    # W2 tile(W2l down-left / W2r down-right) 大小推导:
+    #   k1st = K_down / S0_TS = 512/8 = 64
+    #   n1st = N_down / S0_MC = 256/4 = 64
+    #   w2b  = k1st * n1st * 16B = 64*64*16 = 65536 = 64KB  (INT4 packed: K_down×N_down/2 = 512×256/2)
+    # =========================================================================
+    _S0_MC = 4
+    _S0_TS = 8
+    _L15_ALIGN = 1024
+
+    def _l15_aup(v):
+        return ((int(v) + _L15_ALIGN - 1) // _L15_ALIGN) * _L15_ALIGN
+
+    def _l15_col(off, c=0):
+        return _l15_aup(off) + int(c)
+
+    _l15_k0 = (
+        params["shared_swish_glu_K1"] * tileSize
+    )  # = 128*8 = 1024  (gate/up投影输入K)
+    _l15_n0 = (
+        params["shared_swish_glu_N1"] * meshCol
+    )  # = sN1*16 = 32*16 = 512  (N_hidden per VC, per N2-tile)
+    _l15_k1 = _l15_n0  # = N_hidden = 512  (down投影输入K = gate/up输出N)
+    _l15_n1 = (
+        params["shared_down_projection_N1"] * meshCol
+    )  # = sdN1*16 = 16*16 = 256  (down投影输出N per VC)
+    _l15_k0b = _l15_k0 * 2  # = 1024*2 = 2048 bytes (A行存储: INT16, K列)
+    _l15_k0st = _l15_k0 // _S0_TS  # = 1024/8 = 128  (K方向S0子tile数)
+    _l15_n0st = _l15_n0 // _S0_MC  # = 512/4 = 128  (N方向S0子tile数, N_hidden=512)
+    _l15_apad = 32
+    _l15_wb = (
+        _l15_k0st * _l15_n0st * 16
+    )  # = 128*128*16 = 262144 = 256KB (B0 gate / B1 up 各自大小)
+    _l15_arow = _l15_k0b + _l15_apad  # = 2048+32 = 2080 bytes (A行跨距, 含对齐pad)
+    _l15_ab = (
+        meshRow * _l15_arow
+    )  # = 2*2080 = 4160 bytes (A矩阵总大小, meshRow=2 token)
+    _l15_k1st = _l15_k1 // _S0_TS  # = 512/8 = 64  (down K方向S0子tile数)
+    _l15_n1st = _l15_n1 // _S0_MC  # = 256/4 = 64  (down N方向S0子tile数)
+    _l15_w2b = (
+        _l15_k1st * _l15_n1st * 16
+    )  # = 64*64*16 = 65536 = 64KB (W2l down-left / W2r down-right 各自大小)
+    _l15_m0db = meshRow * _l15_n0 * 2  # = 2*512*2 = 2048 bytes (Mode-0输出D0, INT16)
+    _l15_m1pb = meshRow * _l15_arow  # = 2*2080 = 4160 bytes (Mode-1输出pad区)
+
+    _d_b0 = 0
+    _d_b1 = _l15_col(_d_b0 + _l15_wb, 272)  # = aup(0+262144)+272 = 262144+272 = 262416
+    _d_w2l = _l15_col(
+        _d_b1 + _l15_wb, 128
+    )  # = aup(262416+262144)+128 = 525312+128 = 525440
+    _d_w2r = _l15_col(
+        _d_w2l + _l15_w2b, 0
+    )  # = aup(525440+65536) = aup(590976) = 591872
+    _d_a = _l15_col(_d_w2r + _l15_w2b, 0)  # = aup(591872+65536) = aup(657408) = 657408
+    _d_d0 = _l15_col(_d_a + _l15_ab, 0)  # = aup(657408+4160) = aup(661568) = 662528
+    _d_m1d0 = _l15_col(
+        _d_d0 + _l15_m0db, 256
+    )  # = aup(662528+2048)+256 = 664576+256 = 664832
+    _l15_tcdm_end = _d_m1d0 + _l15_m1pb  # = 664832+4160 = 668992 ≈ 653KB TCDM占用
+
+    params["l15_w_bytes"] = (
+        _l15_wb  # = 262144 = 256KB，B0(gate权重)/B1(up权重) 各自大小
+    )
+    params["l15_delta_b1"] = _d_b1  # = 262416，B1 在TCDM中的偏移
+    params["l15_delta_w2l"] = _d_w2l  # = 525440，W2l 在TCDM中的偏移
+    params["l15_delta_w2r"] = _d_w2r  # = 591872，W2r 在TCDM中的偏移
+    params["l15_delta_a"] = _d_a  # = 657408，A(输入激活) 在TCDM中的偏移
+    params["l15_w2_bytes"] = (
+        _l15_w2b  # = 65536 = 64KB，W2l(down left VC)/W2r(down right VC) 各自大小
+    )
+    params["l15_a_bytes"] = _l15_ab  # = 4160 bytes，A矩阵大小(含对齐pad)
+    params["l15_delta_cfg"] = (
+        _l15_tcdm_end  # cfg 结构体在 TCDM 中的偏移（紧接张量数据之后）
+    )
+    params["l15_cfg_bytes"] = 91 * 4  # moe_l15_shape_cfg_t = 91 个 int32 = 364 bytes
+    params["l15_tcdm_size"] = (
+        _l15_tcdm_end + 91 * 4
+    )  # TCDM 总大小（含 cfg 区域 364 bytes）
 
     return params
 
@@ -824,6 +918,29 @@ def define_memory_handles(params):
         "l3_final_moe_out", size=final_output_total_size, mem_level="L3"
     )
 
+    # =========================================================================
+    # L15 full kernel memory handles
+    # B0/B1 (gate/up, 128KB each) loaded per batch via dual_dma
+    # W2l/W2r (down left/right, 2KB each) loaded per batch via second dual_dma
+    # A (input activations, 4160B) pre-loaded once; not overwritten during pipeline
+    # Single L1 buffer covers entire L15 TCDM layout region
+    # =========================================================================
+    mem_handles["L3_Sym_L15_B0"] = BingoMemSymbol("l15_weights_b0")
+    mem_handles["L3_Sym_L15_B1"] = BingoMemSymbol("l15_weights_b1")
+    mem_handles["L3_Sym_L15_W2l"] = BingoMemSymbol("l15_weights_w2l")
+    mem_handles["L3_Sym_L15_W2r"] = BingoMemSymbol("l15_weights_w2r")
+    mem_handles["L3_Sym_L15_A"] = BingoMemSymbol("l15_input_a")
+    mem_handles["L3_Sym_L15_S2_Cfg"] = BingoMemSymbol("l15_dev_s2_cfg")
+
+    _l15_tcdm_sz = params["l15_tcdm_size"]  # 278848 bytes
+    mem_handles["L1_Buf_L15"] = BingoMemAlloc(
+        "l1_l15",
+        size=_l15_tcdm_sz,
+        mem_level="L1",
+        chip_id=chip_id,
+        cluster_id=cluster_id,
+    )
+
     return mem_handles
 
 
@@ -890,103 +1007,140 @@ def enforce_in_order_completion_per_core(bingo_dfg: BingoDFG) -> None:
 
 
 def create_dfg(params, mem_handles):
-    """简化 DFG：验证 iDMA + xDMA 并行执行 + dual-VC SwiGLU 的时序。
+    """L15 MoE full FFN DFG：单次顺序执行，基线 timing 测试。
 
-    只含 3 个节点：
-      Node 0 (core=1, iDMA):      加载 input A                  (16KB)
-      Node 1 (core=1, dual_dma):  并行加载 gate B (iDMA) + up B (xDMA)  (各 512KB)
-      Node 2 (core=0, GEMM):      dual-VC SwiGLU 计算，依赖 Node 0/1
+    硬件: S2=[meshRow=2, tileSize=8, meshCol=16], dual-VC, down_meshCol=32
+    矩阵规模 (当前参数 sN1=32, sdN1=16):
+      Mode-0 SwiGLU: M=2 tokens, K=1024 (input_dim), N_hidden=512 per VC
+      Mode-1 Down:   M=2 tokens, K_down=512 (=N_hidden), N_down=256 per VC
 
-    Node 1 内部先非阻塞发射 xDMA，再非阻塞发射 iDMA，最后统一等待，
-    两个独立 DMA 引擎在硬件层面形成传输重叠。
+    数据搬运大小 (INT4 packed, 均为 L3→TCDM):
+      A:    2×(1024×2 + 32pad) = 4160 bytes  (INT16, 搬运一次)
+      B0/B1: 各 256KB = 262144 bytes  (K=1024 × N_hidden=512 × INT4/2)
+      W2l/W2r: 各 64KB = 65536 bytes  (K_down=512 × N_down=256 × INT4/2)
+
+    实测 timing (仿真 @ 83.3 MHz):
+      pre_a:   idma(A 4160B → TCDM)              →  ~894 cc
+      dma_B:   dual_dma B0(256KB)‖B1(256KB)      → ~12,532 cc  (~3× CDC开销)
+      dma_W2:  dual_dma W2l(64KB)‖W2r(64KB)      →  ~3,024 cc  (~3× CDC开销)
+      compute: l15_full (Mode-0 SwiGLU+Mode-1 down) → ~19,855 cc
     """
+    N2 = params["shared_swish_glu_M2"]  # = 1 (sM2 M方向外循环，仅1次L15调用)
+    w_bytes = params["l15_w_bytes"]  # = 262144 = 256KB，B0(gate)/B1(up) 各自大小
+    delta_b1 = params["l15_delta_b1"]  # = 262416，B1 TCDM偏移
+    delta_w2l = params["l15_delta_w2l"]  # = 525440，W2l TCDM偏移
+    delta_w2r = params["l15_delta_w2r"]  # = 591872，W2r TCDM偏移
+    delta_a = params["l15_delta_a"]  # = 657408，A TCDM偏移
+    w2_bytes = params["l15_w2_bytes"]  # = 65536 = 64KB，W2l/W2r 各自大小
+    a_bytes = params["l15_a_bytes"]  # = 4160 bytes，A含padding总大小
+    delta_cfg = params["l15_delta_cfg"]  # cfg 在 TCDM 的偏移（= l15_tcdm_end）
+    cfg_bytes = params["l15_cfg_bytes"]  # moe_l15_shape_cfg_t 大小 = 364 bytes
+
     bingo_dfg = BingoDFG(
         num_chiplets=1,
-        num_clusters_per_chiplet=4,  # 必须与硬件物理集群数 NrClustersPerQuad=4 一致，否则 cluster_id 位宽不匹配导致 core_id 字段错位
+        num_clusters_per_chiplet=4,
         num_cores_per_cluster=2,
         is_host_as_acc=True,
         chiplet_ids=[0x00],
     )
 
-    gemm_core_id = 0  # VersaCore 计算核
-    dma_core_id = 1  # 集群 DM 核（iDMA + xDMA 均由此核发起）
+    gemm_core_id = 0
+    dma_core_id = 1
+    buf = mem_handles["L1_Buf_L15"]
 
-    # ---- 缓冲区选择（M2=1，不需要 Ping-Pong）----
-    has_phys_A_pingpong = "L1_Buf_Unified_A_ping" in mem_handles
-    l1_A = (
-        mem_handles["L1_Buf_Unified_A_ping"]
-        if has_phys_A_pingpong
-        else mem_handles["L1_Buf_Unified_A"]
-    )
-
-    A_size = params["shared_swish_glu_A_tileSize"]  # 16 KB
-    B_size = params["shared_swish_glu_B_tileSize"]  # 512 KB（N1=256）
-
-    # ---- Node 0: iDMA — 加载 input A (16KB) ----
-    node_load_A = BingoNode(
+    # ---- 预加载 cfg（一次，cfg 固定不变，搬到 TCDM 后 compute kernel 走 TCDM 读，避免 L3 延迟） ----
+    # cfg 结构体（moe_l15_shape_cfg_t，364 bytes）原本在 L3，每次读取 ~200 cc；
+    # 搬到 TCDM 后每次读取 ~5 cc，Mode-0+Mode-1 CSR 配置总共只需 ~620 cc（vs 之前 ~13000 cc）
+    node_cfg_dma = BingoNode(
         assigned_chiplet_id=0,
         assigned_cluster_id=0,
         assigned_core_id=dma_core_id,
         kernel_name="__snax_bingo_kernel_idma_1d_copy",
         kernel_args=SnaxBingoKernelIdma1dCopyArgs(
-            src_addr=mem_handles["L3_Sym_Shared_Swish_Input_A_tile_0"],
-            dst_addr=l1_A,
-            size=A_size,
+            src_addr=mem_handles["L3_Sym_L15_S2_Cfg"],
+            dst_addr=addr_with_optional_offset(buf, delta_cfg),
+            size=cfg_bytes,
         ),
     )
-    bingo_dfg.bingo_add_node(node_load_A)
+    bingo_dfg.bingo_add_node(node_cfg_dma)
 
-    # ---- Node 1: Dual DMA — 同时加载 gate B (iDMA) + up-proj B (xDMA)，各 512KB ----
-    # iDMA 和 xDMA 在同一个 Bingo 节点内依次发射（均非阻塞），再统一等待，
-    # 两个 DMA 引擎在硬件层面形成传输重叠。
-    # B_size=524288 = 64×8192，满足 xDMA 64 字节对齐要求。
-    node_dual_dma = BingoNode(
+    # ---- 预加载 A（一次，A 不会被 dma_B/dma_W2 覆盖，全程有效） ----
+    node_pre_a = BingoNode(
         assigned_chiplet_id=0,
         assigned_cluster_id=0,
         assigned_core_id=dma_core_id,
-        kernel_name="__snax_bingo_kernel_dual_dma",
-        kernel_args=SnaxBingoKernelDualDmaArgs(
-            idma_src_addr=mem_handles["L3_Sym_Shared_Gate_Weight_B_tile_0"],
-            idma_dst_addr=mem_handles["L1_Buf_Gate_B_N2"],
-            idma_size=B_size,
-            xdma_src_addr=mem_handles["L3_Sym_Shared_Up_Weight_B_tile_0"],
-            xdma_dst_addr=mem_handles["L1_Buf_Up_B_N2"],
-            xdma_size=B_size,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mem_handles["L3_Sym_L15_A"],
+            dst_addr=addr_with_optional_offset(buf, delta_a),
+            size=a_bytes,
         ),
     )
-    bingo_dfg.bingo_add_node(node_dual_dma)
+    bingo_dfg.bingo_add_node(node_pre_a)
+    bingo_dfg.bingo_add_edge(
+        node_cfg_dma, node_pre_a
+    )  # cfg 必须在 A 之前完成（保证 TCDM 已就绪）
 
-    # ---- Node 3: dual-VC SwiGLU 计算 ----
-    # 依赖 Node 0/1/2 全部完成后才开始。
-    node_swiglu = BingoNode(
-        assigned_chiplet_id=0,
-        assigned_cluster_id=0,
-        assigned_core_id=gemm_core_id,
-        kernel_name="__snax_bingo_kernel_dual_vc_swiglu_full",
-        kernel_args=SnaxBingoKernelDualVcSwigluFullArgs(
-            input_A_addr=l1_A,
-            input_B_gate_addr=mem_handles["L1_Buf_Gate_B_N2"],
-            input_B_up_addr=mem_handles["L1_Buf_Up_B_N2"],
-            output_D0_addr=mem_handles["L1_Buf_Swiglu_D_N2"],
-            output_D1_addr=mem_handles["L1_Buf_D1_Scratch"],
-            M=params["shared_swish_glu_M1"],
-            K=params["shared_swish_glu_K1"],
-            N=params["shared_swish_glu_N1"],
-            array_shape=params["array_shape"],
-            rescale_mult=1,
-            rescale_shift=0,
-        ),
-    )
-    bingo_dfg.bingo_add_node(node_swiglu)
+    prev_node = node_pre_a
 
-    # ---- 依赖边 ----
-    # Node 0 → Node 1：确保 input A 加载完成后再发起 B weight 传输
-    bingo_dfg.bingo_add_edge(node_load_A, node_dual_dma)
-    # Node 1 → Node 2：gate B + up B 全部就绪后才能开始 SwiGLU 计算
-    bingo_dfg.bingo_add_edge(node_dual_dma, node_swiglu)
+    for n2 in range(N2):
+        # ---- dual_dma：B0(gate 128KB) ‖ B1(up 128KB) ----
+        node_dma_b = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=0,
+            assigned_core_id=dma_core_id,
+            kernel_name="__snax_bingo_kernel_dual_dma",
+            kernel_args=SnaxBingoKernelDualDmaArgs(
+                idma_src_addr=mem_handles["L3_Sym_L15_B0"],
+                idma_dst_addr=buf,
+                idma_size=w_bytes,
+                xdma_src_addr=mem_handles["L3_Sym_L15_B1"],
+                xdma_dst_addr=addr_with_optional_offset(buf, delta_b1),
+                xdma_size=w_bytes,
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_dma_b)
+        bingo_dfg.bingo_add_edge(prev_node, node_dma_b)
+
+        # ---- dual_dma：W2l(down left 2KB) ‖ W2r(down right 2KB) ----
+        node_dma_w2 = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=0,
+            assigned_core_id=dma_core_id,
+            kernel_name="__snax_bingo_kernel_dual_dma",
+            kernel_args=SnaxBingoKernelDualDmaArgs(
+                idma_src_addr=mem_handles["L3_Sym_L15_W2l"],
+                idma_dst_addr=addr_with_optional_offset(buf, delta_w2l),
+                idma_size=w2_bytes,
+                xdma_src_addr=mem_handles["L3_Sym_L15_W2r"],
+                xdma_dst_addr=addr_with_optional_offset(buf, delta_w2r),
+                xdma_size=w2_bytes,
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_dma_w2)
+        bingo_dfg.bingo_add_edge(node_dma_b, node_dma_w2)
+
+        # ---- L15 compute ----
+        node_compute = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=0,
+            assigned_core_id=gemm_core_id,
+            kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_full",
+            kernel_args=SnaxBingoKernelDualVcL15MoeFullArgs(
+                shape_cfg_addr=addr_with_optional_offset(
+                    buf, delta_cfg
+                ),  # TCDM 地址，~5cc/read vs L3 ~200cc/read
+                tcdm_base=buf,
+                rescale_mult=1,
+                rescale_shift=0,
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_compute)
+        bingo_dfg.bingo_add_edge(node_dma_w2, node_compute)
+
+        prev_node = node_compute  # 下次迭代在 compute 完成后才开始
 
     enforce_in_order_completion_per_core(bingo_dfg)
-
     return bingo_dfg
 
 

@@ -57,8 +57,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_dma(void *arg)
         // xDMA CSR writes must complete before iDMA starts; otherwise iDMA
         // bus traffic stalls xDMA configuration (15000+ cc penalty).
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_CFG_START);
-        xdma_disable_all_extensions();
-        xdma_memcpy_1d_full_addr(xdma_src, xdma_dst, xdma_size);
+        // xdma_memcpy_1d_fast_full_addr: 30 CSR writes (vs 60 for
+        // xdma_disable_all_extensions+xdma_memcpy_1d_full_addr).
+        // Skips clearing 15 unused multicast dst slots (saves 30 writes).
+        xdma_memcpy_1d_fast_full_addr(xdma_src, xdma_dst, xdma_size);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_CFG_END);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_RUN_START);
         int xdma_task_id = xdma_start();   // non-blocking, xDMA engine begins

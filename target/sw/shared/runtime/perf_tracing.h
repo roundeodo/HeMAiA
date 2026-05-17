@@ -107,6 +107,22 @@
 // DUAL DMA (iDMA + xDMA concurrent) — outer wrapper for the entire kernel
 #define BINGO_TRACE_DUAL_DMA_CFG_START      0x2E0
 #define BINGO_TRACE_DUAL_DMA_CFG_END        0x2E1
+// HOST MoE Phase 3: prepare_request (token counting + moe_schedule) + Phase 4: args lowering
+// BINGO_TRACE_HOST_MOE_PREPARE      wraps entire __host_bingo_kernel_moe_prepare_request body
+// BINGO_TRACE_HOST_MOE_TOKEN_COUNT  wraps zero-init + count + offset build + token_ids scatter
+// BINGO_TRACE_HOST_MOE_REQUEST_BUILD wraps CAM state update + request->experts fill
+// BINGO_TRACE_HOST_MOE_SCHED        wraps only the moe_schedule() call inside Phase 3
+// BINGO_TRACE_HOST_MOE_EXECUTE      wraps entire __host_bingo_kernel_moe_execute body (Phase 4 args lowering)
+#define BINGO_TRACE_HOST_MOE_PREPARE_START       0x2F0
+#define BINGO_TRACE_HOST_MOE_PREPARE_END         0x2F1
+#define BINGO_TRACE_HOST_MOE_SCHED_START         0x2F2
+#define BINGO_TRACE_HOST_MOE_SCHED_END           0x2F3
+#define BINGO_TRACE_HOST_MOE_EXECUTE_START       0x2F4
+#define BINGO_TRACE_HOST_MOE_EXECUTE_END         0x2F5
+#define BINGO_TRACE_HOST_MOE_TOKEN_COUNT_START   0x2F6
+#define BINGO_TRACE_HOST_MOE_TOKEN_COUNT_END     0x2F7
+#define BINGO_TRACE_HOST_MOE_REQUEST_BUILD_START 0x2F8
+#define BINGO_TRACE_HOST_MOE_REQUEST_BUILD_END   0x2F9
 
 // Computation Kernels: Compute/Run Phase
 // IDMA
@@ -127,3 +143,24 @@
 // HOST IDMA
 #define BINGO_TRACE_HOST_IDMA_RUN_START   0x360
 #define BINGO_TRACE_HOST_IDMA_RUN_END     0x361
+// L15 MoE device kernels (full, swiglu-only, down-only)
+// _full: CFG wraps Mode-0 CSR configuration; CFG1 wraps Mode-1 CSR configuration;
+//        MODE0/MODE1 wrap each hardware VersaCore execution phase
+#define BINGO_TRACE_L15_FULL_CFG_START    0x370
+#define BINGO_TRACE_L15_FULL_CFG_END      0x371
+#define BINGO_TRACE_L15_FULL_MODE0_START  0x372
+#define BINGO_TRACE_L15_FULL_MODE0_END    0x373
+#define BINGO_TRACE_L15_FULL_MODE1_START  0x374
+#define BINGO_TRACE_L15_FULL_MODE1_END    0x375
+#define BINGO_TRACE_L15_FULL_ZEROFILL_START 0x37E  // Mode-1 output zero-fill
+#define BINGO_TRACE_L15_FULL_ZEROFILL_END   0x37F
+#define BINGO_TRACE_L15_FULL_CFG1_START   0x380  // Mode-1 CSR configuration
+#define BINGO_TRACE_L15_FULL_CFG1_END     0x381
+#define BINGO_TRACE_L15_SWIGLU_CFG_START  0x376
+#define BINGO_TRACE_L15_SWIGLU_CFG_END    0x377
+#define BINGO_TRACE_L15_SWIGLU_RUN_START  0x378
+#define BINGO_TRACE_L15_SWIGLU_RUN_END    0x379
+#define BINGO_TRACE_L15_DOWN_CFG_START    0x37A
+#define BINGO_TRACE_L15_DOWN_CFG_END      0x37B
+#define BINGO_TRACE_L15_DOWN_RUN_START    0x37C
+#define BINGO_TRACE_L15_DOWN_RUN_END      0x37D

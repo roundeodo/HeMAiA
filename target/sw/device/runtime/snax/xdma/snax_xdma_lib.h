@@ -161,6 +161,71 @@ inline int32_t xdma_memcpy_1d_full_addr(uint64_t src, uint64_t dst,
         temporal_stride, temporal_bound, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF);
 }
 
+// xdma_memcpy_1d_fast_full_addr: optimized 1D single-target copy.
+// Replaces xdma_disable_all_extensions() + xdma_memcpy_1d_full_addr().
+//
+// Optimization over the generic path (60 CSR writes total):
+//   1. Disables dst extension 0 (VERILOGMEMSET) via a single direct write of 0
+//      instead of read-modify-write, saving 1 CSR read.
+//   2. Skips clearing the 15 unused multicast destination slots dst[1..15],
+//      saving 30 CSR writes (15 slots x 2 regs each).
+//
+// Result: 30 CSR writes total (vs 60), ~50% reduction.
+// Expected cycle savings: ~450 cycles @ 83.3 MHz per call.
+//
+// Safety: caller must guarantee that xdma_memcpy_nd / xdma_multicast_nd are
+// never called on the same xDMA engine without a subsequent full reconfigure,
+// because dst[1..15] are not cleared here. In the MoE workload (1D single-
+// target transfers only), this invariant always holds.
+__attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_full_addr(
+    uint64_t src, uint64_t dst, uint32_t size) {
+    if (size % XDMA_WIDTH != 0) {
+        XDMA_DEBUG_PRINT("Size is not multiple of XDMA_WIDTH\n");
+        return -1;
+    }
+    // Disable dst extension 0 (VERILOGMEMSET) with a direct write.
+    // Avoids the CSR read in the xdma_disable_all_extensions() RMW sequence.
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLE_PTR, 0);
+
+    // Source / destination base addresses
+    snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_LSB, (uint32_t)src);
+    snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_MSB, (uint32_t)(src >> 32));
+    snax_write_xdma_cfg_reg(XDMA_DST_ADDR_PTR_LSB, (uint32_t)dst);
+    snax_write_xdma_cfg_reg(XDMA_DST_ADDR_PTR_MSB, (uint32_t)(dst >> 32));
+    // dst[1..15] are NOT cleared: 30 CSR writes saved.
+
+    // Spatial strides (bytes per TCDM channel)
+    const uint32_t sp_stride = XDMA_WIDTH / XDMA_SPATIAL_CHAN;
+    snax_write_xdma_cfg_reg(XDMA_SRC_SPATIAL_STRIDE_PTR, sp_stride);
+    snax_write_xdma_cfg_reg(XDMA_DST_SPATIAL_STRIDE_PTR, sp_stride);
+
+    // 1D temporal configuration: one active dimension
+    const uint32_t bound = size / XDMA_WIDTH;
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR,  bound);
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR, XDMA_WIDTH);
+    // Clear unused src temporal dims [1..XDMA_SRC_TEMP_DIM-1]
+#pragma GCC unroll 4
+    for (uint32_t i = 1; i < XDMA_SRC_TEMP_DIM; i++) {
+        snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR  + i, 1);
+        snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR + i, 0);
+    }
+
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR,  bound);
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR, XDMA_WIDTH);
+    // Clear unused dst temporal dims [1..XDMA_DST_TEMP_DIM-1]
+#pragma GCC unroll 4
+    for (uint32_t i = 1; i < XDMA_DST_TEMP_DIM; i++) {
+        snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR  + i, 1);
+        snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR + i, 0);
+    }
+
+    // Enable all channels and bytes
+    snax_write_xdma_cfg_reg(XDMA_SRC_ENABLED_CHAN_PTR, 0xFFFFFFFF);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_CHAN_PTR, 0xFFFFFFFF);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_BYTE_PTR, 0xFFFFFFFF);
+    return 0;
+}
+
 inline int32_t xdma_memcpy_1d(void* src, void* dst, uint32_t size) {
     if (size % XDMA_WIDTH != 0) {
         XDMA_DEBUG_PRINT("Size is not multiple of XDMA_WIDTH\n");
