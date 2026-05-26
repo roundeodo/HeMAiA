@@ -7,7 +7,7 @@
 # 这个文件只描述“这次 workload 的尺寸和 tile 形状”。
 # main_bingo.py 会拿它来建 DFG，multi_cluster_MoE_datagen.py 会拿它来造数据。
 #
-# 下面这组参数保持 M=8，用于 dynamic schedule/slot smoke-test。
+# 下面这组参数当前对应 M_total = router_M2 × router_M1 × A_meshRow = 1 × 4 × 8 = 32 tokens。
 # input K 维保持 1024；N1 全部压到 1，N2=2 表示 N 方向两个 block。
 
 {
@@ -15,51 +15,52 @@
 
     // Dynamic expert task slots per individual-expert cluster.
     // Reduced from 16→4: new struct is 256B (vs 512B), so 4×256=1024B per cluster.
-    // Scheduler guarantees ≤4 tasks per cluster per MoE layer (top_k=2, M_total=8).
+    // Current generated DFG provides 4 runtime slots per cluster. The host lowering
+    // fails if moe_schedule() emits more than 4 tasks for either C2 or C3.
     moe_dynamic_slot_count: 4
 
-    // Router: K_total=1024, N_router=8, M=1x8=8 tokens
+    // Router: K_total=1024, N_router=8, M_total=1×4×8=32 tokens
     router_K1: 128
     router_N1: 1
-    router_M1: 1
+    router_M1: 4
     router_K2: 1
     router_N2: 2
     router_M2: 1
 
     // Individual expert gate+up SwiGLU (Mode 0): K_total=1024, N_hidden=8
     indiv_K1: 128
-    indiv_N1: 1
-    indiv_M1: 1
+    indiv_N1: 64
+    indiv_M1: 4
     indiv_K2: 1
     indiv_N2: 2
     indiv_M2: 1
 
     // Individual expert down projection (Mode 1): K_down=8, N_out=16
-    indiv_down_K1: 1
-    indiv_down_N1: 1
-    indiv_down_M1: 1
+    indiv_down_K1: 64
+    indiv_down_N1: 64
+    indiv_down_M1: 4
     indiv_down_K2: 1
     indiv_down_N2: 2
     indiv_down_M2: 1
 
     // Shared experts: same shapes as individual experts
     shared_K1: 128
-    shared_N1: 1
-    shared_M1: 1
+    shared_N1: 64
+    shared_M1: 4
     shared_K2: 1
     shared_N2: 2
     shared_M2: 1
 
-    shared_down_K1: 1
-    shared_down_N1: 1
-    shared_down_M1: 1
+    shared_down_K1: 64
+    shared_down_N1: 64
+    shared_down_M1: 4
     shared_down_K2: 1
     shared_down_N2: 2
     shared_down_M2: 1
 
     // 给不同矩阵单独覆写 tile 形状。
     // 这里的意思不是“改硬件阵列”，而是“改这个 workload 里数据怎么切 tile”。
-    // input_A 使用硬件 tile 口径：M_total = router_M1 × meshRow = 1 × 8 = 8 tokens。
+    // input_A 使用硬件 tile 口径：M_total = router_M2 × router_M1 × A_meshRow = 1 × 4 × 8 = 32 tokens。
     // down projection 的 B 使用更宽的 meshCol。
     A_meshRow: 8
     A_tileSize: 8

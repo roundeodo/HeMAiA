@@ -50,7 +50,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_dma(void *arg)
         bingo_kernel_scratchpad_t *sp = BINGO_GET_SP(arg, __snax_bingo_kernel_dual_dma_args_t);
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
 
-        // --- Outer span: marks the entire concurrent DMA transfer ---
+        // --- DUAL_DMA_CFG: covers only the setup+issue overhead (config + non-blocking start) ---
+        // Ends after both XDMA and IDMA are launched, before waiting for transfer completion.
         BINGO_TRACE_MARKER(BINGO_TRACE_DUAL_DMA_CFG_START);
 
         // --- Configure and non-blocking start xDMA first ---
@@ -69,6 +70,11 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_dma(void *arg)
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
         snrt_dma_start_1d_wideptr(idma_dst, idma_src, idma_size);
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+
+        // DUAL_DMA_CFG closes here: both engines are now launched (non-blocking).
+        // It covers only the setup+issue overhead, NOT the transfer wait time.
+        BINGO_TRACE_MARKER(BINGO_TRACE_DUAL_DMA_CFG_END);
+
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_RUN_START);
 
         // --- Wait for both engines ---
@@ -76,9 +82,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_dma(void *arg)
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_RUN_END);
         xdma_wait_task(xdma_src, xdma_dst, xdma_task_id);  // xDMA done
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_RUN_END);
-
-        // --- Close outer span ---
-        BINGO_TRACE_MARKER(BINGO_TRACE_DUAL_DMA_CFG_END);
 
         sp->return_value     = 0;
         sp->num_return_values = 0;

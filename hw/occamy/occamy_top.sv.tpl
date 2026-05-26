@@ -700,4 +700,5 @@ module ${name}_top
     .irq_o (),
     .base_addr_i(c2h_mailbox_base_addr)
   );
+
 endmodule

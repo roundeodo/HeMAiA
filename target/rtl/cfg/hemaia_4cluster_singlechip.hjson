@@ -96,11 +96,15 @@
       quad_axi_lite_base_offset: 65536 // 0x10000
     },
     // 4 clusters: C0=shared_up, C1=shared_gate, C2=indiv_A, C3=router+indiv_B
+    // Hardware shape family: S0(meshRow=8,tileSize=8,meshCol=4),
+    //                        S1(meshRow=4,tileSize=8,meshCol=8),
+    //                        S2(meshRow=2,tileSize=8,meshCol=16)
+    // tileSize fixed=8; meshCol changes with shape -> N_per_block = N1 x meshCol is shape-dependent
     clusters:[
-      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
-      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
-      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
-      "snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
       ],
 
     hemaia_xdma_cfg: {

@@ -277,7 +277,7 @@ def place_tensors(globals_, layout):
     }
 
 
-def build_shape_cfg(shape, globals_, golden_names, layout, placement):
+def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1):
     name, array_shape, mesh_row, tile_size, mesh_col = shape
     k0_total = globals_["k0_total"]
     n0_total = globals_["n0_total"]
@@ -287,7 +287,6 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement):
     k1_s0_tiles = globals_["k1_s0_tiles"]
     a_row_stride = globals_["k0_bytes"] + layout["a_pad"]
 
-    m_tiles = 1
     k_tiles = k0_total // tile_size
     k1_tiles = k1_total // tile_size
     n0_tiles = n0_total // mesh_col
@@ -316,7 +315,7 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement):
         f".meshRow                   = {mesh_row}",
         f".tileSize                  = {tile_size}",
         f".meshCol                   = {mesh_col}",
-        f".tokens_used               = {mesh_row}",
+        f".tokens_used               = {m_tiles * mesh_row}",
         f".M_tiles                   = {m_tiles}",
         f".K_tiles                   = {k_tiles}",
         f".N_tiles                   = {n0_tiles}",
@@ -338,7 +337,7 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement):
         f".mode0_D_tbound            = {c_array([d_bound0, n0_tiles, m_tiles, 1])}",
         f".mode0_D_tstride           = {c_array([8, d_stride1, mode0_d_m_stride, 0])}",
         f".mode1_D_tbound            = {c_array([beats_per_row, mesh_row, n1_tiles, m_tiles])}",
-        f".mode1_D_tstride           = {c_array([8, mode1_token_stride, mesh_col * 2, 0])}",
+        f".mode1_D_tstride           = {c_array([8, mode1_token_stride, mesh_col * 2, mesh_row * mode1_token_stride])}",
         f".A_channel_en              = {c_array([a_channel_en])}",
         f".B_channel_en              = {c_array([b_channel_en])}",
         f".D_channel_en              = {c_array([0x01])}",
@@ -351,17 +350,17 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement):
         f".delta_local_mode1_d0      = {placement['delta_local_mode1_d0']}",
         f".delta_local_mode1_d1      = {placement['delta_local_mode1_d1']}",
         f".tcdm_end                  = {placement['tcdm_end']}",
-        f".mode0_output_elems        = {mesh_row * n0_total}",
-        f".mode1_output_elems        = {mesh_row * n1_total}",
+        f".mode0_output_elems        = {m_tiles * mesh_row * n0_total}",
+        f".mode1_output_elems        = {m_tiles * mesh_row * n1_total}",
         f".mode1_output_row_stride_bytes = {mode1_token_stride}",
-        f".mode1_padded_output_elems = {mesh_row * 2 * n1_total}",
+        f".mode1_padded_output_elems = {m_tiles * mesh_row * 2 * n1_total}",
         f".mode0_d0_golden           = {golden_names[name][0]}",
         f".mode1_padded_golden       = {golden_names[name][1]}",
     ]
     return "        {\n            " + ",\n            ".join(fields) + "\n        }"
 
 
-def build_shape_cfg_flat_vals(shape, globals_, layout, placement):
+def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
     """Return flat list of int32 values matching moe_l15_shape_cfg_t field order (91 values).
 
     The order must exactly match the integer prefix of shape_cfg_t / moe_l15_shape_cfg_t:
@@ -391,7 +390,6 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement):
     k1_s0_tiles = globals_["k1_s0_tiles"]
     a_row_stride = globals_["k0_bytes"] + layout["a_pad"]
 
-    m_tiles = 1
     k_tiles = k0_total // tile_size
     k1_tiles = k1_total // tile_size
     n0_tiles = n0_total // mesh_col
@@ -421,7 +419,7 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement):
         mesh_row,
         tile_size,
         mesh_col,
-        mesh_row,
+        m_tiles * mesh_row,  # tokens_used = total tokens processed per kernel call
         # uint32_t M_tiles, K_tiles, N_tiles, K1, N1
         m_tiles,
         k_tiles,
@@ -509,7 +507,8 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement):
         8,
         mode1_token_stride,
         mesh_col * 2,
-        0,
+        mesh_row
+        * mode1_token_stride,  # per-M-tile stride: advance output by meshRow tokens
         # int32_t A_channel_en[1], B_channel_en[1], D_channel_en[1]
         a_channel_en,
         b_channel_en,
@@ -525,11 +524,11 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement):
         placement["delta_local_mode1_d1"],
         # int32_t tcdm_end, mode0_output_elems, mode1_output_elems
         placement["tcdm_end"],
-        mesh_row * n0_total,
-        mesh_row * n1_total,
+        m_tiles * mesh_row * n0_total,
+        m_tiles * mesh_row * n1_total,
         # int32_t mode1_output_row_stride_bytes, mode1_padded_output_elems
         mode1_token_stride,
-        mesh_row * 2 * n1_total,
+        m_tiles * mesh_row * 2 * n1_total,
     ]
     assert len(vals) == 91, f"build_shape_cfg_flat_vals: expected 91, got {len(vals)}"
     return vals
@@ -651,7 +650,9 @@ def build_golden_arrays(logical_a, globals_, active_shapes):
             ],
             axis=1,
         ).reshape(-1)
-        row_elems = a_row_stride // 2
+        row_elems = max(
+            a_row_stride // 2, n1_total * 2
+        )  # ensure buffer fits mode1 dual-VC output
         mode1_padded = np.zeros((mesh_row, row_elems), dtype=np.int16)
         mode1_padded[:, : n1_total * 2] = mode1_combined.reshape(mesh_row, n1_total * 2)
         arrays[gname_mode1] = emit_i16_array(gname_mode1, mode1_padded.reshape(-1))
@@ -877,12 +878,21 @@ def emit_moe_data(**kw):
     ]:
         data_str += [format_scalar_definition("uint32_t", nm, val)]
 
-    # input_A (legacy tiled layout)
-    log("generating input_A (INT16, legacy tiled)")
+    # input_A (tiled layout with per-token L3 padding for 1 DMA/token gather)
+    log("generating input_A (INT16, tiled, with 32B/token L3 padding)")
     A_phys = np.random.randint(
         -256, 255, size=(rM2, rM1, meshRow_A, K1_A, tileSize_A), dtype=np.int16
     )
-    A_flat = A_phys.view(np.uint8).reshape(-1)
+    M_total_tokens = rM2 * rM1 * meshRow_A
+    # 每 token 数据 = K1_A × tileSize_A int16 = 2048 bytes，后跟 32 字节零 padding
+    # 使 gather 的 L3 stride = A_token_bytes + 32 = 2080，每 token 只需 1 次 DMA
+    A_token_data = A_phys.reshape(M_total_tokens, K1_A * tileSize_A).view(
+        np.uint8
+    )  # (M_total, 2048)
+    A_token_pad = np.zeros((M_total_tokens, 32), dtype=np.uint8)
+    A_flat = np.concatenate([A_token_data, A_token_pad], axis=1).reshape(
+        -1
+    )  # (M_total × 2080,)
     pad = (-len(A_flat)) % 64
     if pad:
         A_flat = np.pad(A_flat, (0, pad), constant_values=0)
@@ -928,7 +938,7 @@ def emit_moe_data(**kw):
     gB_phys = np.random.randint(
         -7,
         7,
-        size=(num_indiv_experts, iN2, iK2 * iK1, iN1, tileSize, meshCol),
+        size=(num_indiv_experts, iN2, iN1, iK2 * iK1, tileSize, meshCol),
         dtype=np.int8,
     )
     data_str += [
@@ -947,7 +957,7 @@ def emit_moe_data(**kw):
     uB_phys = np.random.randint(
         -7,
         7,
-        size=(num_indiv_experts, iN2, iK2 * iK1, iN1, tileSize, meshCol),
+        size=(num_indiv_experts, iN2, iN1, iK2 * iK1, tileSize, meshCol),
         dtype=np.int8,
     )
     data_str += [
@@ -958,7 +968,7 @@ def emit_moe_data(**kw):
     dB_phys = np.random.randint(
         -7,
         7,
-        size=(num_indiv_experts, 2, idN2, idK2 * idK1, idN1, tileSize, down_vc_meshCol),
+        size=(num_indiv_experts, 2, idN2, idN1, idK2 * idK1, tileSize, down_vc_meshCol),
         dtype=np.int8,
     )
     data_str += [
@@ -973,7 +983,7 @@ def emit_moe_data(**kw):
         sgB = np.random.randint(
             -7,
             7,
-            size=(num_shared, sN2, sK2 * sK1, sN1, tileSize, meshCol),
+            size=(num_shared, sN2, sN1, sK2 * sK1, tileSize, meshCol),
             dtype=np.int8,
         )
         data_str += [
@@ -992,7 +1002,7 @@ def emit_moe_data(**kw):
         suB = np.random.randint(
             -7,
             7,
-            size=(num_shared, sN2, sK2 * sK1, sN1, tileSize, meshCol),
+            size=(num_shared, sN2, sN1, sK2 * sK1, tileSize, meshCol),
             dtype=np.int8,
         )
         data_str += [
@@ -1003,7 +1013,7 @@ def emit_moe_data(**kw):
         sdB = np.random.randint(
             -7,
             7,
-            size=(num_shared, 2, sdN2, sdK2 * sdK1, sdN1, tileSize, down_vc_meshCol),
+            size=(num_shared, 2, sdN2, sdN1, sdK2 * sdK1, tileSize, down_vc_meshCol),
             dtype=np.int8,
         )
         data_str += [
@@ -1153,8 +1163,29 @@ def emit_moe_data(**kw):
             f"static const int32_t l15_dev_{sname}_cfg[] = {{\n    {vals_str}\n}};"
         ]
 
+    # Shared-expert shape config: S0 with m_tiles=sdM1, processes ALL M_total tokens
+    # in ONE kernel call (no loop in the DFG node, the streamer loops internally).
+    # To change token count: update router_M1/M2 and A_meshRow in params.hjson,
+    #   then re-run: python3 multi_cluster_MoE_datagen.py
+    # M_tiles derivation: sdM1 = shared_down_M1 = M_total / meshRow = M_total / 8
+    _s0_shape = next(s for s in SHAPE_DIMS_ALL if s[0] == "S0")
+    _shared_m_tiles = sdM1  # from params.hjson: shared_down_M1
+    _mode1_tok_stride = 2 * globals_["n1_total"] * 2  # bytes per output token (2 VCs)
+    flat_vals_shared = build_shape_cfg_flat_vals(
+        _s0_shape, globals_, layout, placement, m_tiles=_shared_m_tiles
+    )
+    _shared_vals_str = ", ".join(str(v) for v in flat_vals_shared)
+    data_str += [
+        f"// L15 shared-expert shape config (S0, m_tiles={_shared_m_tiles}=shared_down_M1).\n"
+        f"// Processes {_shared_m_tiles * _s0_shape[2]} tokens per kernel call = M_total={M_total}.\n"
+        f"// mode1_D_tstride[3]={_s0_shape[2] * _mode1_tok_stride} bytes/M-tile (meshRow*token_stride).\n"
+        f"// Used by offload_bingo_hw.h Nodes 18/19/21/22 (shared expert swiglu+down-proj).\n"
+        f"static const int32_t l15_dev_shared_s0_cfg[] = {{\n    {_shared_vals_str}\n}};"
+    ]
+
     # Scalar constants consumed by main_bingo.py for L15 DMA sizes and offsets.
     a_data_bytes = M_total * a_row_stride
+    mode1_padded_bytes = placement["tcdm_end"] - placement["delta_local_mode1_d0"]
     b_data_length = k0_s0_tiles * n0_s0_tiles * 16
     w2_data_length = k1_s0_tiles * n1_s0_tiles * 16
     for nm, val in [
@@ -1168,7 +1199,7 @@ def emit_moe_data(**kw):
         ("l15_delta_local_w2r", placement["delta_local_w2r"]),
         ("l15_delta_local_a", placement["delta_local_a"]),
         ("l15_delta_local_mode1_d0", placement["delta_local_mode1_d0"]),
-        ("l15_mode1_padded_bytes", a_data_bytes),
+        ("l15_mode1_padded_bytes", mode1_padded_bytes),
     ]:
         data_str += [format_scalar_definition("uint32_t", nm, val)]
 

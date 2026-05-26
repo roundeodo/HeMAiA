@@ -17,16 +17,20 @@
 extern "C" {
 #endif
 
-/* ── compile-time limits (sized for HeMAiA 2-cluster, top-K<=2 routing) ── */
-#define MOE_MAX_EXPERTS    8     /* per request                        */
-#define MOE_MAX_TASKS     32     /* upper bound for schedule length    */
-#define MOE_MAX_DMA_OPS  (MOE_MAX_TASKS * 4)
-#define MOE_TASK_DMA_SLOTS 4
+/* ── compile-time limits (64-expert MoE, HeMAiA 2-cluster) ─────────────── */
+#ifndef MOE_MAX_EXPERTS
+#define MOE_MAX_EXPERTS    64    /* compile-time max experts per request (override via -D) */
+#endif
+#define MOE_MAX_TASKS     (MOE_MAX_EXPERTS * 2)   /* SPLIT doubles task count at most   */
+#define MOE_MAX_DMA_OPS  (MOE_MAX_TASKS * 4)      /* S1+S3+S2PF+S4PF per task max       */
+#define MOE_MAX_SLOTS_PER_CLUSTER  (MOE_MAX_EXPERTS) /* max slots per cluster side   */
 
+/* DMA slot kind indices (used by __host_moe_dma_slot_index) */
 #define MOE_TASK_DMA_SLOT_S1          0u
 #define MOE_TASK_DMA_SLOT_S3          1u
 #define MOE_TASK_DMA_SLOT_S2_PREFETCH 2u
 #define MOE_TASK_DMA_SLOT_S4_PREFETCH 3u
+#define MOE_TASK_DMA_SLOTS            4u
 
 /* ── Shape enum (mirrors ShapeA/B/C in four_stage_scheduler.py) ───────── */
 typedef enum {
@@ -56,23 +60,6 @@ typedef enum {
     MOE_DMA_OP_S4_PREFETCH = 5 /* next gate/up prefetched during S3/S4  */
 } moe_dma_op_kind_t;
 
-typedef enum {
-    MOE_WEIGHT_GATE_UP = 0,
-    MOE_WEIGHT_DOWN = 1
-} moe_weight_kind_t;
-
-typedef struct {
-    uint8_t valid;            /* 0 = hardware ignores this slot          */
-    moe_dma_op_kind_t kind;   /* fixed stage/prefetch role               */
-    moe_weight_kind_t weight; /* gate/up or down weight                  */
-    int16_t expert_id;        /* expert weight to transfer               */
-    moe_shape_t shape;        /* transfer shape                          */
-    uint16_t alloc_bw;        /* reserved DMA bandwidth in B/cc          */
-    moe_dma_binding_t dma;    /* selected DMA lane(s)                    */
-    uint32_t start_cc;        /* analytical absolute cycle               */
-    uint32_t end_cc;          /* analytical absolute cycle               */
-} moe_task_dma_slot_t;
-
 /* ── Input: per-expert token count after routing ──────────────────────── */
 typedef struct {
     uint16_t expert_id;       /* 0..N_EXPERTS-1                          */
@@ -86,49 +73,41 @@ typedef struct {
     int16_t   cache_eid_c3;   /* expert resident in C3 weight SRAM, -1 = none */
 } moe_request_t;
 
-/* ── Output: one scheduled expert run = (cluster, expert, token slice) ─── */
+/* ── Output: one scheduled expert run (compact vs old 88-byte record) ───── */
 typedef struct {
-    moe_cluster_t cluster;    /* which cluster runs this task            */
-    uint16_t  expert_id;      /* expert to run                           */
-    uint16_t  token_start_rank; /* rank in this expert's routed-token list */
-    uint16_t  ntokens;        /* routed-token slice after possible SPLIT */
-    moe_shape_t shape_s1;     /* analytical S1 initial token-window shape */
-    moe_shape_t shape_s3;     /* analytical S3 initial token-window shape */
-    uint16_t  bw_s1;          /* allocated S1 DMA BW in B/cc, 0 if skip  */
-    uint16_t  bw_s3;          /* allocated S3 DMA BW in B/cc             */
-    moe_dma_binding_t dma_s1; /* DMA lane(s) assigned to S1              */
-    moe_dma_binding_t dma_s3; /* DMA lane(s) assigned to S3              */
-    uint8_t   skip_s1;        /* 1 if S1 load+compute skipped (cache hit) */
-    uint8_t   skip_s3;        /* 1 if S3 load+compute skipped (cache hit) */
-    uint8_t   skip_s2;        /* 1 if S2 full compute skipped (ntokens<=shape_M, non-hit) */
-    uint8_t   skip_s4;        /* 1 if S4 full compute skipped */
-    uint32_t  m_s2_exec;      /* token count for S2 (0 when skip_s2=1)  */
-    uint32_t  m_s4_exec;      /* token count for S4 (0 when skip_s4=1)  */
-    int16_t   prefetch_eid;   /* expert id to prefetch during S4, -1=none */
-    moe_task_dma_slot_t dma_slots[MOE_TASK_DMA_SLOTS];
-    uint32_t  est_start_cc;   /* analytical estimate, dispatch hint only */
-    uint32_t  est_end_cc;     /* analytical estimate, dispatch hint only */
+    moe_cluster_t     cluster;          /* MOE_CLUSTER_C2=0, MOE_CLUSTER_C3=1        */
+    uint16_t          expert_id;        /* 0..MOE_MAX_EXPERTS-1                      */
+    uint16_t          token_start_rank; /* rank in expert's routed-token list        */
+    uint16_t          ntokens;          /* token slice (after SPLIT)                 */
+    moe_shape_t       shape_s1;         /* gate/up weight DMA shape                  */
+    moe_shape_t       shape_s3;         /* down weight DMA shape                     */
+    moe_dma_binding_t dma_s1;          /* iDMA / xDMA / BOTH / NONE for S1          */
+    moe_dma_binding_t dma_s3;          /* iDMA / xDMA / BOTH / NONE for S3          */
+    uint8_t           skip_s1;          /* 1 = S1 cache hit, skip gate/up DMA+GEMM  */
+    uint8_t           skip_s3;          /* 1 = S3 cache hit, skip down DMA+GEMM     */
+    uint8_t           skip_s2;          /* 1 = S2 tail empty (ntokens<=shape_Mdim)  */
+    uint8_t           skip_s4;          /* 1 = S4 tail empty                        */
+    uint32_t          m_s2_exec;        /* token count for S2 tail GEMM             */
+    uint32_t          m_s4_exec;        /* token count for S4 tail GEMM             */
+    /* REMOVED: bw_s1, bw_s3 (derivable from shape+skip), prefetch_eid (from dma_ops),
+     *          dma_slots[] (from dma_ops), est_start_cc/est_end_cc (timing removed) */
 } moe_task_t;
 
+/* ── DMA operation record (compact, 12 bytes vs old 34 bytes) ────────── */
 typedef struct {
-    uint16_t task_idx;        /* owner task in tasks[], 0xFFFF if none   */
-    moe_cluster_t cluster;    /* cluster whose DMA engine issues op      */
-    int16_t expert_id;        /* expert weight being transferred         */
-    moe_dma_op_kind_t kind;   /* S1/S3 foreground or prefetch op         */
-    moe_weight_kind_t weight; /* gate/up or down weight                  */
-    moe_shape_t shape;        /* shape that determines transfer size     */
-    uint16_t alloc_bw;        /* reserved DMA bandwidth in B/cc          */
-    moe_dma_binding_t dma;    /* lane assignment after binding pass      */
-    uint32_t start_cc;
-    uint32_t end_cc;
+    uint16_t          task_idx;  /* index into tasks[]                        */
+    moe_dma_op_kind_t kind;      /* S1/S3/S2_PREFETCH/S4_PREFETCH             */
+    moe_dma_binding_t dma;       /* iDMA/xDMA/BOTH lane assignment            */
+    int16_t           expert_id; /* expert whose weight is transferred        */
+    /* REMOVED: cluster (from tasks[task_idx]), weight/shape/alloc_bw/start_cc/end_cc */
 } moe_dma_op_t;
 
 typedef struct {
-    moe_task_t tasks[MOE_MAX_TASKS];
-    moe_dma_op_t dma_ops[MOE_MAX_DMA_OPS];
-    uint16_t   n_tasks;       /* number of valid tasks                    */
-    uint16_t   n_dma_ops;     /* number of valid DMA operations           */
-    uint32_t   est_makespan_cc;  /* total estimated cycles                */
+    moe_task_t   tasks[MOE_MAX_TASKS];      /* ordered task list               */
+    moe_dma_op_t dma_ops[MOE_MAX_DMA_OPS];  /* DMA operations in issue order   */
+    uint16_t     n_tasks;                   /* valid tasks count               */
+    uint16_t     n_dma_ops;                 /* valid DMA ops count             */
+    /* REMOVED: est_makespan_cc (timing no longer propagated to L3)            */
 } moe_schedule_t;
 
 /* ── Return codes ─────────────────────────────────────────────────────── */

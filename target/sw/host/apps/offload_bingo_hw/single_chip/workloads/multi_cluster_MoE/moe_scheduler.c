@@ -42,6 +42,9 @@ static const uint32_t kAlloc[3] = {64u, 64u, 128u};
 #define INF_CC          0xFFFFFFFFu
 #define T_DMA3_C        11264u          /* ShapeC t_dma_s3; S3-overlap threshold */
 #define EXACT_TAIL_MAX  4u              /* continuation_cost n=2 exact threshold  */
+/* Sentinel stored in snap_t.pf_eid to mean "S4 window is available for prefetch
+ * of whoever gets assigned next".  Any valid expert_id is >= 0. */
+#define PF_EID_GHOST    ((int16_t)(-2))
 
 /* =========================================================================
  * Timing primitives
@@ -251,31 +254,35 @@ static void try_s2pf_pair(snap_t *sa, uint8_t s3a, snap_t *sb, uint8_t s3b)
 /* =========================================================================
  * Cache hit queries
  * ========================================================================= */
-static int pf_hit(int16_t eid, const snap_t *s, uint32_t t)
-{ return s->pf_eid==eid && s->pf_end>=0 && (uint32_t)s->pf_end<=t; }
+static int swiglu_hit(int16_t eid, const snap_t *s, uint32_t t)
+{
+    if (s->pf_end < 0 || (uint32_t)s->pf_end > t) return 0;
+    /* PF_EID_GHOST means the S4 window can prefetch whoever arrives next:
+     * any eid benefits from skip_s1. */
+    return s->pf_eid == PF_EID_GHOST || s->pf_eid == eid;
+}
 
-static int full_hit(int16_t eid, const snap_t *s, uint32_t t)
-{ return pf_hit(eid,s,t) && s->pf_full; }
+static int down_hit(int16_t eid, const snap_t *s, uint32_t t)
+{ return swiglu_hit(eid,s,t) && s->pf_full; }
 
 /* =========================================================================
  * Analytical shape selection  (_pick_pair_shapes from lite_scheduler.py)
  * ========================================================================= */
 static void pick_shapes(uint16_t na, uint16_t nb,
-                        uint8_t cca, uint8_t cfa, uint8_t ccb, uint8_t cfb,
+                        uint8_t sw_a, uint8_t dn_a, uint8_t sw_b, uint8_t dn_b,
                         uint32_t t0,
                         uint8_t *s1a, uint8_t *s3a, uint8_t *s1b, uint8_t *s3b)
 {
-    if (cca||ccb){ *s1a=2; *s1b=2; } else { *s1a=1; *s1b=1; }
+    if (sw_a||sw_b){ *s1a=2; *s1b=2; } else { *s1a=1; *s1b=1; }
 
     uint32_t s2a, s2b;
-    if (cca) s2a=t0+best_s2(na);
+    if (sw_a) s2a=t0+best_s2(na);
     else { uint32_t r=(na>kMdim[*s1a])?(na-kMdim[*s1a]):0u; s2a=t0+kTs1[*s1a]+best_s2(r); }
-    if (ccb) s2b=t0+best_s2(nb);
+    if (sw_b) s2b=t0+best_s2(nb);
     else { uint32_t r=(nb>kMdim[*s1b])?(nb-kMdim[*s1b]):0u; s2b=t0+kTs1[*s1b]+best_s2(r); }
 
-    if (cfa&&cfb){ *s3a=1; *s3b=1; }
-    else if (cfa){ *s3a=1; *s3b=2; }
-    else if (cfb){ *s3a=2; *s3b=1; }
+    /* hit侧DMA=0 → S4执行全部ntok: ShapeC(M_dim=2,11264cc/tile)匹配best_s4 */
+    if (dn_a||dn_b){ *s3a=2; *s3b=2; }
     else {
         uint32_t d=(s2a>=s2b)?(s2a-s2b):(s2b-s2a);
         if (d>=T_DMA3_C){ *s3a=2; *s3b=2; } else { *s3a=1; *s3b=1; }
@@ -345,20 +352,20 @@ static uint32_t sim1(const snap_t *c2, const snap_t *c3,
     uint32_t best=INF_CC;
     const snap_t *sns[2]={c2,c3};
     for (int ci=0;ci<2;ci++){
-        uint8_t cc=(uint8_t)pf_hit(eid,sns[ci],t);
-        uint8_t cf=(uint8_t)full_hit(eid,sns[ci],t);
+        uint8_t cc=(uint8_t)swiglu_hit(eid,sns[ci],t);
+        uint8_t cf=(uint8_t)down_hit(eid,sns[ci],t);
         snap_t sn=mk_snap(t,2u,2u,ntok,eid,cc,cf);
         if (sn.task_end<best) best=sn.task_end;
         if (!cc){ snap_t sn2=mk_snap(t,1u,1u,ntok,eid,0u,0u); if(sn2.task_end<best)best=sn2.task_end; }
     }
     if (ntok>=2u){
         uint16_t ca=(uint16_t)((ntok+1u)/2u), cb=ntok-ca;
-        uint8_t cca=(uint8_t)pf_hit(eid,c2,t),cfa=(uint8_t)full_hit(eid,c2,t);
-        uint8_t ccb=(uint8_t)pf_hit(eid,c3,t),cfb=(uint8_t)full_hit(eid,c3,t);
+        uint8_t sw_a=(uint8_t)swiglu_hit(eid,c2,t),dn_a=(uint8_t)down_hit(eid,c2,t);
+        uint8_t sw_b=(uint8_t)swiglu_hit(eid,c3,t),dn_b=(uint8_t)down_hit(eid,c3,t);
         uint8_t s1a,s3a,s1b,s3b;
-        pick_shapes(ca,cb,cca,cfa,ccb,cfb,t,&s1a,&s3a,&s1b,&s3b);
-        snap_t sna=mk_snap(t,s1a,s3a,ca,eid,cca,cfa);
-        snap_t snb=mk_snap(t,s1b,s3b,cb,eid,ccb,cfb);
+        pick_shapes(ca,cb,sw_a,dn_a,sw_b,dn_b,t,&s1a,&s3a,&s1b,&s3b);
+        snap_t sna=mk_snap(t,s1a,s3a,ca,eid,sw_a,dn_a);
+        snap_t snb=mk_snap(t,s1b,s3b,cb,eid,sw_b,dn_b);
         try_s2pf_pair(&sna,s3a,&snb,s3b);
         if (bw_ok(&sna,&snb)){
             uint32_t e=(sna.task_end>snb.task_end)?sna.task_end:snb.task_end;
@@ -444,8 +451,23 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
         uint32_t tnow=(t2>t3)?t2:t3;
         int both_idle=(t2==t3);
 
-        uint8_t c2c0=(uint8_t)pf_hit(t0eid,&c2,tnow), c2f0=(uint8_t)full_hit(t0eid,&c2,tnow);
-        uint8_t c3c0=(uint8_t)pf_hit(t0eid,&c3,tnow), c3f0=(uint8_t)full_hit(t0eid,&c3,tnow);
+        /* Inject PF_EID_GHOST into each cluster whose S4 window can fit a
+         * ShapeA S1 DMA (conservative lower-bound, no BW check here).
+         * PF_EID_GHOST means "whoever gets assigned to this cluster next will
+         * benefit from skip_s1"; lower_plan fills in the actual expert_id when
+         * emitting the S4_PREFETCH DMA op.
+         * Condition: pf_eid == -1 (no ghost and no initial cache yet). */
+        if (c2.cur_eid>=0 && c2.pf_eid==(int16_t)(-1) &&
+                c2.s4_start+kTd1[0]<=c2.task_end){
+            c2.pf_eid=PF_EID_GHOST; c2.pf_end=(int32_t)c2.task_end; c2.pf_full=0;
+        }
+        if (c3.cur_eid>=0 && c3.pf_eid==(int16_t)(-1) &&
+                c3.s4_start+kTd1[0]<=c3.task_end){
+            c3.pf_eid=PF_EID_GHOST; c3.pf_end=(int32_t)c3.task_end; c3.pf_full=0;
+        }
+
+        uint8_t c2c0=(uint8_t)swiglu_hit(t0eid,&c2,tnow), c2f0=(uint8_t)down_hit(t0eid,&c2,tnow);
+        uint8_t c3c0=(uint8_t)swiglu_hit(t0eid,&c3,tnow), c3f0=(uint8_t)down_hit(t0eid,&c3,tnow);
 
         /* ── n=1 ─────────────────────────────────────────────────────────── */
         if (nr==1u){
@@ -459,8 +481,8 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
                 snap_t *snap_ci=(ci==0)?&c2:&c3;
                 snap_t *peer   =(ci==0)?&c3:&c2;
                 uint32_t tst=snap_ci->task_end;
-                uint8_t cc=(uint8_t)pf_hit(t0eid,snap_ci,tst);
-                uint8_t cf=(uint8_t)full_hit(t0eid,snap_ci,tst);
+                uint8_t cc=(uint8_t)swiglu_hit(t0eid,snap_ci,tst);
+                uint8_t cf=(uint8_t)down_hit(t0eid,snap_ci,tst);
                 for (uint8_t s1=0;s1<3u;s1++) for (uint8_t s3=0;s3<3u;s3++){
                     snap_t sn=mk_snap(tst,s1,s3,t0ntok,t0eid,cc,cf);
                     if (!bw_ok(&sn,peer)) continue;
@@ -507,8 +529,8 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
                 }
                 for (int ti=0;ti<ntp;ti++){
                     uint32_t tst=tpts[ti];
-                    uint8_t cc=(uint8_t)pf_hit(t0eid,idle_s,tst);
-                    uint8_t cf=(uint8_t)full_hit(t0eid,idle_s,tst);
+                    uint8_t cc=(uint8_t)swiglu_hit(t0eid,idle_s,tst);
+                    uint8_t cf=(uint8_t)down_hit(t0eid,idle_s,tst);
                     uint8_t s1=2u, s3=2u;  /* ShapeC: fastest; BW conflict handled by next tpt */
                     snap_t sn=mk_snap(tst,s1,s3,t0ntok,t0eid,cc,cf);
                     int ok=(idle_ci==0)?bw_ok(&sn,busy_s):bw_ok(busy_s,&sn);
@@ -579,20 +601,20 @@ do { \
                 for (uint8_t ri=0;ri<nr;ri++) if(rem[ri].eid!=t0eid&&rem[ri].eid!=Keid) ra[nra++]=rem[ri];
 
                 /* Dir 1: top0→C2, topK→C3 */
-                { uint8_t cca=c2c0,cfa=c2f0;
-                  uint8_t ccb=(uint8_t)pf_hit(Keid,&c3,tnow),cfb=(uint8_t)full_hit(Keid,&c3,tnow);
+                { uint8_t sw_a=c2c0,dn_a=c2f0;
+                  uint8_t sw_b=(uint8_t)swiglu_hit(Keid,&c3,tnow),dn_b=(uint8_t)down_hit(Keid,&c3,tnow);
                   uint8_t s1a,s3a,s1b,s3b;
-                  pick_shapes(t0ntok,Kntok,cca,cfa,ccb,cfb,tnow,&s1a,&s3a,&s1b,&s3b);
-                  snap_t sa=mk_snap(tnow,s1a,s3a,t0ntok,t0eid,cca,cfa);
-                  snap_t sb=mk_snap(tnow,s1b,s3b,Kntok,Keid,ccb,cfb);
+                  pick_shapes(t0ntok,Kntok,sw_a,dn_a,sw_b,dn_b,tnow,&s1a,&s3a,&s1b,&s3b);
+                  snap_t sa=mk_snap(tnow,s1a,s3a,t0ntok,t0eid,sw_a,dn_a);
+                  snap_t sb=mk_snap(tnow,s1b,s3b,Kntok,Keid,sw_b,dn_b);
                   EVAL_PAIR_BI(sa,s1a,s3a,t0eid,t0ntok,0u,sb,s1b,s3b,Keid,Kntok,0u,ra,nra,0u); }
                 /* Dir 2: topK→C2, top0→C3 */
-                { uint8_t cca=(uint8_t)pf_hit(Keid,&c2,tnow),cfa=(uint8_t)full_hit(Keid,&c2,tnow);
-                  uint8_t ccb=c3c0,cfb=c3f0;
+                { uint8_t sw_a=(uint8_t)swiglu_hit(Keid,&c2,tnow),dn_a=(uint8_t)down_hit(Keid,&c2,tnow);
+                  uint8_t sw_b=c3c0,dn_b=c3f0;
                   uint8_t s1a,s3a,s1b,s3b;
-                  pick_shapes(Kntok,t0ntok,cca,cfa,ccb,cfb,tnow,&s1a,&s3a,&s1b,&s3b);
-                  snap_t sa=mk_snap(tnow,s1a,s3a,Kntok,Keid,cca,cfa);
-                  snap_t sb=mk_snap(tnow,s1b,s3b,t0ntok,t0eid,ccb,cfb);
+                  pick_shapes(Kntok,t0ntok,sw_a,dn_a,sw_b,dn_b,tnow,&s1a,&s3a,&s1b,&s3b);
+                  snap_t sa=mk_snap(tnow,s1a,s3a,Kntok,Keid,sw_a,dn_a);
+                  snap_t sb=mk_snap(tnow,s1b,s3b,t0ntok,t0eid,sw_b,dn_b);
                   EVAL_PAIR_BI(sa,s1a,s3a,Keid,Kntok,0u,sb,s1b,s3b,t0eid,t0ntok,0u,ra,nra,0u); }
             }
 
@@ -606,20 +628,20 @@ do { \
                     for (uint8_t ri=0;ri<nr;ri++) if(rem[ri].eid!=eidK&&rem[ri].eid!=eidJ) ra[nra++]=rem[ri];
                     if (nra==0u) continue;
                     /* Dir1 */
-                    { uint8_t cca=(uint8_t)pf_hit(eidK,&c2,tnow),cfa=(uint8_t)full_hit(eidK,&c2,tnow);
-                      uint8_t ccb=(uint8_t)pf_hit(eidJ,&c3,tnow),cfb=(uint8_t)full_hit(eidJ,&c3,tnow);
+                    { uint8_t sw_a=(uint8_t)swiglu_hit(eidK,&c2,tnow),dn_a=(uint8_t)down_hit(eidK,&c2,tnow);
+                      uint8_t sw_b=(uint8_t)swiglu_hit(eidJ,&c3,tnow),dn_b=(uint8_t)down_hit(eidJ,&c3,tnow);
                       uint8_t s1a,s3a,s1b,s3b;
-                      pick_shapes(ntK,ntJ,cca,cfa,ccb,cfb,tnow,&s1a,&s3a,&s1b,&s3b);
-                      snap_t sa=mk_snap(tnow,s1a,s3a,ntK,eidK,cca,cfa);
-                      snap_t sb=mk_snap(tnow,s1b,s3b,ntJ,eidJ,ccb,cfb);
+                      pick_shapes(ntK,ntJ,sw_a,dn_a,sw_b,dn_b,tnow,&s1a,&s3a,&s1b,&s3b);
+                      snap_t sa=mk_snap(tnow,s1a,s3a,ntK,eidK,sw_a,dn_a);
+                      snap_t sb=mk_snap(tnow,s1b,s3b,ntJ,eidJ,sw_b,dn_b);
                       EVAL_PAIR_BI(sa,s1a,s3a,eidK,ntK,0u,sb,s1b,s3b,eidJ,ntJ,0u,ra,nra,0u); }
                     /* Dir2 */
-                    { uint8_t cca=(uint8_t)pf_hit(eidJ,&c2,tnow),cfa=(uint8_t)full_hit(eidJ,&c2,tnow);
-                      uint8_t ccb=(uint8_t)pf_hit(eidK,&c3,tnow),cfb=(uint8_t)full_hit(eidK,&c3,tnow);
+                    { uint8_t sw_a=(uint8_t)swiglu_hit(eidJ,&c2,tnow),dn_a=(uint8_t)down_hit(eidJ,&c2,tnow);
+                      uint8_t sw_b=(uint8_t)swiglu_hit(eidK,&c3,tnow),dn_b=(uint8_t)down_hit(eidK,&c3,tnow);
                       uint8_t s1a,s3a,s1b,s3b;
-                      pick_shapes(ntJ,ntK,cca,cfa,ccb,cfb,tnow,&s1a,&s3a,&s1b,&s3b);
-                      snap_t sa=mk_snap(tnow,s1a,s3a,ntJ,eidJ,cca,cfa);
-                      snap_t sb=mk_snap(tnow,s1b,s3b,ntK,eidK,ccb,cfb);
+                      pick_shapes(ntJ,ntK,sw_a,dn_a,sw_b,dn_b,tnow,&s1a,&s3a,&s1b,&s3b);
+                      snap_t sa=mk_snap(tnow,s1a,s3a,ntJ,eidJ,sw_a,dn_a);
+                      snap_t sb=mk_snap(tnow,s1b,s3b,ntK,eidK,sw_b,dn_b);
                       EVAL_PAIR_BI(sa,s1a,s3a,eidJ,ntJ,0u,sb,s1b,s3b,eidK,ntK,0u,ra,nra,0u); }
                 }
             }
@@ -668,6 +690,8 @@ do { \
                 plan_t pf=plan_from_snap(&sf,0u,0u,2u,2u);
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pf;
                 c2=sf; rem_remove(rem,&nr,0u);
+                /* No ghost rollback needed: PF_EID_GHOST in C3 stays valid;
+                 * the next expert assigned to C3 will benefit from skip_s1. */
             }
             continue;
         }
@@ -697,8 +721,8 @@ do { \
 
             for (int ti=0;ti<ntp;ti++){
                 uint32_t tst=tpts[ti];
-                uint8_t cc=(uint8_t)pf_hit(t0eid,idle_sn,tst);
-                uint8_t cf=(uint8_t)full_hit(t0eid,idle_sn,tst);
+                uint8_t cc=(uint8_t)swiglu_hit(t0eid,idle_sn,tst);
+                uint8_t cf=(uint8_t)down_hit(t0eid,idle_sn,tst);
                 uint8_t s1=2u, s3=2u;  /* ShapeC: fastest; BW conflict handled by next tpt */
                 snap_t sn=mk_snap(tst,s1,s3,t0ntok,t0eid,cc,cf);
                 /* S2 pf attempt (latest valid position) */
@@ -728,6 +752,9 @@ do { \
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pf;
                 if (idle_ci==0) c2=sf; else c3=sf;
             }
+            /* No ghost rollback needed: PF_EID_GHOST in the busy cluster stays
+             * valid; the next expert assigned to that cluster will benefit from
+             * skip_s1 (lower_plan will fill in the actual expert_id for S4_PREFETCH). */
             continue;
         }
     } /* while (nr > 0) */
@@ -741,7 +768,7 @@ do { \
 static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
                                 const moe_request_t *req, moe_schedule_t *out)
 {
-    out->n_tasks=0; out->n_dma_ops=0; out->est_makespan_cc=0;
+    out->n_tasks=0; out->n_dma_ops=0;
 
     for (uint8_t pi=0;pi<n_plan;pi++){
         const plan_t *p=&plan[pi];
@@ -756,71 +783,68 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
         uint32_t dma1_end=skip_s1?p->est_start:p->est_dma1_end;
 
         moe_task_t *tk=&out->tasks[out->n_tasks];
-        { uint32_t s; for(s=0u;s<MOE_TASK_DMA_SLOTS;s++) tk->dma_slots[s].valid=0u; }
+        /* (dma_slots[] removed from compact moe_task_t) */
 
         tk->cluster         =cl;
-        tk->expert_id       =p->eid;
+        tk->expert_id       =(uint16_t)p->eid;
         tk->token_start_rank=p->tok_start;
         tk->ntokens         =(uint16_t)ntok_u;
         tk->shape_s1        =sh1;
         tk->shape_s3        =sh3;
-        tk->bw_s1           =skip_s1?0u:(uint16_t)kAlloc[p->shape_s1];
-        tk->bw_s3           =skip_s3?0u:(uint16_t)kAlloc[p->shape_s3];
+        /* bw_s1/bw_s3 removed: derivable from shape+skip if needed */
         tk->dma_s1          =skip_s1?MOE_DMA_NONE:(kAlloc[p->shape_s1]>=128u?MOE_DMA_BOTH:MOE_DMA_IDMA);
         tk->dma_s3          =skip_s3?MOE_DMA_NONE:(kAlloc[p->shape_s3]>=128u?MOE_DMA_BOTH:MOE_DMA_XDMA);
         tk->skip_s1         =skip_s1;
         tk->skip_s3         =skip_s3;
 
         if (skip_s1){
-            tk->m_s2_exec=ntok_u; tk->skip_s2=0u;
+            /* S2 handles all tokens: batch count = ceil(ntok / meshRow) */
+            uint32_t b2=(ntok_u+kMdim[p->shape_s1]-1u)/kMdim[p->shape_s1];
+            tk->m_s2_exec=b2; tk->skip_s2=0u;
         } else {
+            /* S2 handles tail tokens after S1 block (kMdim = one S1 batch) */
             uint32_t tail=(ntok_u>kMdim[p->shape_s1])?(ntok_u-kMdim[p->shape_s1]):0u;
-            tk->m_s2_exec=tail; tk->skip_s2=(tail==0u)?1u:0u;
+            uint32_t b2=(tail+kMdim[p->shape_s1]-1u)/kMdim[p->shape_s1];
+            tk->m_s2_exec=b2; tk->skip_s2=(b2==0u)?1u:0u;
         }
         if (skip_s3){
-            tk->m_s4_exec=ntok_u; tk->skip_s4=0u;
+            /* S4 handles all tokens: batch count = ceil(ntok / meshRow) */
+            uint32_t b4=(ntok_u+kMdim[p->shape_s3]-1u)/kMdim[p->shape_s3];
+            tk->m_s4_exec=b4; tk->skip_s4=0u;
         } else {
+            /* S4 handles tail tokens after S3 block */
             uint32_t tail4=(ntok_u>kMdim[p->shape_s3])?(ntok_u-kMdim[p->shape_s3]):0u;
-            tk->m_s4_exec=tail4; tk->skip_s4=(tail4==0u)?1u:0u;
+            uint32_t b4=(tail4+kMdim[p->shape_s3]-1u)/kMdim[p->shape_s3];
+            tk->m_s4_exec=b4; tk->skip_s4=(b4==0u)?1u:0u;
         }
-        tk->prefetch_eid=-1;
-        tk->est_start_cc=p->est_start;
-        tk->est_end_cc  =p->est_end;
+        /* prefetch_eid/dma_slots/est_start_cc/est_end_cc removed from compact moe_task_t */
 
-        /* S1 DMA */
+        /* S1 DMA: compact op (task_idx, expert_id, kind, dma only) */
         if (!skip_s1){
             if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
             moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
-            op->task_idx=out->n_tasks; op->cluster=cl; op->expert_id=p->eid;
-            op->kind=MOE_DMA_OP_S1; op->weight=MOE_WEIGHT_GATE_UP; op->shape=sh1;
-            op->alloc_bw=(uint16_t)kAlloc[p->shape_s1];
+            op->task_idx=(uint16_t)out->n_tasks;
+            op->expert_id=p->eid;
+            op->kind=MOE_DMA_OP_S1;
             op->dma=(kAlloc[p->shape_s1]>=128u)?MOE_DMA_BOTH:MOE_DMA_IDMA;
-            op->start_cc=p->est_start; op->end_cc=dma1_end;
+            /* cluster/weight/shape/alloc_bw/start_cc/end_cc removed */
         }
 
-        /* S3 / S2-prefetch DMA
-         * NOTE: when apply_s2pf fires, bw_s3=0 → skip_s3=1 but has_s2pf=1.
-         * We must still emit the MOE_DMA_OP_S2_PREFETCH op in that case. */
+        /* S3 / S2-prefetch DMA: compact op */
         if (!skip_s3 || has_s2pf){
             if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
             moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
-            op->task_idx=out->n_tasks; op->cluster=cl; op->expert_id=p->eid;
-            op->weight=MOE_WEIGHT_DOWN; op->shape=sh3;
-            op->alloc_bw=(uint16_t)kAlloc[p->shape_s3];
+            op->task_idx=(uint16_t)out->n_tasks;
+            op->expert_id=p->eid;
             op->dma=(kAlloc[p->shape_s3]>=128u)?MOE_DMA_BOTH:MOE_DMA_XDMA;
-            if (has_s2pf){
-                op->kind=MOE_DMA_OP_S2_PREFETCH;
-                op->start_cc=p->est_s2pf_start;
-                op->end_cc  =p->est_s2pf_start+kTd3[p->shape_s3];
-            } else {
-                op->kind=MOE_DMA_OP_S3;
-                op->start_cc=p->est_s2_end;
-                op->end_cc  =p->est_s2_end+kTd3[p->shape_s3];
-            }
+            op->kind=has_s2pf?MOE_DMA_OP_S2_PREFETCH:MOE_DMA_OP_S3;
+            /* cluster/weight/shape/alloc_bw/start_cc/end_cc removed */
         }
 
-        /* S4 prefetch: next expert's gate/up via iDMA during S4 window */
-        if (!skip_s1){
+        /* S4 prefetch: next expert's gate/up via iDMA during S4 window.
+         * Applies regardless of skip_s1: when skip_s1=1, iDMA is idle the
+         * entire task, and dma1_end==est_start which is always <= s4_start. */
+        {
             int16_t next_eid=-1;
             for (uint8_t pj=pi+1u;pj<n_plan;pj++){
                 if (plan[pj].cluster==p->cluster){ next_eid=plan[pj].eid; break; }
@@ -835,23 +859,17 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
                     if (dma1_end<=s4s && (s4s+pfd)<=p->est_end
                             && out->n_dma_ops<MOE_MAX_DMA_OPS){
                         moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
-                        op->task_idx=out->n_tasks; op->cluster=cl; op->expert_id=next_eid;
-                        op->kind=MOE_DMA_OP_S4_PREFETCH; op->weight=MOE_WEIGHT_GATE_UP;
-                        op->shape=MOE_SHAPE_A; op->alloc_bw=64u; op->dma=MOE_DMA_IDMA;
-                        op->start_cc=s4s; op->end_cc=s4s+pfd;
-                        tk->prefetch_eid=next_eid;
-                        tk->dma_slots[MOE_TASK_DMA_SLOT_S4_PREFETCH].valid=1u;
+                        op->task_idx=(uint16_t)out->n_tasks;
+                        op->expert_id=next_eid;
+                        op->kind=MOE_DMA_OP_S4_PREFETCH;
+                        op->dma=MOE_DMA_IDMA;
                     }
                 }
             }
         }
         out->n_tasks++;
     }
-
-    uint32_t ms=0;
-    for (uint16_t ti=0;ti<out->n_tasks;ti++)
-        if (out->tasks[ti].est_end_cc>ms) ms=out->tasks[ti].est_end_cc;
-    out->est_makespan_cc=ms;
+    /* est_makespan_cc removed from compact moe_schedule_t */
     return MOE_OK;
 }
 
@@ -865,7 +883,10 @@ moe_status_t moe_schedule(const moe_request_t *req, moe_schedule_t *out)
     if (ne==0u||ne>MOE_MAX_EXPERTS) return MOE_ERR_BAD_INPUT;
     for (uint16_t i=0u;i<ne;i++) if (req->experts[i].ntokens==0u) return MOE_ERR_BAD_INPUT;
 
-    plan_t plan[MOE_MAX_TASKS]; uint8_t n_plan=0;
-    out->est_makespan_cc=moe_plan(req,plan,&n_plan);
+    /* Static plan buffer avoids large stack allocation (128*36=4.6KB at 64 experts).
+     * Safe for single-threaded CVA6 host execution. */
+    static plan_t plan[MOE_MAX_TASKS];
+    uint8_t n_plan=0;
+    (void)moe_plan(req,plan,&n_plan); /* makespan returned but not stored in compact output */
     return lower_plan(plan,n_plan,req,out);
 }

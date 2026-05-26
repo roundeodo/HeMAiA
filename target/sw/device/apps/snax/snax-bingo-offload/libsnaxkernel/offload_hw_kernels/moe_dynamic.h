@@ -382,8 +382,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
     uint32_t K           = ((uint32_t *)arg)[6];
     uint32_t N           = ((uint32_t *)arg)[7];
     uint32_t array_shape = ((uint32_t *)arg)[8];
-    uint32_t rscl_mult   = ((uint32_t *)arg)[9];
-    uint32_t rscl_shift  = ((uint32_t *)arg)[10];
+    uint32_t rscl_mult           = ((uint32_t *)arg)[9];
+    uint32_t rscl_shift          = ((uint32_t *)arg)[10];
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
 
     uint32_t meshRow, tileSize, meshCol;
@@ -397,28 +397,36 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
         return BINGO_RET_FAIL;
     }
 
-    // A: INT16, 6-dim temporal (shared for gate and up), 2-dim spatial (hw req.)
-    // Spatial stride[1]=0: unused 2nd dim placeholder (S_STRIDE_NUM_READER_0=2)
-    int32_t Asl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), 0 };
+    // A: INT16, 6-dim temporal (shared for gate and up), 2-dim spatial [2, 8] (hw bounds).
+    // Dynamic MoE: gather stores tokens in L1 without padding (stride = K*tileSize*2 = 2048).
+    // Asl[0]=8 (inner stride, 1 bank); Asl[1]=a_row_stride (outer stride = packed token row).
+    // Ats[0] = tileSize*2 (K stride: advance one K-tile within token row).
+    // Ats[2] = meshRow * a_row_stride (M stride: skip meshRow packed rows).
+    uint32_t a_row_stride = (uint32_t)K * (uint32_t)tileSize * 2u;  /* = 2048, packed (no pad) */
+    int32_t Asl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), (int32_t)a_row_stride };
     int32_t Atb[6]       = { (int32_t)K, (int32_t)N, (int32_t)M, 1, 1, 1 };
-    int32_t Ats[6]       = { (int32_t)(meshRow * tileSize * 2), 0,
-                              (int32_t)(K * meshRow * tileSize * 2), 0, 0, 0 };
+    int32_t Ats[6]       = { (int32_t)(tileSize * 2), 0,
+                              (int32_t)(meshRow * a_row_stride), 0, 0, 0 };
     int32_t chan_en_A[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_A(array_shape) };
 
     // B0 (gate): INT4 packed, 4-dim temporal, 2-dim spatial (hw req.)
-    // n_b_chan: active B channels per shape (S0=2, S1=4, S2=8)
-    uint32_t n_b_chan     = (array_shape == 0u) ? 2u : (array_shape == 1u) ? 4u : 8u;
+    // L15 B canonical layout: [N_tiles_S0][K_tiles][16 bytes].
+    // B_sl[1] = K*16 = 2048 (K-section stride between outer spatial j-groups; fixed).
+    // B_ts[0] = 16 (fixed k-stride for all shapes; NOT B_stream_bytes).
+    // B_ts[1] = K * B_stream_bytes (correct N-tile stride, same for all shapes).
+    uint32_t n_b_chan      = (array_shape == 0u) ? 2u : (array_shape == 1u) ? 4u : 8u;
     int32_t B_stream_bytes = (int32_t)(n_b_chan * (MOE_DUAL_VC_BANK_WIDTH / 8));
-    int32_t B0sl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), 0 };
-    int32_t B0tb[4]       = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
-    int32_t B0ts[4]       = { B_stream_bytes, (int32_t)(K * B_stream_bytes), 0, 0 };
-    int32_t chan_en_B0[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
+    uint32_t b_k_section   = (uint32_t)K * (uint32_t)tileSize * 2u;  /* = K*16 = 2048 */
+    int32_t B0sl[2]        = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), (int32_t)b_k_section };
+    int32_t B0tb[4]        = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
+    int32_t B0ts[4]        = { (int32_t)(tileSize * 2u), (int32_t)(K * B_stream_bytes), 0, 0 };
+    int32_t chan_en_B0[1]  = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
 
-    // B1 (up): INT4 packed, same shape as B0, 2-dim spatial (hw req.)
-    int32_t B1sl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), 0 };
-    int32_t B1tb[4]       = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
-    int32_t B1ts[4]       = { B_stream_bytes, (int32_t)(K * B_stream_bytes), 0, 0 };
-    int32_t chan_en_B1[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
+    // B1 (up): INT4 packed, same layout as B0, 2-dim spatial (hw req.)
+    int32_t B1sl[2]        = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), (int32_t)b_k_section };
+    int32_t B1tb[4]        = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
+    int32_t B1ts[4]        = { (int32_t)(tileSize * 2u), (int32_t)(K * B_stream_bytes), 0, 0 };
+    int32_t chan_en_B1[1]  = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
 
     // D0: INT16, 4-dim temporal (4-lane postproc: 1ch, 4×int16/beat=8 bytes/beat)
     // 8 beats per N-tile (constant for all shapes: meshRow*meshCol/4=8)
@@ -470,6 +478,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
     // Mode-1 A reader directly reads the Mode-0 D0 output without any copy.
     return BINGO_RET_SUCC;
 }
+/* ── Schedule verification debug: set to 1 to print slot assignment on UART ── */
+#define MOE_DYN_DEBUG_SCHED_VERIFY 1
+
 /* ── ctrl-word field extractors ─────────────────────────────────────────────
  * Bit layout written by __host_moe_program_task_arg each scheduling round:
  *   bit  0:       active            (1 = this slot is live)
@@ -494,7 +505,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
 #define MOE_DYN_CTRL_DMA_S1(c)   (((c) >> 9u) & 3u)
 #define MOE_DYN_CTRL_DMA_S3(c)   (((c) >> 11u) & 3u)
 #define MOE_DYN_CTRL_CLUSTER(c)  (((c) >> 13u) & 1u)
-#define MOE_DYN_CTRL_SLOT_ID(c)  (((c) >> 14u) & 3u)
+#define MOE_DYN_CTRL_SLOT_ID(c)  (((c) >> 14u) & 31u) /* bits [18:14]: 5-bit slot_id (0..31, supports 64 experts/2) */
 /* ── dma_slot_vd field extractors (3 bits per slot: valid | dma[1:0]) ───────
  * For slot i: bit[i*3] = valid, bits[i*3+2:i*3+1] = dma binding
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -510,14 +521,22 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
 #define MOE_DYN_DMA_BOTH             3u
 #define MOE_DYN_RT_C2_DONE           0u
 #define MOE_DYN_RT_C3_DONE           1u
-#define MOE_DYN_RT_IDMA_SEQ          2u
-#define MOE_DYN_RT_XDMA_SEQ          3u
 
 static inline uint32_t __moe_dyn_shape_m(uint32_t shape)
 {
     if (shape == 0u) return 8u;
     if (shape == 1u) return 4u;
     return 2u;
+}
+
+/* Return per-VC meshCol for the given array_shape index.
+ * S0: meshCol=4, S1: meshCol=8, S2: meshCol=16 (multidim_spatial_k8 hardware).
+ * N1 = indiv_N_per_block / __moe_dyn_meshcol(shape) at runtime. */
+static inline uint32_t __moe_dyn_meshcol(uint32_t shape)
+{
+    if (shape == 0u) return MOE_DUAL_VC_MESH_COL_0;
+    if (shape == 1u) return MOE_DUAL_VC_MESH_COL_1;
+    return MOE_DUAL_VC_MESH_COL_2;
 }
 
 static inline uint32_t __moe_dyn_s1_block_count(
@@ -579,11 +598,13 @@ static inline volatile uint32_t *__moe_dyn_runtime_state(
 static inline void __moe_dyn_wait_task_start(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
 {
+    uint32_t wait_for_peer_slots = cfg->wait_for_peer_slots;
+    if (wait_for_peer_slots == 0u) return;
+
     volatile uint32_t *state = __moe_dyn_runtime_state(cfg);
-    if (state == (volatile uint32_t *)0) return;
-    uint32_t peer_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ? MOE_DYN_RT_C3_DONE
-                                                                  : MOE_DYN_RT_C2_DONE;
-    while (state[peer_idx] < cfg->wait_for_peer_slots) {
+    uint32_t peer_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ?
+        MOE_DYN_RT_C3_DONE : MOE_DYN_RT_C2_DONE;
+    while (state[peer_idx] < wait_for_peer_slots) {
         asm volatile("" ::: "memory");
     }
     asm volatile("fence r, rw" ::: "memory");
@@ -593,49 +614,27 @@ static inline void __moe_dyn_mark_task_complete(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
 {
     volatile uint32_t *state = __moe_dyn_runtime_state(cfg);
-    if (state == (volatile uint32_t *)0) return;
-    uint32_t self_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ? MOE_DYN_RT_C2_DONE
-                                                                   : MOE_DYN_RT_C3_DONE;
-    asm volatile("fence rw, rw" ::: "memory");
+    uint32_t self_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ?
+        MOE_DYN_RT_C2_DONE : MOE_DYN_RT_C3_DONE;
+    asm volatile("fence rw, w" ::: "memory");
     state[self_idx] = MOE_DYN_CTRL_SLOT_ID(cfg->ctrl) + 1u;
+    asm volatile("fence w, w" ::: "memory");
 }
 
 static inline void __moe_dyn_wait_dma_slot(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
     uint32_t slot)
 {
-    volatile uint32_t *state = __moe_dyn_runtime_state(cfg);
-    if (state == (volatile uint32_t *)0 || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) return;
-    uint32_t binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
-    if ((binding & MOE_DYN_DMA_IDMA) != 0u) {
-        uint32_t seq = cfg->dma_slot_idma_seq[slot];
-        while (state[MOE_DYN_RT_IDMA_SEQ] != seq) {
-            asm volatile("" ::: "memory");
-        }
-    }
-    if ((binding & MOE_DYN_DMA_XDMA) != 0u) {
-        uint32_t seq = cfg->dma_slot_xdma_seq[slot];
-        while (state[MOE_DYN_RT_XDMA_SEQ] != seq) {
-            asm volatile("" ::: "memory");
-        }
-    }
-    asm volatile("fence r, rw" ::: "memory");
+    (void)cfg;
+    (void)slot;
 }
 
 static inline void __moe_dyn_mark_dma_slot(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
     uint32_t slot)
 {
-    volatile uint32_t *state = __moe_dyn_runtime_state(cfg);
-    if (state == (volatile uint32_t *)0 || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) return;
-    uint32_t binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
-    asm volatile("fence rw, rw" ::: "memory");
-    if ((binding & MOE_DYN_DMA_IDMA) != 0u) {
-        state[MOE_DYN_RT_IDMA_SEQ] = cfg->dma_slot_idma_seq[slot] + 1u;
-    }
-    if ((binding & MOE_DYN_DMA_XDMA) != 0u) {
-        state[MOE_DYN_RT_XDMA_SEQ] = cfg->dma_slot_xdma_seq[slot] + 1u;
-    }
+    (void)cfg;
+    (void)slot;
 }
 
 static inline uint32_t __moe_dyn_copy_gate_up_weight(
@@ -810,15 +809,17 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
         return BINGO_RET_FAIL;
     }
 
-    if (cfg->indiv_K1 == 0u || cfg->A_token_bytes == 0u ||
-        (cfg->A_token_bytes % cfg->indiv_K1) != 0u) {
-        printf_safe("[MoEDyn C%d] invalid A layout: K1=%u A_token_bytes=%u\r\n",
-                    snrt_cluster_idx(), cfg->indiv_K1, cfg->A_token_bytes);
+    if (cfg->A_token_bytes == 0u) {
+        printf_safe("[MoEDyn C%d] invalid A layout: A_token_bytes=%u\r\n",
+                    snrt_cluster_idx(), cfg->A_token_bytes);
         return BINGO_RET_FAIL;
     }
 
-    uint32_t a_kblock_token_bytes = cfg->A_token_bytes / cfg->indiv_K1;
-    uint32_t a_kblock_stride = cfg->max_tokens_per_expert * a_kblock_token_bytes;
+    /* L3 每 token 后有 32 字节 padding（datagen 预加），所以 L3 stride = A_token_bytes + 32。
+     * L1 中 VersaCore streamer 以固定 stride = K×tileSize×2 = A_token_bytes 读取，
+     * 不需要 padding，tokens 紧密排列。每 token 做一次整行 DMA（2048 bytes）。 */
+    uint32_t l3_a_row_stride = cfg->A_token_bytes + 32u;  /* L3 stride: includes 32-byte padding */
+    uint32_t l1_a_row_stride = cfg->A_token_bytes;          /* L1 stride: packed, no padding */
     uint16_t *token_ids = (uint16_t *)(uintptr_t)cfg->token_ids_addr;
     uint32_t gather_dma = (MOE_DYN_CTRL_DMA_S1(cfg->ctrl) != 0u) ? MOE_DYN_CTRL_DMA_S1(cfg->ctrl) : 1u;
     for (uint32_t local_t = 0; local_t < cfg->ntokens; local_t++) {
@@ -828,25 +829,19 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
                         snrt_cluster_idx(), token_id, cfg->max_tokens_per_expert);
             return BINGO_RET_FAIL;
         }
-        for (uint32_t k = 0; k < cfg->indiv_K1; k++) {
-            uint64_t src = cfg->input_A_l3_base +
-                (uint64_t)token_id * (uint64_t)cfg->A_token_bytes +
-                (uint64_t)k * (uint64_t)a_kblock_token_bytes;
-            uint32_t dst = cfg->l1_a_addr +
-                k * a_kblock_stride + local_t * a_kblock_token_bytes;
-            uint32_t rc = __moe_dyn_copy_one(gather_dma,
-                                             __moe_dyn_l1_wide(dst), src,
-                                             a_kblock_token_bytes);
-            if (rc != BINGO_RET_SUCC) return rc;
-        }
+        uint64_t src = cfg->input_A_l3_base +
+            (uint64_t)token_id * (uint64_t)l3_a_row_stride;
+        uint32_t dst = cfg->l1_a_addr + local_t * l1_a_row_stride;
+        uint32_t rc = __moe_dyn_copy_one(gather_dma,
+                                         __moe_dyn_l1_wide(dst), src,
+                                         cfg->A_token_bytes); /* copy only data, no L3 padding */
+        if (rc != BINGO_RET_SUCC) return rc;
     }
     if (m_s1_exec > cfg->ntokens) {
-        for (uint32_t k = 0; k < cfg->indiv_K1; k++) {
-            __moe_dyn_zero_bytes((uint64_t)cfg->l1_a_addr +
-                (uint64_t)k * (uint64_t)a_kblock_stride +
-                (uint64_t)cfg->ntokens * (uint64_t)a_kblock_token_bytes,
-                (m_s1_exec - cfg->ntokens) * a_kblock_token_bytes);
-        }
+        /* Zero padding token rows in one contiguous range (L1 row = l1_a_row_stride bytes). */
+        __moe_dyn_zero_bytes((uint64_t)cfg->l1_a_addr +
+            (uint64_t)cfg->ntokens * (uint64_t)l1_a_row_stride,
+            (uint64_t)(m_s1_exec - cfg->ntokens) * (uint64_t)l1_a_row_stride);
     }
     return BINGO_RET_SUCC;
 }
@@ -861,6 +856,11 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *
 
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
+#if MOE_DYN_DEBUG_SCHED_VERIFY
+    /* PROBE gather_s1: 在 ACTIVE check 前 — 确认 DM core 进入了此函数 */
+    printf_safe("[PROBE gs C%d] ctrl=0x%08x ntok=%u\r\n",
+                snrt_cluster_idx(), cfg->ctrl, cfg->ntokens);
+#endif
     if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u) return BINGO_RET_SUCC;
     __moe_dyn_wait_task_start(cfg);
 
@@ -894,9 +894,36 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         __moe_dyn_block_cfg(arg, &n);
     uint32_t s1_blocks = __moe_dyn_s1_block_count(cfg);
+#if MOE_DYN_DEBUG_SCHED_VERIFY
+    if (n == 0u) {
+        /* RAW probe: before ACTIVE check — shows ctrl even if ACTIVE=0 */
+        printf_safe("[DEV C%d] n=%u ctrl=0x%08x ntok=%u s1blk=%u\r\n",
+                    snrt_cluster_idx(), n, cfg->ctrl, cfg->ntokens, s1_blocks);
+    }
+#endif
     if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u || n >= s1_blocks) {
         return BINGO_RET_SUCC;
     }
+#if MOE_DYN_DEBUG_SCHED_VERIFY
+    if (n == 0u) {
+        /* sk: skip_s1 skip_s3 skip_s2 skip_s4 | ms2/ms4: actual exec tokens */
+        printf_safe("[DEV C%d] slot=%u e%u n%u sh%u/%u dm%u/%u sk%u%u%u%u ms2=%u ms4=%u\r\n",
+                    snrt_cluster_idx(),
+                    MOE_DYN_CTRL_SLOT_ID(cfg->ctrl),
+                    (unsigned)cfg->expert_id,
+                    (unsigned)cfg->ntokens,
+                    MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl),
+                    MOE_DYN_CTRL_SHAPE_S3(cfg->ctrl),
+                    MOE_DYN_CTRL_DMA_S1(cfg->ctrl),
+                    MOE_DYN_CTRL_DMA_S3(cfg->ctrl),
+                    MOE_DYN_CTRL_SKIP_S1(cfg->ctrl),
+                    MOE_DYN_CTRL_SKIP_S3(cfg->ctrl),
+                    MOE_DYN_CTRL_SKIP_S2(cfg->ctrl),
+                    MOE_DYN_CTRL_SKIP_S4(cfg->ctrl),
+                    (unsigned)cfg->m_s2_exec,
+                    (unsigned)cfg->m_s4_exec);
+    }
+#endif
     if (MOE_DYN_CTRL_SKIP_S1(cfg->ctrl) != 0u) return BINGO_RET_SUCC;
     if (MOE_DYN_CTRL_DMA_S1(cfg->ctrl) == 0u) return BINGO_RET_FAIL;
 
@@ -923,34 +950,52 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         __moe_dyn_block_cfg(arg, &n);
     uint32_t s1_blocks = __moe_dyn_s1_block_count(cfg);
+#if MOE_DYN_DEBUG_SCHED_VERIFY
+    if (n == 0u) {
+        /* PROBE compute_gate_up: 在 ACTIVE check 前 — 确认 core 0 进入了 GEMM 函数 */
+        printf_safe("[PROBE cgu C%d n%u] ctrl=0x%08x ntok=%u\r\n",
+                    snrt_cluster_idx(), n, cfg->ctrl, cfg->ntokens);
+    }
+#endif
     if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u || n >= s1_blocks) {
         return BINGO_RET_SUCC;
     }
 
-    uint32_t m_s1_exec = __moe_dyn_m_exec(cfg->ntokens, MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl));
+    uint32_t shape_s1    = MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl);
+    uint32_t m_s1_exec  = __moe_dyn_m_exec(cfg->ntokens, shape_s1); /* token count for gather/bounds */
     if (m_s1_exec > cfg->max_tokens_per_expert) {
         printf_safe("[MoEDyn C%d] slot=%u ntokens=%u exceeds max=%u\r\n",
                     snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->ntokens,
                     cfg->max_tokens_per_expert);
         return BINGO_RET_FAIL;
     }
+    /* S1 只跑一个 batch (M1=1, M2=1): VersaCore M=1，只处理 meshRow 个 token;
+     * 剩余 token 由 compute_gate_up_full (S2) 统一处理，M = m_s2_exec */
+    (void)m_s1_exec; /* 仅用于上方 bounds check，不再用于计算 M */
 
     __snax_bingo_kernel_dual_vc_swiglu_full_args_t swiglu_args;
     if (MOE_DYN_CTRL_SKIP_S1(cfg->ctrl) != 0u) {
         /* cache hit: S1 全部跳过，所有 token 由 compute_gate_up_full (S2) 处理 */
         return BINGO_RET_SUCC;
     } else {
-        /* 正常流水线：每次处理 block n，与 load[n] 重叠执行 */
+        /* 正常流水线：每次处理 block n，与 load[n] 重叠执行。
+         * D 地址连续布局：block n 紧接 block n-1 之后，使 S3 能以连续 K-tiles 读取全 N。
+         * 每个 M-tile 中 block n 的字节偏移 = n × (shape_m × d_row_bytes)。
+         * shape_m = meshRow of shape_s1；d_row_bytes = indiv_D_tile_bytes / max_tokens。
+         * 对 shape C (meshRow=2, meshCol=16): 每 block M-tile = 2×512 = 1024 bytes;
+         *   block 0 at [0..1023], block 1 at [1024..2047] → full-N M-tile = 2048 bytes ✓ */
+        uint32_t d_row_bytes_s1 = cfg->indiv_D_tile_bytes / cfg->max_tokens_per_expert;
+        uint32_t shape_m_s1     = __moe_dyn_shape_m(shape_s1);
         swiglu_args = (__snax_bingo_kernel_dual_vc_swiglu_full_args_t){
             .input_A_addr      = cfg->l1_a_addr,
             .input_B_gate_addr = cfg->l1_b_gate_addr + n * cfg->indiv_B_tile_bytes,
             .input_B_up_addr   = cfg->l1_b_up_addr   + n * cfg->indiv_B_tile_bytes,
-            .output_D0_addr    = cfg->l1_d_addr + n * cfg->indiv_D_tile_bytes,
+            .output_D0_addr    = cfg->l1_d_addr + n * shape_m_s1 * d_row_bytes_s1,
             .output_D1_addr    = cfg->l1_d1_scratch_addr,
-            .M           = m_s1_exec,
+            .M           = 1u, /* S1: 固定 1 个 batch (M1=1) */
             .K           = cfg->indiv_K1,
-            .N           = cfg->indiv_N1,
-            .array_shape = cfg->array_shape,
+            .N           = cfg->indiv_N_per_block / __moe_dyn_meshcol(shape_s1),
+            .array_shape = shape_s1,
             .rescale_mult = cfg->rescale_mult,
             .rescale_shift = cfg->rescale_shift,
         };
@@ -1003,13 +1048,17 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_blo
         return BINGO_RET_SUCC;
     }
 
-    uint32_t m_s3_exec = __moe_dyn_m_exec(cfg->ntokens, MOE_DYN_CTRL_SHAPE_S3(cfg->ctrl));
+    uint32_t shape_s3    = MOE_DYN_CTRL_SHAPE_S3(cfg->ctrl);
+    uint32_t m_s3_exec  = __moe_dyn_m_exec(cfg->ntokens, shape_s3); /* token count for bounds */
     if (m_s3_exec > cfg->max_tokens_per_expert) {
         printf_safe("[MoEDyn C%d] slot=%u ntokens=%u exceeds max=%u\r\n",
                     snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->ntokens,
                     cfg->max_tokens_per_expert);
         return BINGO_RET_FAIL;
     }
+    /* S3 只跑一个 batch (M1=1, M2=1): VersaCore M=1，只处理 meshRow 个 token;
+     * 剩余 token 由 compute_down_full (S4) 统一处理，M = m_s4_exec */
+    (void)m_s3_exec; /* 仅用于上方 bounds check，不再用于计算 M */
 
     __snax_bingo_kernel_dual_vc_gemm_full_args_t down_args;
     if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u) {
@@ -1025,10 +1074,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_blo
             .output_D0_addr = cfg->l1_down_d_addr + n * cfg->indiv_down_D_tile_bytes,
             .output_D1_addr = cfg->l1_down_d_addr +
                 (s3_blocks + n) * cfg->indiv_down_D_tile_bytes,
-            .M           = m_s3_exec,
+            .M           = 1u, /* S3: 固定 1 个 batch (M1=1) */
             .K           = cfg->indiv_down_K1,
-            .N           = cfg->indiv_down_N1,
-            .array_shape = cfg->array_shape,
+            .N           = cfg->indiv_down_N_per_block / __moe_dyn_meshcol(shape_s3),
+            .array_shape = shape_s3,
             .rescale_mult = cfg->rescale_mult,
             .rescale_shift = cfg->rescale_shift,
         };
@@ -1106,15 +1155,17 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
     }
 
     uint32_t m_s2 = cfg->m_s2_exec;
+    uint32_t shape_s1 = MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl);  // S1's shape: used for tail A-offset only
+    uint32_t shape_s2 = 2u;  // S2 固定 shape C (meshRow=2)，与 S1 动态 shape 解耦
     if (m_s2 == 0u) return BINGO_RET_SUCC;
-    if (m_s2 > cfg->max_tokens_per_expert) {
+    if (m_s2 > cfg->max_tokens_per_expert / 2u) {  /* m_s2 单位: M-tile；shape C meshRow=2 */
         printf_safe("[MoEDyn C%d] slot=%u m_s2_exec=%u exceeds max=%u\r\n",
                     snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), m_s2,
                     cfg->max_tokens_per_expert);
         return BINGO_RET_FAIL;
     }
 
-    uint32_t s1_blocks = __moe_dyn_s1_block_count(cfg);
+    uint32_t gate_up_n2 = __moe_dyn_s1_block_count(cfg);  /* gate/up N 方向 N2 分块数 */
 
     if (MOE_DYN_CTRL_SKIP_S1(cfg->ctrl) != 0u) {
         /* cache hit: 权重全部驻留 TCDM，single full-N GEMM 处理所有 token */
@@ -1126,56 +1177,42 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
             .output_D1_addr    = cfg->l1_d1_scratch_addr,
             .M                 = m_s2,
             .K                 = cfg->indiv_K1,
-            .N                 = s1_blocks * cfg->indiv_N1,
-            .array_shape       = cfg->array_shape,
+            .N                 = gate_up_n2 * cfg->indiv_N_per_block / __moe_dyn_meshcol(shape_s2),
+            .array_shape       = shape_s2,
             .rescale_mult      = cfg->rescale_mult,
             .rescale_shift     = cfg->rescale_shift,
         };
         return __snax_bingo_kernel_dual_vc_swiglu_full(&swiglu_args);
     } else {
-        /* 正常 tail：A 从 shape_M token 处偏移，per-block 写入 D 的 shape_M 行之后 */
-        uint32_t shape_m = __moe_dyn_shape_m(MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl));
-        uint32_t a_kblock_token_bytes = cfg->A_token_bytes / cfg->indiv_K1;
-        uint32_t a_offset  = shape_m * a_kblock_token_bytes;
+        /* 正常 tail：single full-N GEMM，与 cache hit 路径对称。
+         * d_offset 跳过 S1 已写入的完整 M-tile（全 N-blocks 连续布局）:
+         *   d_offset = shape_m × gate_up_n2 × d_row_bytes
+         * 其中 d_row_bytes = indiv_D_tile_bytes / max_tokens（每 token 每 N-block 的字节数）。*/
+        uint32_t shape_m = __moe_dyn_shape_m(shape_s1);
+        uint32_t a_offset    = shape_m * cfg->A_token_bytes;
         uint32_t d_row_bytes = cfg->indiv_D_tile_bytes / cfg->max_tokens_per_expert;
-        uint32_t d_offset  = shape_m * d_row_bytes;
-        /* n=0: full configuration — programs all 85 CSRs and does bank replication. */
-        {
-            __snax_bingo_kernel_dual_vc_swiglu_full_args_t swiglu_args = {
-                .input_A_addr      = cfg->l1_a_addr + a_offset,
-                .input_B_gate_addr = cfg->l1_b_gate_addr,
-                .input_B_up_addr   = cfg->l1_b_up_addr,
-                .output_D0_addr    = cfg->l1_d_addr + d_offset,
-                .output_D1_addr    = cfg->l1_d1_scratch_addr,
-                .M                 = m_s2,
-                .K                 = cfg->indiv_K1,
-                .N                 = cfg->indiv_N1,
-                .array_shape       = cfg->array_shape,
-                .rescale_mult      = cfg->rescale_mult,
-                .rescale_shift     = cfg->rescale_shift,
-            };
-            uint32_t rc = __snax_bingo_kernel_dual_vc_swiglu_full(&swiglu_args);
-            if (rc != BINGO_RET_SUCC) return rc;
-        }
-        /* n=1..N-1: shape/stride/mode/rescale unchanged — update 3 base ptrs only. */
-        for (uint32_t n = 1u; n < s1_blocks; n++) {
-            uint32_t D0n = cfg->l1_d_addr + n * cfg->indiv_D_tile_bytes + d_offset;
-            moe_set_dual_vc_addrs_swiglu(
-                cfg->l1_b_gate_addr + n * cfg->indiv_B_tile_bytes,
-                cfg->l1_b_up_addr   + n * cfg->indiv_B_tile_bytes,
-                D0n);
-            moe_start_dual_vc_and_streamer();
-            moe_wait_dual_vc_and_streamer();
-            moe_dual_vc_swiglu_bank_replicate(m_s2, cfg->indiv_N1, cfg->array_shape, D0n);
-        }
-        return BINGO_RET_SUCC;
+        uint32_t d_offset    = shape_m * gate_up_n2 * d_row_bytes;
+        __snax_bingo_kernel_dual_vc_swiglu_full_args_t swiglu_args = {
+            .input_A_addr      = cfg->l1_a_addr + a_offset,
+            .input_B_gate_addr = cfg->l1_b_gate_addr,
+            .input_B_up_addr   = cfg->l1_b_up_addr,
+            .output_D0_addr    = cfg->l1_d_addr + d_offset,
+            .output_D1_addr    = cfg->l1_d1_scratch_addr,
+            .M                 = m_s2,
+            .K                 = cfg->indiv_K1,
+            .N                 = gate_up_n2 * cfg->indiv_N_per_block / __moe_dyn_meshcol(shape_s2),
+            .array_shape       = shape_s2,
+            .rescale_mult      = cfg->rescale_mult,
+            .rescale_shift     = cfg->rescale_shift,
+        };
+        return __snax_bingo_kernel_dual_vc_swiglu_full(&swiglu_args);
     }
 }
 
 /* ============================================================
  * S4: down 全量 GEMM（在 S3 pipeline 之后处理剩余/全部 token）
  *   - skip_s3=1 (cache hit): A 从偏移 0 开始，N = full_N，single call
- *   - skip_s3=0 (tail):      A 从 shape_M_down token 处开始，per-block loop
+ *   - skip_s3=0 (tail):      A 从 shape_m_down token 处开始，single full-N call
  * ============================================================ */
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_full(void *arg)
 {
@@ -1192,15 +1229,17 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
     }
 
     uint32_t m_s4 = cfg->m_s4_exec;
+    uint32_t shape_s3 = MOE_DYN_CTRL_SHAPE_S3(cfg->ctrl);  // S3's shape: used for tail A-offset only
+    uint32_t shape_s4 = 2u;  // S4 固定 shape C (meshRow=2)，与 S3 动态 shape 解耦
     if (m_s4 == 0u) return BINGO_RET_SUCC;
-    if (m_s4 > cfg->max_tokens_per_expert) {
+    if (m_s4 > cfg->max_tokens_per_expert / 2u) {  /* m_s4 单位: M-tile；shape C meshRow=2 */
         printf_safe("[MoEDyn C%d] slot=%u m_s4_exec=%u exceeds max=%u\r\n",
                     snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), m_s4,
                     cfg->max_tokens_per_expert);
         return BINGO_RET_FAIL;
     }
 
-    uint32_t s3_blocks = __moe_dyn_s3_block_count(cfg);
+    uint32_t down_n2 = __moe_dyn_s3_block_count(cfg);  /* down-proj N 方向 N2 分块数 */
 
     if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u) {
         /* cache hit: 权重全部驻留 TCDM，single full-N down GEMM 处理所有 token */
@@ -1208,56 +1247,43 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
             .input_A_addr   = cfg->l1_d_addr,
             .input_B0_addr  = cfg->l1_b_down_addr,
             .input_B1_addr  = cfg->l1_b_down_addr +
-                s3_blocks * cfg->indiv_down_B_tile_bytes,
+                down_n2 * cfg->indiv_down_B_tile_bytes,
             .output_D0_addr = cfg->l1_down_d_addr,
             .output_D1_addr = cfg->l1_down_d_addr +
-                s3_blocks * cfg->indiv_down_D_tile_bytes,
+                down_n2 * cfg->indiv_down_D_tile_bytes,
             .M              = m_s4,
             .K              = cfg->indiv_down_K1,
-            .N              = s3_blocks * cfg->indiv_down_N1,
-            .array_shape    = cfg->array_shape,
+            .N              = down_n2 * cfg->indiv_down_N_per_block / __moe_dyn_meshcol(shape_s4),
+            .array_shape    = shape_s4,
             .rescale_mult   = cfg->rescale_mult,
             .rescale_shift  = cfg->rescale_shift,
         };
         return __snax_bingo_kernel_dual_vc_gemm_full(&down_args);
     } else {
-        /* 正常 tail：A(=D_gate_up) 从 shape_M_down 行偏移，per-block 写入 down_d */
-        uint32_t shape_m_down = __moe_dyn_shape_m(MOE_DYN_CTRL_SHAPE_S3(cfg->ctrl));
+        /* 正常 tail：single full-N GEMM，与 cache-hit 路径对称。
+         * A 跳过 S3 已处理的 shape_m_down 个 token（a_offset），
+         * D 输出在各块内从 down_d_offset 处写入（与 S3 per-block 输出对齐）。*/
+        uint32_t shape_m_down = __moe_dyn_shape_m(shape_s3);
         uint32_t d_row_bytes      = cfg->indiv_D_tile_bytes / cfg->max_tokens_per_expert;
-        uint32_t a_offset         = shape_m_down * d_row_bytes;
+        uint32_t a_offset         = shape_m_down * down_n2 * d_row_bytes;
         uint32_t down_d_row_bytes = cfg->indiv_down_D_tile_bytes / cfg->max_tokens_per_expert;
         uint32_t down_d_offset    = shape_m_down * down_d_row_bytes;
-        /* n=0: full configuration — programs all 77 CSRs. */
-        {
-            __snax_bingo_kernel_dual_vc_gemm_full_args_t down_args = {
-                .input_A_addr   = cfg->l1_d_addr + a_offset,
-                .input_B0_addr  = cfg->l1_b_down_addr,
-                .input_B1_addr  = cfg->l1_b_down_addr +
-                    s3_blocks * cfg->indiv_down_B_tile_bytes,
-                .output_D0_addr = cfg->l1_down_d_addr + down_d_offset,
-                .output_D1_addr = cfg->l1_down_d_addr +
-                    s3_blocks * cfg->indiv_down_D_tile_bytes + down_d_offset,
-                .M              = m_s4,
-                .K              = cfg->indiv_down_K1,
-                .N              = cfg->indiv_down_N1,
-                .array_shape    = cfg->array_shape,
-                .rescale_mult   = cfg->rescale_mult,
-                .rescale_shift  = cfg->rescale_shift,
-            };
-            uint32_t rc = __snax_bingo_kernel_dual_vc_gemm_full(&down_args);
-            if (rc != BINGO_RET_SUCC) return rc;
-        }
-        /* n=1..N-1: shape/stride/mode/rescale unchanged — update 4 base ptrs only. */
-        for (uint32_t n = 1u; n < s3_blocks; n++) {
-            moe_set_dual_vc_addrs_gemm(
-                cfg->l1_b_down_addr + n * cfg->indiv_down_B_tile_bytes,
-                cfg->l1_b_down_addr + (s3_blocks + n) * cfg->indiv_down_B_tile_bytes,
-                cfg->l1_down_d_addr + n * cfg->indiv_down_D_tile_bytes + down_d_offset,
-                cfg->l1_down_d_addr + (s3_blocks + n) * cfg->indiv_down_D_tile_bytes + down_d_offset);
-            moe_start_dual_vc_and_streamer();
-            moe_wait_dual_vc_and_streamer();
-        }
-        return BINGO_RET_SUCC;
+        __snax_bingo_kernel_dual_vc_gemm_full_args_t down_args = {
+            .input_A_addr   = cfg->l1_d_addr + a_offset,
+            .input_B0_addr  = cfg->l1_b_down_addr,
+            .input_B1_addr  = cfg->l1_b_down_addr +
+                down_n2 * cfg->indiv_down_B_tile_bytes,
+            .output_D0_addr = cfg->l1_down_d_addr + down_d_offset,
+            .output_D1_addr = cfg->l1_down_d_addr +
+                down_n2 * cfg->indiv_down_D_tile_bytes + down_d_offset,
+            .M              = m_s4,
+            .K              = cfg->indiv_down_K1,
+            .N              = down_n2 * cfg->indiv_down_N_per_block / __moe_dyn_meshcol(shape_s4),
+            .array_shape    = shape_s4,
+            .rescale_mult   = cfg->rescale_mult,
+            .rescale_shift  = cfg->rescale_shift,
+        };
+        return __snax_bingo_kernel_dual_vc_gemm_full(&down_args);
     }
 }
 

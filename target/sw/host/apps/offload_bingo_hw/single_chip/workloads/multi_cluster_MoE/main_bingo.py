@@ -41,8 +41,8 @@
 #              moe_schedule_t，其中 tasks[] 给出 C2/C3 的全局 expert 顺序，dma_ops[]
 #              给出 iDMA/xDMA lane 顺序，tasks[].dma_slots[] 给出固定 DMA 槽语义。
 #   Phase 4 — Individual expert 动态 GEMM：CVA6 一次性将 moe_schedule_t 降低到
-#              C2/C3 的 L1 static slot args；device kernels 通过 L3 runtime counters
-#              严格等待跨 cluster 前置关系和 DMA lane 顺序。
+#              C2/C3 的 L1 static slot args；跨 cluster slot wavefront 由 Bingo DFG
+#              cross-edge 表达，slot 内 stage skip 由 device kernel 根据本 slot 参数处理。
 
 import os
 import sys
@@ -114,7 +114,10 @@ from bingo_kernel_args import (
 )
 from typing import Union, Dict
 
-MOE_DYNAMIC_SLOT_COUNT = 4
+# MOE_DYNAMIC_SLOT_COUNT: max tasks per cluster side.
+# With MOE_MAX_EXPERTS=64 and greedy SPLIT: max tasks/cluster = 64 (1 per expert).
+# Set to 32 conservatively (ceil(64/2) tasks per cluster under balanced assignment).
+MOE_DYNAMIC_SLOT_COUNT = 32
 MOE_DYNAMIC_ARG_SLOT_BYTES = 256
 MOE_SCHEDULE_BYTES = 32768
 MOE_RUNTIME_STATE_BYTES = 16
@@ -198,7 +201,8 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
 class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
     """
         Phase 4：CVA6 读取 Phase 3 写入的 moe_schedule_t，
-        一次性写入 C2/C3 的 L1 dynamic slot args。后续 static DFG 节点在 device 侧执行。
+        一次性写入 C2/C3 的 L3 stage dynamic slot args，并由 host runtime
+        DMA flush 到 L1。后续 static DFG 节点在 device 侧执行。
     对应 __host_bingo_kernel_moe_execute。
     """
 
@@ -691,19 +695,30 @@ def define_workload_params(**kw):
     p["l15_a_row_stride"] = _a_row_stride
     p["l15_b_data_length"] = _k0_s0_tiles * _n0_s0_tiles * 16  # bytes (uint8)
     p["l15_w2_data_length"] = _k1_s0_tiles * _n1_s0_tiles * 16  # bytes (uint8)
-    p["l15_a_data_bytes"] = p["M_total"] * _a_row_stride  # = 16640 B
+    p["l15_a_data_bytes"] = p["M_total"] * _a_row_stride  # M_total * a_row_stride bytes
+
+    # Dynamic L15 TCDM layout offsets: matches place_tensors in multi_cluster_MoE_datagen.py.
+    # L15_LAYOUT: b1_color=272, w2l_color=128, m1d0_color=256; all others 0, align=1024.
+    def _l15_col(offset, color=0, align=1024):
+        return ((int(offset) + align - 1) // align) * align + int(color)
+
+    _w_bytes = p["l15_b_data_length"]  # k0_s0_tiles * n0_s0_tiles * 16
+    _w2_bytes = p["l15_w2_data_length"]  # k1_s0_tiles * n1_s0_tiles * 16
+    _a_bytes = p["l15_a_data_bytes"]  # M_total * a_row_stride
+    _mode0_d_bytes = (
+        p["M_total"] * _n0_total_s0 * 2
+    )  # M_total * n0_total * sizeof(int16)
     p["l15_delta_local_b0"] = 0
-    p["l15_delta_local_b1"] = 4368
-    p["l15_delta_local_w2l"] = 9344
-    p["l15_delta_local_w2r"] = 10240
-    p["l15_delta_local_a"] = 11264
-    p["l15_delta_local_mode1_d0"] = 29952
-    # Mode-1 output: packed dual-VC layout, row stride = 2*n1_total*2 bytes (no gaps).
-    _mode1_row_stride = 2 * _n1_total * 2  # = 64 B
-    p["l15_mode1_padded_bytes"] = p["M_total"] * _mode1_row_stride  # = 512 B
-    p["l15_tcdm_size"] = (
-        p["l15_delta_local_mode1_d0"] + p["l15_mode1_padded_bytes"]
-    )  # = 30464
+    p["l15_delta_local_b1"] = _l15_col(p["l15_delta_local_b0"] + _w_bytes, 272)
+    p["l15_delta_local_w2l"] = _l15_col(p["l15_delta_local_b1"] + _w_bytes, 128)
+    p["l15_delta_local_w2r"] = _l15_col(p["l15_delta_local_w2l"] + _w2_bytes)
+    p["l15_delta_local_a"] = _l15_col(p["l15_delta_local_w2r"] + _w2_bytes)
+    _delta_d0 = _l15_col(p["l15_delta_local_a"] + _a_bytes)
+    p["l15_delta_local_mode1_d0"] = _l15_col(_delta_d0 + _mode0_d_bytes, 256)
+    # Mode-1 output: packed dual-VC layout, row stride = n1_total * 4 bytes.
+    _mode1_row_stride = _n1_total * 4  # 2 VCs x n1_total elems x 2 B/elem
+    p["l15_mode1_padded_bytes"] = p["M_total"] * _mode1_row_stride
+    p["l15_tcdm_size"] = p["l15_delta_local_mode1_d0"] + p["l15_mode1_padded_bytes"]
 
     return p
 
@@ -764,6 +779,8 @@ def define_memory_handles(params):
     mh["L3_Sym_Layout_A"] = BingoMemSymbol(f"layout_A_row_stride_{_a_row}")
     # Flat int32_t shape-config array for S0 (array_shape=0, matches moe_l15_shape_cfg_t)
     mh["L3_Sym_L15_S0_Dev_Cfg"] = BingoMemSymbol("l15_dev_s0_cfg")
+    # Shared-expert variant: m_tiles=4 so kernel covers all 32 tokens per call
+    mh["L3_Sym_L15_Shared_Dev_Cfg"] = BingoMemSymbol("l15_dev_shared_s0_cfg")
 
     # ------------------------------------------------------------------
     # L3 dynamic allocations
@@ -811,9 +828,10 @@ def define_memory_handles(params):
         size=MOE_RUNTIME_STATE_BYTES,
         mem_level="L3",
     )
-    # L3 staging buffers for dynamic args:
-    # CVA6 writes slot args here (local L3 stores), iDMA flushes to cluster L1 in one burst.
-    # Each must be >= dynamic_slot_count * dynamic_arg_slot_bytes.
+    # L3 staging buffers for dynamic slot args.
+    # The static template is initialized here first and DMA-copied to cluster L1.
+    # Phase 4 then rewrites the dynamic fields in L3 and flushes the slot records
+    # to the L1 runtime args consumed by the device kernels.
     mh["L3_Alloc_C2_Stage"] = BingoMemAlloc(
         "l3_c2_stage",
         size=MOE_DYNAMIC_SLOT_COUNT * MOE_DYNAMIC_ARG_SLOT_BYTES,
@@ -1333,7 +1351,7 @@ def create_dfg(params, mh):
         assigned_core_id=GEMM_CORE_ID,
         kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_swiglu",
         kernel_args=SnaxBingoKernelDualVcL15MoeSwigluArgs(
-            shape_cfg_addr=mh["L3_Sym_L15_S0_Dev_Cfg"],
+            shape_cfg_addr=mh["L3_Sym_L15_Shared_Dev_Cfg"],
             tcdm_base=mh["C0_L1_Layout"],
             rescale_mult=1,
             rescale_shift=0,
@@ -1349,7 +1367,7 @@ def create_dfg(params, mh):
         assigned_core_id=GEMM_CORE_ID,
         kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_down",
         kernel_args=SnaxBingoKernelDualVcL15MoeDownArgs(
-            shape_cfg_addr=mh["L3_Sym_L15_S0_Dev_Cfg"],
+            shape_cfg_addr=mh["L3_Sym_L15_Shared_Dev_Cfg"],
             tcdm_base=mh["C0_L1_Layout"],
             rescale_mult=1,
             rescale_shift=0,
@@ -1383,7 +1401,7 @@ def create_dfg(params, mh):
         assigned_core_id=GEMM_CORE_ID,
         kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_swiglu",
         kernel_args=SnaxBingoKernelDualVcL15MoeSwigluArgs(
-            shape_cfg_addr=mh["L3_Sym_L15_S0_Dev_Cfg"],
+            shape_cfg_addr=mh["L3_Sym_L15_Shared_Dev_Cfg"],
             tcdm_base=mh["C1_L1_Layout"],
             rescale_mult=1,
             rescale_shift=0,
@@ -1399,7 +1417,7 @@ def create_dfg(params, mh):
         assigned_core_id=GEMM_CORE_ID,
         kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_down",
         kernel_args=SnaxBingoKernelDualVcL15MoeDownArgs(
-            shape_cfg_addr=mh["L3_Sym_L15_S0_Dev_Cfg"],
+            shape_cfg_addr=mh["L3_Sym_L15_Shared_Dev_Cfg"],
             tcdm_base=mh["C1_L1_Layout"],
             rescale_mult=1,
             rescale_shift=0,
@@ -1532,9 +1550,11 @@ def create_dfg(params, mh):
     # =====================================================================
     # Phase 4: CVA6 schedule lowering + static slot execution
     #
-    # node_execute 只负责把 moe_schedule_t 降低到 C2/C3 的 L1 dynamic args。
-    # 后续 static slot graph 真正执行 S1/S2/S3/S4/store。跨 cluster 启动顺序
-    # 和 iDMA/xDMA lane 顺序由每个 slot 参数中的 runtime counters 强制执行。
+    # node_execute 只负责把 moe_schedule_t 降低到 C2/C3 的 L3 stage dynamic args，
+    # 再由 host runtime DMA flush 到 cluster L1 dynamic args。
+    # 后续 static slot graph 真正执行 S1/S2/S3/S4/store。跨 cluster slot wavefront
+    # 由 Bingo DFG cross-edge 表达；slot 内 skip_s1/skip_s3/skip_s2/skip_s4 仍由
+    # device kernel 根据本 slot ctrl 字段处理。
     # =====================================================================
     node_execute = BingoNode(
         assigned_chiplet_id=0,
@@ -1585,9 +1605,13 @@ def create_dfg(params, mh):
     bingo_dfg.bingo_add_edge(node_prepare, node_execute)
 
     def make_dyn_args(prefix: str, slot: int):
+        stage_prefix = "L3_Alloc_C2_Stage" if prefix == "C2_indiv" else "L3_Alloc_C3_Stage"
         return SnaxBingoKernelMoeDynamicExpertArgs(
             arg_storage_addr=addr_offset(
                 mh[f"{prefix}_Dyn_Args"], slot * params["dynamic_arg_slot_bytes"]
+            ),
+            init_storage_addr=addr_offset(
+                mh[stage_prefix], slot * params["dynamic_arg_slot_bytes"]
             ),
             slot_id=slot,
             token_ids_addr=mh["L3_Alloc_Expert_Token_Ids"],
@@ -1616,10 +1640,12 @@ def create_dfg(params, mh):
             s1_block_count=N2,
             s3_block_count=N2d,
             indiv_K1=params["indiv_K1"],
-            indiv_N1=params["indiv_N1"],
+            indiv_N_per_block=params["indiv_N1"]
+            * params["meshCol"],  # shape-invariant = N1_s0 × meshCol_s0
             indiv_down_K1=params["indiv_down_K1"],
-            indiv_down_N1=params["indiv_down_N1"],
-            array_shape=params["array_shape"],
+            indiv_down_N_per_block=params["indiv_down_N1"]
+            * params["meshCol"],  # shape-invariant = down_N1_s0 × meshCol_s0
+            # array_shape removed: kernel derives it from ctrl.shape_s1 / ctrl.shape_s3 at runtime
             rescale_mult=1,
             rescale_shift=0,
             output_expert_stride_bytes=2 * N2d * params["indiv_down_D_tilesize"],

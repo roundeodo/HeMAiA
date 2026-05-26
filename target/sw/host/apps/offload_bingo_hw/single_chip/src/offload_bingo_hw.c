@@ -13,6 +13,14 @@ int main() {
     init_uart(current_chip_address_prefix, 32, 1);
     // Enable vector extension
     enable_vec();
+
+    // Set all clocks to 83.3 MHz (500 MHz / 6) for unified trace analysis
+    // Directly switch division without disable/reset to avoid AXI disruption
+    for (int i = 0; i <= N_CLUSTERS_PER_CHIPLET; i++) {
+        enable_clk_domain(i, 6);
+        asm volatile("fence" ::: "memory");
+    }
+
     OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE("Single-chip Offload HW Bingo Main\r\n");
     OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
         "Chip(%x, %x): [Host] Start Offloading Program\r\n",

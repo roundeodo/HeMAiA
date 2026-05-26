@@ -120,6 +120,13 @@ void uartdpi_write(void *ctx_void, char c) {
     struct uartdpi_ctx *ctx = (struct uartdpi_ctx *)ctx_void;
 
     rv = write(ctx->host, &c, 1);
+    /* PTY master is O_NONBLOCK; when the PTY kernel buffer is full (no reader
+     * on the slave side), write() returns -1 with errno=EAGAIN.  Treat this
+     * as a silent drop to the terminal – the character is still written to the
+     * log file below.  Any other error is a real failure. */
+    if (rv == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        rv = 1;
+    }
     assert(rv == 1 && "Write to pseudo-terminal failed.");
 
     if (ctx->log_file) {

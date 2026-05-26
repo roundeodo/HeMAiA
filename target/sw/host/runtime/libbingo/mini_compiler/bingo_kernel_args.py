@@ -459,16 +459,17 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
         s1_block_count: int,
         s3_block_count: int,
         indiv_K1: int,
-        indiv_N1: int,
+        indiv_N_per_block: int,
         indiv_down_K1: int,
-        indiv_down_N1: int,
-        array_shape: int,
+        indiv_down_N_per_block: int,
         rescale_mult: int,
         rescale_shift: int,
         output_expert_stride_bytes: int,
         max_tokens_per_expert: int,
+        init_storage_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str, None] = None,
     ):
         self.arg_storage_addr = arg_storage_addr
+        self.init_storage_addr = init_storage_addr
         self.slot_id = slot_id
         self.token_ids_addr = token_ids_addr
         self.input_A_l3_base = input_A_l3_base
@@ -496,10 +497,9 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
         self.s1_block_count = s1_block_count
         self.s3_block_count = s3_block_count
         self.indiv_K1 = indiv_K1
-        self.indiv_N1 = indiv_N1
+        self.indiv_N_per_block = indiv_N_per_block
         self.indiv_down_K1 = indiv_down_K1
-        self.indiv_down_N1 = indiv_down_N1
-        self.array_shape = array_shape
+        self.indiv_down_N_per_block = indiv_down_N_per_block
         self.rescale_mult = rescale_mult
         self.rescale_shift = rescale_shift
         self.output_expert_stride_bytes = output_expert_stride_bytes
@@ -515,6 +515,21 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
             offset_op = f" + {self.arg_storage_addr.offset}" if self.arg_storage_addr.offset != 0 else ""
             return f"(uint64_t)(uintptr_t){self.arg_storage_addr.symbol_name}{offset_op}"
         return str(self.arg_storage_addr)
+
+    def get_arg_init_storage_expr(self, handle_name_map: Dict[BingoMemAlloc, str]) -> str:
+        init_storage_addr = self.init_storage_addr
+        if init_storage_addr is None:
+            return self.get_arg_storage_expr(handle_name_map)
+        if isinstance(init_storage_addr, BingoMemAlloc):
+            return handle_name_map[init_storage_addr]
+        if isinstance(init_storage_addr, BingoMemSymbol):
+            offset_op = (
+                f" + {init_storage_addr.offset}"
+                if init_storage_addr.offset != 0
+                else ""
+            )
+            return f"(uint64_t)(uintptr_t){init_storage_addr.symbol_name}{offset_op}"
+        return str(init_storage_addr)
 
     def _process_addr64(
         self,
@@ -582,28 +597,33 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
         self._process_addr32(self.l1_b_up_addr, "l1_b_up_addr", assignments, handle_name_map)
         self._process_addr32(self.l1_b_down_addr, "l1_b_down_addr", assignments, handle_name_map)
         self._process_addr32(self.l1_d_addr, "l1_d_addr", assignments, handle_name_map)
-        self._process_addr32(self.l1_down_d_addr, "l1_down_d_addr", assignments, handle_name_map)
-        self._process_addr32(self.l1_d1_scratch_addr, "l1_d1_scratch_addr", assignments, handle_name_map)
-        assignments.update({
-            "A_token_bytes": str(self.A_token_bytes),
-            "indiv_B_expert_stride": str(self.indiv_B_expert_stride),
-            "indiv_down_B_expert_stride": str(self.indiv_down_B_expert_stride),
-            "indiv_B_tile_bytes": str(self.indiv_B_tile_bytes),
-            "indiv_D_tile_bytes": str(self.indiv_D_tile_bytes),
-            "indiv_down_B_tile_bytes": str(self.indiv_down_B_tile_bytes),
-            "indiv_down_D_tile_bytes": str(self.indiv_down_D_tile_bytes),
-            "indiv_N2": str(self.indiv_N2),
-            "indiv_down_N2": str(self.indiv_down_N2),
-            "indiv_K1": str(self.indiv_K1),
-            "indiv_N1": str(self.indiv_N1),
-            "indiv_down_K1": str(self.indiv_down_K1),
-            "indiv_down_N1": str(self.indiv_down_N1),
-            "array_shape": str(self.array_shape),
-            "rescale_mult": str(self.rescale_mult),
-            "rescale_shift": str(self.rescale_shift),
-            "output_expert_stride_bytes": str(self.output_expert_stride_bytes),
-            "max_tokens_per_expert": str(self.max_tokens_per_expert),
-        })
+        self._process_addr32(
+            self.l1_down_d_addr, "l1_down_d_addr", assignments, handle_name_map
+        )
+        self._process_addr32(
+            self.l1_d1_scratch_addr, "l1_d1_scratch_addr", assignments, handle_name_map
+        )
+        assignments.update(
+            {
+                "A_token_bytes": str(self.A_token_bytes),
+                "indiv_B_expert_stride": str(self.indiv_B_expert_stride),
+                "indiv_down_B_expert_stride": str(self.indiv_down_B_expert_stride),
+                "indiv_B_tile_bytes": str(self.indiv_B_tile_bytes),
+                "indiv_D_tile_bytes": str(self.indiv_D_tile_bytes),
+                "indiv_down_B_tile_bytes": str(self.indiv_down_B_tile_bytes),
+                "indiv_down_D_tile_bytes": str(self.indiv_down_D_tile_bytes),
+                "indiv_N2": str(self.indiv_N2),
+                "indiv_down_N2": str(self.indiv_down_N2),
+                "indiv_K1": str(self.indiv_K1),
+                "indiv_N_per_block": str(self.indiv_N_per_block),
+                "indiv_down_K1": str(self.indiv_down_K1),
+                "indiv_down_N_per_block": str(self.indiv_down_N_per_block),
+                "rescale_mult": str(self.rescale_mult),
+                "rescale_shift": str(self.rescale_shift),
+                "output_expert_stride_bytes": str(self.output_expert_stride_bytes),
+                "max_tokens_per_expert": str(self.max_tokens_per_expert),
+            }
+        )
         return assignments
 
 

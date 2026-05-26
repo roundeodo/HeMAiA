@@ -538,6 +538,7 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_swiglu_full_args {
   uint32_t array_shape;
   uint32_t rescale_mult;
   uint32_t rescale_shift;
+
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_dual_vc_swiglu_full_args_t;
 
@@ -577,8 +578,8 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   uint32_t expert_id;
   uint32_t token_start_rank;
   uint32_t ntokens;
-  uint32_t m_s2_exec;    /* S2 处理的 token 数 (0 when skip_s2=1) */
-  uint32_t m_s4_exec;    /* S4 处理的 token 数 (0 when skip_s4=1) */
+  uint32_t m_s2_exec;    /* S2 M-tile 数 = ⌈tail_tokens / 2⌉（shape C 固定 meshRow=2）; 0 when skip_s2=1 */
+  uint32_t m_s4_exec;    /* S4 M-tile 数 = ⌈tail_tokens / 2⌉（shape C 固定 meshRow=2）; 0 when skip_s4=1 */
   uint32_t wait_for_peer_slots;
   /* ── dma_slot_vd: packed valid + DMA binding for all 4 DMA slots ───────────
    * For slot i (i=0..3), bits at offset i*3:
@@ -615,10 +616,10 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   uint32_t indiv_N2;
   uint32_t indiv_down_N2;
   uint32_t indiv_K1;
-  uint32_t indiv_N1;
+  uint32_t indiv_N_per_block;       // = indiv_N1 x meshCol(shape); shape-invariant constant
   uint32_t indiv_down_K1;
-  uint32_t indiv_down_N1;
-  uint32_t array_shape;
+  uint32_t indiv_down_N_per_block;  // = indiv_down_N1 x vc_meshCol(shape); shape-invariant constant
+  // array_shape removed: derived at runtime from ctrl.shape_s1 / ctrl.shape_s3
   uint32_t rescale_mult;
   uint32_t rescale_shift;
   uint32_t output_expert_stride_bytes;
