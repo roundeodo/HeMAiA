@@ -686,15 +686,19 @@ def define_workload_params(**kw):
     _k0_total = p["router_K2"] * p["router_K1"] * tileSize  # = K_total input
     _k0_bytes = _k0_total * 2  # int16 → 2 B/elem
     _a_row_stride = _k0_bytes + _l15_a_pad  # = 2080 B
-    _n0_total_s0 = p["indiv_N2"] * p["indiv_N1"] * 4  # s0_meshCol=4
-    _n1_total = p["indiv_down_N2"] * p["indiv_down_N1"] * meshCol_down  # N_indiv_down
+    _n0_total_s0 = p["shared_N2"] * p["shared_N1"] * 4  # s0_meshCol=4
+    # Logical down output width after concatenating the two VC output halves.
+    _n1_total = p["shared_down_N2"] * p["shared_down_N1"] * meshCol_down
+    if _n1_total % 2 != 0:
+        raise ValueError("L15 dual-VC down output width must split evenly across two VCs")
+    _n1_per_vc = _n1_total // 2
     _k0_s0_tiles = _k0_total // 8
     _k1_s0_tiles = _n0_total_s0 // 8  # k1=n0 for mode1 input
     _n0_s0_tiles = _n0_total_s0 // 4
-    _n1_s0_tiles = _n1_total // 4
+    _n1_s0_tiles_per_vc = _n1_per_vc // 4
     p["l15_a_row_stride"] = _a_row_stride
     p["l15_b_data_length"] = _k0_s0_tiles * _n0_s0_tiles * 16  # bytes (uint8)
-    p["l15_w2_data_length"] = _k1_s0_tiles * _n1_s0_tiles * 16  # bytes (uint8)
+    p["l15_w2_data_length"] = _k1_s0_tiles * _n1_s0_tiles_per_vc * 16
     p["l15_a_data_bytes"] = p["M_total"] * _a_row_stride  # M_total * a_row_stride bytes
 
     # Dynamic L15 TCDM layout offsets: matches place_tensors in multi_cluster_MoE_datagen.py.
@@ -703,7 +707,7 @@ def define_workload_params(**kw):
         return ((int(offset) + align - 1) // align) * align + int(color)
 
     _w_bytes = p["l15_b_data_length"]  # k0_s0_tiles * n0_s0_tiles * 16
-    _w2_bytes = p["l15_w2_data_length"]  # k1_s0_tiles * n1_s0_tiles * 16
+    _w2_bytes = p["l15_w2_data_length"]  # k1_s0_tiles * n1_s0_tiles_per_vc * 16
     _a_bytes = p["l15_a_data_bytes"]  # M_total * a_row_stride
     _mode0_d_bytes = (
         p["M_total"] * _n0_total_s0 * 2
@@ -715,8 +719,8 @@ def define_workload_params(**kw):
     p["l15_delta_local_a"] = _l15_col(p["l15_delta_local_w2r"] + _w2_bytes)
     _delta_d0 = _l15_col(p["l15_delta_local_a"] + _a_bytes)
     p["l15_delta_local_mode1_d0"] = _l15_col(_delta_d0 + _mode0_d_bytes, 256)
-    # Mode-1 output: packed dual-VC layout, row stride = n1_total * 4 bytes.
-    _mode1_row_stride = _n1_total * 4  # 2 VCs x n1_total elems x 2 B/elem
+    # Mode-1 output: VC0 writes the left half and VC1 writes the right half.
+    _mode1_row_stride = _n1_total * 2
     p["l15_mode1_padded_bytes"] = p["M_total"] * _mode1_row_stride
     p["l15_tcdm_size"] = p["l15_delta_local_mode1_d0"] + p["l15_mode1_padded_bytes"]
 
@@ -923,7 +927,8 @@ def define_memory_handles(params):
             chip_id=chip,
             cluster_id=cid,
         )
-        # L1_A: sized for max_tokens tokens (runtime fetch fills 1..max_tok tokens)
+        # L1_A: sized for max_tokens tokens (runtime fetch fills 1..max_tok tokens).
+        # S3/S4 down outputs are written to L1_down_D in one unified full-N row layout.
         mh[f"{prefix}_L1_A"] = BingoMemAlloc(
             f"{prefix.lower()}_l1_a",
             size=max_tok * params["A_token_bytes"],
@@ -1747,6 +1752,9 @@ def create_dfg(params, mh):
             "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1",
             args,
         )
+        # This prefetch is intentionally overlapped with the current slot's
+        # down-full compute. Do not serialize it after compute_down_full just to
+        # make trace node durations look cleaner; that would change the workload.
         bingo_dfg.bingo_add_edge(s3_loads[-1], prefetch_s4_next_s1)
 
         # S4: down 全量 GEMM 节点

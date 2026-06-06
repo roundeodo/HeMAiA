@@ -385,9 +385,10 @@ def define_workload_params(**kwargs):
     def _l15_col(off, c=0):
         return _l15_aup(off) + int(c)
 
-    _l15_k0 = (
-        params["shared_swish_glu_K1"] * tileSize
-    )  # = 128*8 = 1024  (gate/up投影输入K)
+    # l15_test_k1: 独立参数，仅控制L15权重大小，不影响shared_experts数组
+    # 1408 → l15_k0_total=11264 → B0/B1 = 1408×128×16 = 2,883,584 B ≈ 2.75MB
+    _l15_test_k1 = int(kwargs.get("l15_test_k1", params["shared_swish_glu_K1"]))
+    _l15_k0 = _l15_test_k1 * tileSize  # = 1408*8 = 11264  (L15 gate/up投影输入K)
     _l15_n0 = (
         params["shared_swish_glu_N1"] * meshCol
     )  # = sN1*16 = 32*16 = 512  (N_hidden per VC, per N2-tile)
@@ -1048,43 +1049,47 @@ def create_dfg(params, mem_handles):
     dma_core_id = 1
     buf = mem_handles["L1_Buf_L15"]
 
-    # ---- 预加载 cfg（一次，cfg 固定不变，搬到 TCDM 后 compute kernel 走 TCDM 读，避免 L3 延迟） ----
-    # cfg 结构体（moe_l15_shape_cfg_t，364 bytes）原本在 L3，每次读取 ~200 cc；
-    # 搬到 TCDM 后每次读取 ~5 cc，Mode-0+Mode-1 CSR 配置总共只需 ~620 cc（vs 之前 ~13000 cc）
+    # ---- [诊断] idma 带宽测试节点0：用 iDMA 传 2*w_bytes（≈2.75MB）的 B0 数据到 TCDM B0 区 ----
+    # 目的：测量纯 iDMA 单路带宽，与 dual_dma 中的 iDMA/xDMA 对比
+    # iDMA 无 4MB 地址宽度限制（寻址宽度 23bit），可安全传 2.75MB
+    # 注意：dst 是 TCDM B0 位置，N2(dual_dma) 随后会用正确数据覆盖它，功能不受影响
     node_cfg_dma = BingoNode(
         assigned_chiplet_id=0,
         assigned_cluster_id=0,
         assigned_core_id=dma_core_id,
         kernel_name="__snax_bingo_kernel_idma_1d_copy",
         kernel_args=SnaxBingoKernelIdma1dCopyArgs(
-            src_addr=mem_handles["L3_Sym_L15_S2_Cfg"],
-            dst_addr=addr_with_optional_offset(buf, delta_cfg),
-            size=cfg_bytes,
+            src_addr=mem_handles["L3_Sym_L15_B0"],
+            dst_addr=buf,
+            size=2 * w_bytes,  # 2.75MB：完整读 B0+B1 连续地址
         ),
     )
     bingo_dfg.bingo_add_node(node_cfg_dma)
 
-    # ---- 预加载 A（一次，A 不会被 dma_B/dma_W2 覆盖，全程有效） ----
+    # ---- [诊断] idma 带宽测试节点1：再次用 iDMA 传 2*w_bytes（≈2.75MB） ----
+    # 与节点0完全相同，独立测量第二次 iDMA 以排除缓存预热效应
+    # N2(dual_dma) 随后覆盖 TCDM B0 区，功能不受影响
     node_pre_a = BingoNode(
         assigned_chiplet_id=0,
         assigned_cluster_id=0,
         assigned_core_id=dma_core_id,
         kernel_name="__snax_bingo_kernel_idma_1d_copy",
         kernel_args=SnaxBingoKernelIdma1dCopyArgs(
-            src_addr=mem_handles["L3_Sym_L15_A"],
-            dst_addr=addr_with_optional_offset(buf, delta_a),
-            size=a_bytes,
+            src_addr=mem_handles["L3_Sym_L15_B0"],
+            dst_addr=buf,
+            size=2 * w_bytes,  # 2.75MB同 N0
         ),
     )
     bingo_dfg.bingo_add_node(node_pre_a)
-    bingo_dfg.bingo_add_edge(
-        node_cfg_dma, node_pre_a
-    )  # cfg 必须在 A 之前完成（保证 TCDM 已就绪）
+    bingo_dfg.bingo_add_edge(node_cfg_dma, node_pre_a)
 
     prev_node = node_pre_a
 
     for n2 in range(N2):
-        # ---- dual_dma：B0(gate 128KB) ‖ B1(up 128KB) ----
+        # ---- dual_dma：带宽测试（B0 gate 2.75MB ‖ B1 up 2.75MB）----
+        # xDMA 地址宽度限制22bit→4MB，因此 xdma_dst 也指向 buf（TCDM[0]）
+        # iDMA 和 xDMA 都写 TCDM[0..2.75MB]，两路并行测出双路带宽
+        # N3 随后用正确 B0/B1 数据覆盖 TCDM，计算功能不受影响
         node_dma_b = BingoNode(
             assigned_chiplet_id=0,
             assigned_cluster_id=0,
@@ -1093,10 +1098,10 @@ def create_dfg(params, mem_handles):
             kernel_args=SnaxBingoKernelDualDmaArgs(
                 idma_src_addr=mem_handles["L3_Sym_L15_B0"],
                 idma_dst_addr=buf,
-                idma_size=w_bytes,
+                idma_size=2 * w_bytes,  # 2.75MB：iDMA 无 4MB 限制
                 xdma_src_addr=mem_handles["L3_Sym_L15_B1"],
-                xdma_dst_addr=addr_with_optional_offset(buf, delta_b1),
-                xdma_size=w_bytes,
+                xdma_dst_addr=buf,  # TCDM[0]，同 iDMA，2.75MB < 4MB 限制
+                xdma_size=2 * w_bytes,  # 2.75MB：xDMA 寄址 [0..2.75MB] < 4MB ✓
             ),
         )
         bingo_dfg.bingo_add_node(node_dma_b)
@@ -1120,6 +1125,36 @@ def create_dfg(params, mem_handles):
         bingo_dfg.bingo_add_node(node_dma_w2)
         bingo_dfg.bingo_add_edge(node_dma_b, node_dma_w2)
 
+        # ---- 补回 cfg 和 A 的实际加载（N0/N1 改为带宽测试后不再搬这些）----
+        # cfg 必须在 compute 之前搬到 TCDM；A 也必须就绪
+        node_load_cfg = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=0,
+            assigned_core_id=dma_core_id,
+            kernel_name="__snax_bingo_kernel_idma_1d_copy",
+            kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+                src_addr=mem_handles["L3_Sym_L15_S2_Cfg"],
+                dst_addr=addr_with_optional_offset(buf, delta_cfg),
+                size=cfg_bytes,
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_load_cfg)
+        bingo_dfg.bingo_add_edge(node_dma_w2, node_load_cfg)
+
+        node_load_a = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=0,
+            assigned_core_id=dma_core_id,
+            kernel_name="__snax_bingo_kernel_idma_1d_copy",
+            kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+                src_addr=mem_handles["L3_Sym_L15_A"],
+                dst_addr=addr_with_optional_offset(buf, delta_a),
+                size=a_bytes,
+            ),
+        )
+        bingo_dfg.bingo_add_node(node_load_a)
+        bingo_dfg.bingo_add_edge(node_load_cfg, node_load_a)
+
         # ---- L15 compute ----
         node_compute = BingoNode(
             assigned_chiplet_id=0,
@@ -1136,7 +1171,7 @@ def create_dfg(params, mem_handles):
             ),
         )
         bingo_dfg.bingo_add_node(node_compute)
-        bingo_dfg.bingo_add_edge(node_dma_w2, node_compute)
+        bingo_dfg.bingo_add_edge(node_load_a, node_compute)
 
         prev_node = node_compute  # 下次迭代在 compute 完成后才开始
 

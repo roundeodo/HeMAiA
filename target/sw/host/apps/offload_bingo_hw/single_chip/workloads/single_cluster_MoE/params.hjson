@@ -2,20 +2,19 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# single_cluster_MoE workload parameters — M=2 BASELINE MEASUREMENT
+# single_cluster_MoE workload parameters — DMA EFFICIENCY TEST (large B matrix)
 #
 # Hardware: snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane
 #   array_shape=2 (S2): meshRow=2, tileSize=8, meshCol=16
 #   down_meshCol=32  (= 2 × meshCol)
 #
-# 测试目标：M=2 token 基线，验证 compute 时间 vs DMA 时间
-#   M=2 tokens = 1 M-tile (meshRow=2)
-#   Mode-0: 2×2×1024×512 = 2,097,152 MACs per VC, ideal T = MACs/512 = 4096 cc
-#   Mode-1: 2×2×512×256  =   524,288 MACs per VC, ideal T = MACs/512 = 1024 cc
-#   Total compute (ideal) = 5120 cc
-#   B0+B1: 2×256KB = 512KB, ideal DMA (128 B/cc) = 4096 cc
-#   W2l+W2r: 2×64KB = 128KB, ideal DMA = 1024 cc
-#   Total DMA (ideal) = 5120 cc → 理论完全平衡
+# 测试目标：扩大 L15 B0/B1 至 2.75MB，对比 iDMA vs dual_DMA 带宽
+#   router_K1=128，shared_swish_glu_K1=128（保持小值，避免 shared_experts_gate_B ELF 膨胀）
+#   l15_test_k1=1408（独立参数，仅控制 L15 权重大小）
+#   l15_weights_b0/b1: 1408×8/8 × 32×16/4 × 16 = 1408×128×16 = 2,883,584 B ≈ 2.75MB
+#   N0/N1(idma_1d_copy): 各传 2.75MB（诊断纯 iDMA 带宽）
+#   N2(dual_dma): iDMA+xDMA 各传 2.75MB（对照双路 DMA 带宽）
+#   W2l+W2r: 2×64KB = 128KB (不变)
 
 {
     array_shape: 2
@@ -26,7 +25,8 @@
     A_tileSize: 8
     down_meshCol: 32  // 必须 = 2 × meshCol = 2 × 16
 
-    // Router: 8 tokens (meshRow_A=2, M1=1, M2=4) — 4 batches × 2 tokens each
+    // Router: K=1024 (= 128×8, 与 shared_swish_glu_K1=128 保持一致)
+    // l15_test_k1=1408 单独控制 L15 权重大小（不影响 shared_experts 数组）
     router_M1: 1
     router_K1: 128
     router_N1: 2
@@ -38,8 +38,8 @@
     // N_hidden=512 per VC (N1×meshCol = 32×16), N2=4 kept for DFG compat
     // Mode-1: K=512, N1_per_vc=256 (sdN1×meshCol = 16×16)
     shared_swish_glu_M1: 1
-    shared_swish_glu_K1: 128    // K = 1024 (input_dim)
-    shared_swish_glu_N1: 32     // N per tile = 32 meshCol-groups × 16 = 512 cols (N_hidden)
+    shared_swish_glu_K1: 128    // K=1024 (小值，避免 shared_experts_gate_B ELF 膨胀)
+    shared_swish_glu_N1: 32     // N per tile = 32 meshCol-groups × 16 = 512 cols (N_hidden, 不变)
     shared_swish_glu_M2: 1      // M=2 tokens (M1×M2×meshRow = 1×1×2 = 2)
     shared_swish_glu_K2: 1
     shared_swish_glu_N2: 4      // 4 outer tiles (保留用于旧 DFG compat)
@@ -51,6 +51,12 @@
     shared_down_projection_M2: 1
     shared_down_projection_K2: 1
     shared_down_projection_N2: 1
+
+    // l15_test_k1: 独立控制 L15 权重大小，不影响 shared_experts 数组 shape
+    // xDMA 地址宽度受 max_mem_size=4096 限制：addressWidth=log2Ceil(4096)+10=22bit→只能寻址 4MB TCDM
+    // TCDM 布局必须全部在 4MB 内：B0+B1+W2l+W2r+A+cfg 合计≤ 4MB
+    // 704: TCDM布局占用 ~3MB (<4MB安全），N0/N1/N2 size=2*w_bytes=2.75MB取深度测试
+    l15_test_k1: 704
 
     individual_swish_glu_M1: 1
     individual_swish_glu_K1: 128

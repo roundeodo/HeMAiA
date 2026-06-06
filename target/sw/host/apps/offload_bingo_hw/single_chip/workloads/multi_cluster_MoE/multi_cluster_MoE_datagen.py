@@ -23,13 +23,15 @@
 #   b1_color=272, w2l_color=128, m1d0_color=256 (bank-rotation offsets)
 #
 # 参数说明（params.hjson → L15 全局变量对应关系）:
-#   k0_total = indiv_K2 * indiv_K1 * tileSize       (gate/up 输入 K 维)
-#   n0_total = indiv_N2 * indiv_N1 * 4              (gate/up 输出 N，基于 S0 meshCol=4)
+#   k0_total = router_K2 * router_K1 * tileSize     (shared gate/up 输入 K 维)
+#   n0_total = shared_N2 * shared_N1 * 4            (shared gate/up 输出 N，基于 S0 meshCol=4)
 #   k1_total = n0_total                             (down 输入 K = gate/up 输出，自动匹配)
-#   n1_total = indiv_down_N2 * indiv_down_N1 * meshCol_down  (down 输出 N)
+#   n1_total = shared_down_N2 * shared_down_N1 * meshCol_down (down 输出 N)
+#   n1_per_vc = n1_total / 2                       (down 每个 VC 的输出 N)
 #   m_total  = router_M2 * router_M1 * A_meshRow    (token 总数)
 #
-# 修改 params.hjson 中的 indiv_N1/indiv_N2/indiv_down_N1/indiv_down_N2 即可灵活调整布局。
+# 修改 shared_N1/shared_N2/shared_down_N1/shared_down_N2 可调整 L15 shared 布局；
+# indiv_* 参数仍用于 C2/C3 individual dynamic expert 路径。
 # S2 shape 在 n0_total < 16 时会自动跳过（输出注释说明）。
 
 import numpy as np
@@ -244,9 +246,9 @@ def place_tensors(globals_, layout):
     w_bytes = globals_["k0_s0_tiles"] * globals_["n0_s0_tiles"] * 16
     mode0_d_bytes = globals_["m_total"] * globals_["n0_total"] * 2
     w2_bytes = globals_["k1_s0_tiles"] * globals_["n1_s0_tiles"] * 16
-    # Mode-1 D output: dual-VC, each VC writes n1_total INT16 elements per row.
-    # Packed row stride = 2 * n1_total * 2 bytes (VC0 + VC1 side-by-side, no gap).
-    mode1_row_stride = globals_["n1_total"] * 4  # = 2 VCs × n1_total elems × 2 B/elem
+    # Mode-1 D output: VC0 writes the left half, VC1 writes the right half.
+    # Packed row stride = n1_total * 2 bytes (no gap between halves).
+    mode1_row_stride = globals_["n1_total"] * 2
     mode1_padded_d_bytes = globals_["m_total"] * mode1_row_stride
 
     delta_local_b0 = colored_offset(0, layout.get("b0_color", 0))
@@ -262,7 +264,7 @@ def place_tensors(globals_, layout):
     delta_local_mode1_d0 = colored_offset(
         delta_local_d0 + mode0_d_bytes, layout.get("m1d0_color", 0)
     )
-    delta_local_mode1_d1 = delta_local_mode1_d0 + globals_["n1_total"] * 2
+    delta_local_mode1_d1 = delta_local_mode1_d0 + globals_["n1_per_vc"] * 2
 
     return {
         "delta_local_a": delta_local_a,
@@ -283,6 +285,7 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1)
     n0_total = globals_["n0_total"]
     k1_total = globals_["k1_total"]
     n1_total = globals_["n1_total"]
+    n1_per_vc = globals_["n1_per_vc"]
     k0_s0_tiles = globals_["k0_s0_tiles"]
     k1_s0_tiles = globals_["k1_s0_tiles"]
     a_row_stride = globals_["k0_bytes"] + layout["a_pad"]
@@ -290,7 +293,7 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1)
     k_tiles = k0_total // tile_size
     k1_tiles = k1_total // tile_size
     n0_tiles = n0_total // mesh_col
-    n1_tiles = n1_total // mesh_col
+    n1_tiles = n1_per_vc // mesh_col
 
     b_k_stride = 16
     mode0_b_n_stride = (mesh_col // 4) * k0_s0_tiles * 16
@@ -305,8 +308,8 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1)
     mode0_d_m_stride = n0_tiles * d_stride1
     d_bound0 = 8
     beats_per_row = mesh_col // 4
-    # Packed Mode-1 D output row stride: 2 VCs × n1_total × 2 B/elem.
-    mode1_token_stride = 2 * n1_total * 2
+    # Packed Mode-1 D output row stride: total logical output width × INT16.
+    mode1_token_stride = n1_total * 2
     mode1_a_sstride = {0: [64, 8], 1: [8, 16], 2: [8, 32]}[array_shape]
     mode1_a_k_stride = {0: 128, 1: 64, 2: 16}[array_shape]
 
@@ -353,7 +356,7 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1)
         f".mode0_output_elems        = {m_tiles * mesh_row * n0_total}",
         f".mode1_output_elems        = {m_tiles * mesh_row * n1_total}",
         f".mode1_output_row_stride_bytes = {mode1_token_stride}",
-        f".mode1_padded_output_elems = {m_tiles * mesh_row * 2 * n1_total}",
+        f".mode1_padded_output_elems = {m_tiles * mesh_row * n1_total}",
         f".mode0_d0_golden           = {golden_names[name][0]}",
         f".mode1_padded_golden       = {golden_names[name][1]}",
     ]
@@ -386,6 +389,7 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
     n0_total = globals_["n0_total"]
     k1_total = globals_["k1_total"]
     n1_total = globals_["n1_total"]
+    n1_per_vc = globals_["n1_per_vc"]
     k0_s0_tiles = globals_["k0_s0_tiles"]
     k1_s0_tiles = globals_["k1_s0_tiles"]
     a_row_stride = globals_["k0_bytes"] + layout["a_pad"]
@@ -393,7 +397,7 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
     k_tiles = k0_total // tile_size
     k1_tiles = k1_total // tile_size
     n0_tiles = n0_total // mesh_col
-    n1_tiles = n1_total // mesh_col
+    n1_tiles = n1_per_vc // mesh_col
 
     b_k_stride = 16
     mode0_b_n_stride = (mesh_col // 4) * k0_s0_tiles * 16
@@ -408,8 +412,8 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
     mode0_d_m_stride = n0_tiles * d_stride1
     d_bound0 = 8
     beats_per_row = mesh_col // 4
-    # Packed Mode-1 D output row stride: 2 VCs × n1_total × 2 B/elem.
-    mode1_token_stride = 2 * n1_total * 2
+    # Packed Mode-1 D output row stride: total logical output width × INT16.
+    mode1_token_stride = n1_total * 2
     mode1_a_sstride = {0: [64, 8], 1: [8, 16], 2: [8, 32]}[array_shape]
     mode1_a_k_stride = {0: 128, 1: 64, 2: 16}[array_shape]
 
@@ -528,7 +532,7 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
         m_tiles * mesh_row * n1_total,
         # int32_t mode1_output_row_stride_bytes, mode1_padded_output_elems
         mode1_token_stride,
-        m_tiles * mesh_row * 2 * n1_total,
+        m_tiles * mesh_row * n1_total,
     ]
     assert len(vals) == 91, f"build_shape_cfg_flat_vals: expected 91, got {len(vals)}"
     return vals
@@ -539,6 +543,7 @@ def build_golden_arrays(logical_a, globals_, active_shapes):
     n0_total = globals_["n0_total"]
     k1_total = globals_["k1_total"]
     n1_total = globals_["n1_total"]
+    n1_per_vc = globals_["n1_per_vc"]
     k0_bytes = globals_["k0_bytes"]
 
     arrays = {}
@@ -550,7 +555,7 @@ def build_golden_arrays(logical_a, globals_, active_shapes):
         k_tiles = k0_total // tile_size
         k1_tiles = k1_total // tile_size
         n0_tiles = n0_total // mesh_col
-        n1_tiles = n1_total // mesh_col
+        n1_tiles = n1_per_vc // mesh_col
         a_channel_en = {0: 0xFFFF, 1: 0x00FF, 2: 0x000F}[array_shape]
 
         a_flat = streamer_i16_flat(
@@ -645,16 +650,14 @@ def build_golden_arrays(logical_a, globals_, active_shapes):
         )
         mode1_combined = np.concatenate(
             [
-                mode1_d0_pt.reshape(mesh_row, n1_total),
-                mode1_d1_pt.reshape(mesh_row, n1_total),
+                mode1_d0_pt.reshape(mesh_row, n1_per_vc),
+                mode1_d1_pt.reshape(mesh_row, n1_per_vc),
             ],
             axis=1,
         ).reshape(-1)
-        row_elems = max(
-            a_row_stride // 2, n1_total * 2
-        )  # ensure buffer fits mode1 dual-VC output
+        row_elems = n1_total
         mode1_padded = np.zeros((mesh_row, row_elems), dtype=np.int16)
-        mode1_padded[:, : n1_total * 2] = mode1_combined.reshape(mesh_row, n1_total * 2)
+        mode1_padded[:, :n1_total] = mode1_combined.reshape(mesh_row, n1_total)
         arrays[gname_mode1] = emit_i16_array(gname_mode1, mode1_padded.reshape(-1))
 
     return arrays, names_by_shape
@@ -752,6 +755,7 @@ def emit_moe_data(**kw):
     N_indiv = iN2 * iN1 * meshCol
     N_shared = sN2 * sN1 * meshCol
     N_indiv_down = idN2 * idN1 * meshCol_down
+    N_shared_down = sdN2 * sdN1 * meshCol_down
     K_indiv_down = idK2 * idK1 * tileSize
     K_shared_down = sdK2 * sdK1 * tileSize
 
@@ -768,24 +772,27 @@ def emit_moe_data(**kw):
     log(f"S{ashape}: meshRow={meshRow} tileSize={tileSize} meshCol={meshCol}")
     log(
         f"M_total={M_total} K_total={K_total} N_router={N_router} "
-        f"N_indiv={N_indiv} N_indiv_down={N_indiv_down}"
+        f"N_indiv={N_indiv} N_indiv_down={N_indiv_down} N_shared_down={N_shared_down}"
     )
 
     # L15 globals (per-cluster per-expert dimensions)
     k0_total = K_total
     s0_meshCol = 4
-    n0_total = iN2 * iN1 * s0_meshCol
+    n0_total = sN2 * sN1 * s0_meshCol
     k1_total = n0_total
-    n1_total = N_indiv_down
+    n1_total = N_shared_down
+    if n1_total % 2 != 0:
+        raise ValueError("L15 dual-VC down output width must split evenly across two VCs")
+    n1_per_vc = n1_total // 2
     k0_bytes = k0_total * 2
     k0_s0_tiles = k0_total // 8
     k1_s0_tiles = k1_total // 8
     n0_s0_tiles = n0_total // 4
-    n1_s0_tiles = n1_total // 4
+    n1_s0_tiles = n1_per_vc // 4
 
     assert (
-        k1_total == K_indiv_down
-    ), f"L15 k1_total={k1_total} != K_indiv_down={K_indiv_down}"
+        k1_total == K_shared_down
+    ), f"L15 k1_total={k1_total} != K_shared_down={K_shared_down}"
 
     globals_ = {
         "m_total": M_total,
@@ -793,6 +800,7 @@ def emit_moe_data(**kw):
         "n0_total": n0_total,
         "k1_total": k1_total,
         "n1_total": n1_total,
+        "n1_per_vc": n1_per_vc,
         "k0_s0_tiles": k0_s0_tiles,
         "k1_s0_tiles": k1_s0_tiles,
         "n0_s0_tiles": n0_s0_tiles,
@@ -804,19 +812,20 @@ def emit_moe_data(**kw):
         s
         for s in SHAPE_DIMS_ALL
         if n0_total % s[4] == 0
-        and n1_total % s[4] == 0
+        and n1_per_vc % s[4] == 0
         and n0_total // s[4] >= 1
-        and n1_total // s[4] >= 1
+        and n1_per_vc // s[4] >= 1
     ]
     skipped = [s[0] for s in SHAPE_DIMS_ALL if s not in active_shapes]
     if skipped:
         log(
-            f"NOTE: shapes {skipped} skipped (n0={n0_total} or n1={n1_total} "
-            f"too small for those meshCols). Increase indiv_N1/N2 or "
-            f"indiv_down_N1/N2 in params.hjson to enable them."
+            f"NOTE: shapes {skipped} skipped (n0={n0_total} or n1_per_vc={n1_per_vc} "
+            f"too small for those meshCols). Increase shared_N1/N2 or "
+            f"shared_down_N1/N2 in params.hjson to enable them."
         )
     log(
         f"L15: k0={k0_total} n0={n0_total} k1={k1_total} n1={n1_total} "
+        f"n1_per_vc={n1_per_vc} "
         f"m={M_total} active={[s[0] for s in active_shapes]}"
     )
 
@@ -869,6 +878,7 @@ def emit_moe_data(**kw):
         ("N_router", N_router),
         ("N_indiv", N_indiv),
         ("N_indiv_down", N_indiv_down),
+        ("N_shared_down", N_shared_down),
         ("K_indiv_down", K_indiv_down),
         ("num_indiv_experts", num_indiv_experts),
         ("top_k", top_k),
@@ -1170,7 +1180,7 @@ def emit_moe_data(**kw):
     # M_tiles derivation: sdM1 = shared_down_M1 = M_total / meshRow = M_total / 8
     _s0_shape = next(s for s in SHAPE_DIMS_ALL if s[0] == "S0")
     _shared_m_tiles = sdM1  # from params.hjson: shared_down_M1
-    _mode1_tok_stride = 2 * globals_["n1_total"] * 2  # bytes per output token (2 VCs)
+    _mode1_tok_stride = globals_["n1_total"] * 2  # bytes per logical output row
     flat_vals_shared = build_shape_cfg_flat_vals(
         _s0_shape, globals_, layout, placement, m_tiles=_shared_m_tiles
     )
@@ -1216,14 +1226,22 @@ def emit_header_file(**kw):
     ashape = kw["array_shape"]
     mc = acc["snax_versacore_spatial_unrolling"][0][ashape][2]
     dmc = int(kw.get("down_meshCol", mc))
-    iN2, iN1 = kw["indiv_N2"], kw["indiv_N1"]
-    idN2, idN1 = kw.get("indiv_down_N2", iN2), kw.get("indiv_down_N1", iN1)
-    n0 = iN2 * iN1 * 4
-    n1 = idN2 * idN1 * dmc
+    sN2 = kw.get("shared_N2", kw["indiv_N2"])
+    sN1 = kw.get("shared_N1", kw["indiv_N1"])
+    sdN2 = kw.get("shared_down_N2", sN2)
+    sdN1 = kw.get("shared_down_N1", sN1)
+    n0 = sN2 * sN1 * 4
+    n1 = sdN2 * sdN1 * dmc
+    if n1 % 2 != 0:
+        raise ValueError("L15 dual-VC down output width must split evenly across two VCs")
+    n1_per_vc = n1 // 2
     active_count = sum(
         1
         for (_, _, _, _, c) in SHAPE_DIMS_ALL
-        if n0 % c == 0 and n1 % c == 0 and n0 // c >= 1 and n1 // c >= 1
+        if n0 % c == 0
+        and n1_per_vc % c == 0
+        and n0 // c >= 1
+        and n1_per_vc // c >= 1
     )
 
     lines = [

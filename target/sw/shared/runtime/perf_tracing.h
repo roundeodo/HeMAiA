@@ -164,3 +164,41 @@
 #define BINGO_TRACE_L15_DOWN_CFG_END      0x37B
 #define BINGO_TRACE_L15_DOWN_RUN_START    0x37C
 #define BINGO_TRACE_L15_DOWN_RUN_END      0x37D
+
+// Device MoE dynamic expert per-kernel identification markers (0x382 - 0x395)
+// These are emitted inside each __snax_bingo_kernel_moe_dynamic_expert_*
+// function to allow classify_kernel to distinguish DMA kernel types.
+#define BINGO_TRACE_DEV_MOE_GATHER_S1_START             0x382
+#define BINGO_TRACE_DEV_MOE_GATHER_S1_END               0x383
+#define BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_START          0x384
+#define BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_END            0x385
+#define BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_START       0x386
+#define BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_END         0x387
+#define BINGO_TRACE_DEV_MOE_LOAD_DOWN_START             0x388
+#define BINGO_TRACE_DEV_MOE_LOAD_DOWN_END               0x389
+#define BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_START          0x38A
+#define BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_END            0x38B
+#define BINGO_TRACE_DEV_MOE_PREFETCH_S2_START           0x38C
+#define BINGO_TRACE_DEV_MOE_PREFETCH_S2_END             0x38D
+#define BINGO_TRACE_DEV_MOE_PREFETCH_S4_START           0x38E
+#define BINGO_TRACE_DEV_MOE_PREFETCH_S4_END             0x38F
+#define BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_START  0x390
+#define BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_END    0x391
+#define BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_START     0x392
+#define BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_END       0x393
+#define BINGO_TRACE_DEV_MOE_STORE_START                 0x394
+#define BINGO_TRACE_DEV_MOE_STORE_END                   0x395
+
+// DMA 子阶段计时 marker (0x396 - 0x39B)
+// 由 __moe_dyn_xdma_start_copy / __moe_dyn_wait_xdma / copy_one / copy_pair 内部发出。
+// 这些是 gather_s1 / load_gate_up / load_down / prefetch_s2/s4 / store 的子事件。
+//
+//   xDMA_CFG  = xdma_memcpy_1d_fast_full_addr() 的 30-CSR-write 阶段
+//   xDMA_WAIT = xdma_wait_task() 等待 xDMA 传输完成的阶段
+//   iDMA_WAIT = snrt_dma_wait_all() 等待 iDMA 传输完成的阶段
+#define BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START          0x396
+#define BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END            0x397
+#define BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START         0x398
+#define BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END           0x399
+#define BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_START         0x39A
+#define BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_END           0x39B

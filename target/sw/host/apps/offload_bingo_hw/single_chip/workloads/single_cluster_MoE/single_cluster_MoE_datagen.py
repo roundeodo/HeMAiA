@@ -486,7 +486,9 @@ def emit_MoE_data(**kwargs):
     S0_TILESIZE = 8
 
     # L15 globals derived from current shape params
-    l15_k0_total = sK1 * tileSize  # 128*8 = 1024
+    # l15_test_k1: 独立参数，仅控制 L15 权重大小，不影响 shared_experts 数组 shape
+    l15_test_k1 = int(kwargs.get("l15_test_k1", sK1))
+    l15_k0_total = l15_test_k1 * tileSize  # l15_test_k1=1408 → 11264
     l15_n0_total = sN1 * meshCol  # sN1*16 = N_hidden
     l15_k1_total = l15_n0_total  # = N_hidden (down K = gate/up N output)
     l15_n1_total = sdN1 * meshCol  # sdN1*16 = down output cols per VC
@@ -748,9 +750,14 @@ def emit_MoE_data(**kwargs):
     # idma: A → TCDM[base + delta_a=268288], size=4160（pipeline 开始前各 buffer 预加载一次）
     # A 区域不被 dma_B（写 [0..262416]）或 dma_W2（写 [263296..268288]）覆盖，
     # 因此 pre-load 后整个 pipeline 期间保持有效。
-    K_total = l15_k0_total  # 1024
-    _a_row_elems = _l15_a_row_stride // 2  # 1040 int16 per row
-    _a_logical = A_phys[0, 0].reshape(meshRow, K_total)  # (2, 1024) int16，用第一份数据
+    K_total = l15_k0_total
+    _a_row_elems = _l15_a_row_stride // 2
+    # 当 l15_test_k1 != sK1 时，A_phys 形状不匹配，用全零占位（仅计时测试，计算结果无意义）
+    router_K_total = sK1 * tileSize
+    if l15_k0_total != router_K_total:
+        _a_logical = np.zeros((meshRow, l15_k0_total), dtype=np.int16)
+    else:
+        _a_logical = A_phys[0, 0].reshape(meshRow, K_total)
     _a_padded_arr = np.zeros((meshRow, _a_row_elems), dtype=np.int16)
     _a_padded_arr[:, :K_total] = _a_logical
     _l15_a_data = _a_padded_arr.view(np.uint8).flatten()  # 4160 bytes

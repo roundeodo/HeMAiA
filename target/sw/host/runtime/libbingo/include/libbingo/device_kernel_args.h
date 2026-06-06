@@ -561,7 +561,7 @@ typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
         __snax_bingo_kernel_dual_vc_l15_moe_down_args_t;
 
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
-  /* ── ctrl: packed control word (16 bits used, written every round by Phase4) ──────
+  /* ── ctrl: packed control word (19 bits used, written every round by Phase4) ──────
    * bit  0:      active             (1 = slot valid, Snitch will execute)
    * bit  1:      skip_s1            (1 = S1 load+compute 全跳过, cache hit)
    * bit  2:      skip_s3            (1 = S3 load+compute 全跳过, cache hit)
@@ -572,7 +572,7 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
    * bits [10:9]: dma_s1             (0=NONE, 1=IDMA, 2=XDMA, 3=BOTH)
    * bits [12:11]:dma_s3
    * bit  13:     runtime_cluster_idx (0=C2, 1=C3)
-   * bits [15:14]:slot_id            (0-3, local slot index)
+   * bits [18:14]:slot_id            (0-31, local slot index)
    * ──────────────────────────────────────────────────────────────────────────── */
   uint32_t ctrl;
   uint32_t expert_id;

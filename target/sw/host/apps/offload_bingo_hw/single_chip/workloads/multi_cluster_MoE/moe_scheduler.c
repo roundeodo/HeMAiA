@@ -37,6 +37,7 @@ static const uint32_t kTd1[3]   = {45056u, 45056u, 22528u};
 static const uint32_t kTd3[3]   = {22528u, 22528u, 11264u};
 static const uint32_t kMdim[3]  = {8u, 4u, 2u};
 static const uint32_t kAlloc[3] = {64u, 64u, 128u};
+static const uint32_t kFullMdim = 2u; /* S2/S4 GEMM always runs shape C. */
 
 #define MAX_BW_CC       128u
 #define INF_CC          0xFFFFFFFFu
@@ -798,23 +799,23 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
         tk->skip_s3         =skip_s3;
 
         if (skip_s1){
-            /* S2 handles all tokens: batch count = ceil(ntok / meshRow) */
-            uint32_t b2=(ntok_u+kMdim[p->shape_s1]-1u)/kMdim[p->shape_s1];
+            /* S2 handles all tokens with fixed shape C: batch count = ceil(ntok / 2). */
+            uint32_t b2=(ntok_u+kFullMdim-1u)/kFullMdim;
             tk->m_s2_exec=b2; tk->skip_s2=0u;
         } else {
-            /* S2 handles tail tokens after S1 block (kMdim = one S1 batch) */
+            /* S2 handles tail tokens after S1 block, but S2 itself uses shape C. */
             uint32_t tail=(ntok_u>kMdim[p->shape_s1])?(ntok_u-kMdim[p->shape_s1]):0u;
-            uint32_t b2=(tail+kMdim[p->shape_s1]-1u)/kMdim[p->shape_s1];
+            uint32_t b2=(tail+kFullMdim-1u)/kFullMdim;
             tk->m_s2_exec=b2; tk->skip_s2=(b2==0u)?1u:0u;
         }
         if (skip_s3){
-            /* S4 handles all tokens: batch count = ceil(ntok / meshRow) */
-            uint32_t b4=(ntok_u+kMdim[p->shape_s3]-1u)/kMdim[p->shape_s3];
+            /* S4 handles all tokens with fixed shape C: batch count = ceil(ntok / 2). */
+            uint32_t b4=(ntok_u+kFullMdim-1u)/kFullMdim;
             tk->m_s4_exec=b4; tk->skip_s4=0u;
         } else {
-            /* S4 handles tail tokens after S3 block */
+            /* S4 handles tail tokens after S3 block, but S4 itself uses shape C. */
             uint32_t tail4=(ntok_u>kMdim[p->shape_s3])?(ntok_u-kMdim[p->shape_s3]):0u;
-            uint32_t b4=(tail4+kMdim[p->shape_s3]-1u)/kMdim[p->shape_s3];
+            uint32_t b4=(tail4+kFullMdim-1u)/kFullMdim;
             tk->m_s4_exec=b4; tk->skip_s4=(b4==0u)?1u:0u;
         }
         /* prefetch_eid/dma_slots/est_start_cc/est_end_cc removed from compact moe_task_t */
@@ -851,8 +852,13 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
             }
             if (next_eid>=0){
                 uint8_t nc=0;
-                if (ci==0 && req->cache_eid_c2==next_eid) nc=1;
-                if (ci==1 && req->cache_eid_c3==next_eid) nc=1;
+                /* Only skip S4_PREFETCH if the current task's S1 DMA did NOT
+                 * run (skip_s1=1), meaning the initial cached expert is still
+                 * intact in the SRAM gate/up buffer.  If skip_s1=0, the S1 DMA
+                 * already overwrote the buffer with the current expert's data,
+                 * so the initial cache is gone and we must prefetch next_eid. */
+                if (ci==0 && req->cache_eid_c2==next_eid && p->skip_s1) nc=1;
+                if (ci==1 && req->cache_eid_c3==next_eid && p->skip_s1) nc=1;
                 if (!nc){
                     uint32_t s4s=p->est_s4_start;
                     uint32_t pfd=kTd1[0]; /* ShapeA gate+up DMA = 45056 cc */

@@ -87,8 +87,8 @@ typedef struct {
     uint8_t           skip_s3;          /* 1 = S3 cache hit, skip down DMA+GEMM     */
     uint8_t           skip_s2;          /* 1 = S2 tail empty (ntokens<=shape_Mdim)  */
     uint8_t           skip_s4;          /* 1 = S4 tail empty                        */
-    uint32_t          m_s2_exec;        /* token count for S2 tail GEMM             */
-    uint32_t          m_s4_exec;        /* token count for S4 tail GEMM             */
+    uint32_t          m_s2_exec;        /* S2 M-tile count; fixed shape C, 2 tok/tile */
+    uint32_t          m_s4_exec;        /* S4 M-tile count; fixed shape C, 2 tok/tile */
     /* REMOVED: bw_s1, bw_s3 (derivable from shape+skip), prefetch_eid (from dma_ops),
      *          dma_slots[] (from dma_ops), est_start_cc/est_end_cc (timing removed) */
 } moe_task_t;

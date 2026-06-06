@@ -2246,8 +2246,8 @@ int kernel_execution(){
         global_task_id_to_host_task_id_chip_00[294] = -1; // Node ID 294 (Node_ID0_Chiplet0_Cluster0_Core0_KernelNone)
         uint32_t num_host_tasks_chip_00 = 8;
         // 1. Memory Allocations
-        uint64_t ptr_c0_l1_layout = bingo_l1_alloc(0x00, 0, 1281280);
-        uint64_t ptr_c1_l1_layout = bingo_l1_alloc(0x00, 1, 1281280);
+        uint64_t ptr_c0_l1_layout = bingo_l1_alloc(0x00, 0, 953600);
+        uint64_t ptr_c1_l1_layout = bingo_l1_alloc(0x00, 1, 953600);
         uint64_t ptr_c2_indiv_dyn_args = bingo_l1_alloc(0x00, 2, 1024);
         uint64_t ptr_c2_indiv_l1_a = bingo_l1_alloc(0x00, 2, 65536);
         uint64_t ptr_c2_indiv_l1_b_down = bingo_l1_alloc(0x00, 2, 262144);
@@ -2279,7 +2279,7 @@ int kernel_execution(){
         uint64_t ptr_l3_moe_runtime_state = bingo_l3_alloc(0x00, 16);
         uint64_t ptr_l3_moe_schedule = bingo_l3_alloc(0x00, 32768);
         uint64_t ptr_l3_router_out = bingo_l3_alloc(0x00, 512);
-        uint64_t ptr_l3_shared_down_out = bingo_l3_alloc(0x00, 262144);
+        uint64_t ptr_l3_shared_down_out = bingo_l3_alloc(0x00, 131072);
         uint64_t ptr_l3_topk_idx = bingo_l3_alloc(0x00, 128);
         uint64_t ptr_l3_topk_scores = bingo_l3_alloc(0x00, 256);
 
@@ -2579,8 +2579,8 @@ int kernel_execution(){
         __snax_bingo_kernel_idma_1d_copy_args_t* args_dev_chip00_11 = (__snax_bingo_kernel_idma_1d_copy_args_t*)bingo_l1_alloc(0x00, 0, sizeof(__snax_bingo_kernel_idma_1d_copy_args_t));
         args_dev_chip00_11->src_addr_lo = (uint32_t)(chiplet_addr_transform((uint64_t)((uintptr_t)layout_A_row_stride_2080)));
         args_dev_chip00_11->src_addr_hi = (uint32_t)((chiplet_addr_transform((uint64_t)((uintptr_t)layout_A_row_stride_2080))) >> 32);
-        args_dev_chip00_11->dst_addr_lo = (uint32_t)ptr_c0_l1_layout + 1050624;
-        args_dev_chip00_11->dst_addr_hi = (uint32_t)(ptr_c0_l1_layout + 1050624 >> 32);
+        args_dev_chip00_11->dst_addr_lo = (uint32_t)ptr_c0_l1_layout + 788480;
+        args_dev_chip00_11->dst_addr_hi = (uint32_t)(ptr_c0_l1_layout + 788480 >> 32);
         args_dev_chip00_11->size = 66560;
         args_dev_chip00_11->gating_sp_addr = 0;
         args_dev_chip00_11->cond_node_index = 0;
@@ -2591,8 +2591,8 @@ int kernel_execution(){
         __snax_bingo_kernel_xdma_1d_copy_args_t* args_dev_chip00_12 = (__snax_bingo_kernel_xdma_1d_copy_args_t*)bingo_l1_alloc(0x00, 1, sizeof(__snax_bingo_kernel_xdma_1d_copy_args_t));
         args_dev_chip00_12->src_addr_lo = (uint32_t)(chiplet_addr_transform((uint64_t)((uintptr_t)layout_A_row_stride_2080)));
         args_dev_chip00_12->src_addr_hi = (uint32_t)((chiplet_addr_transform((uint64_t)((uintptr_t)layout_A_row_stride_2080))) >> 32);
-        args_dev_chip00_12->dst_addr_lo = (uint32_t)ptr_c1_l1_layout + 1050624;
-        args_dev_chip00_12->dst_addr_hi = (uint32_t)(ptr_c1_l1_layout + 1050624 >> 32);
+        args_dev_chip00_12->dst_addr_lo = (uint32_t)ptr_c1_l1_layout + 788480;
+        args_dev_chip00_12->dst_addr_hi = (uint32_t)(ptr_c1_l1_layout + 788480 >> 32);
         args_dev_chip00_12->size = 66560;
         args_dev_chip00_12->gating_sp_addr = 0;
         args_dev_chip00_12->cond_node_index = 0;
@@ -2617,7 +2617,7 @@ int kernel_execution(){
         args_dev_chip00_14->src_addr_hi = (uint32_t)((chiplet_addr_transform((uint64_t)((uintptr_t)layout_W2_left))) >> 32);
         args_dev_chip00_14->dst_addr_lo = (uint32_t)ptr_c0_l1_layout + 525440;
         args_dev_chip00_14->dst_addr_hi = (uint32_t)(ptr_c0_l1_layout + 525440 >> 32);
-        args_dev_chip00_14->size = 262144;
+        args_dev_chip00_14->size = 131072;
         args_dev_chip00_14->gating_sp_addr = 0;
         args_dev_chip00_14->cond_node_index = 0;
         args_dev_chip00_14->scratchpad_ptr = (uint32_t)(uintptr_t)sp_dev_14;
@@ -2627,9 +2627,9 @@ int kernel_execution(){
         __snax_bingo_kernel_xdma_1d_copy_args_t* args_dev_chip00_15 = (__snax_bingo_kernel_xdma_1d_copy_args_t*)bingo_l1_alloc(0x00, 0, sizeof(__snax_bingo_kernel_xdma_1d_copy_args_t));
         args_dev_chip00_15->src_addr_lo = (uint32_t)(chiplet_addr_transform((uint64_t)((uintptr_t)layout_W2_right)));
         args_dev_chip00_15->src_addr_hi = (uint32_t)((chiplet_addr_transform((uint64_t)((uintptr_t)layout_W2_right))) >> 32);
-        args_dev_chip00_15->dst_addr_lo = (uint32_t)ptr_c0_l1_layout + 788480;
-        args_dev_chip00_15->dst_addr_hi = (uint32_t)(ptr_c0_l1_layout + 788480 >> 32);
-        args_dev_chip00_15->size = 262144;
+        args_dev_chip00_15->dst_addr_lo = (uint32_t)ptr_c0_l1_layout + 657408;
+        args_dev_chip00_15->dst_addr_hi = (uint32_t)(ptr_c0_l1_layout + 657408 >> 32);
+        args_dev_chip00_15->size = 131072;
         args_dev_chip00_15->gating_sp_addr = 0;
         args_dev_chip00_15->cond_node_index = 0;
         args_dev_chip00_15->scratchpad_ptr = (uint32_t)(uintptr_t)sp_dev_15;
@@ -2641,7 +2641,7 @@ int kernel_execution(){
         args_dev_chip00_16->src_addr_hi = (uint32_t)((chiplet_addr_transform((uint64_t)((uintptr_t)layout_W2_left))) >> 32);
         args_dev_chip00_16->dst_addr_lo = (uint32_t)ptr_c1_l1_layout + 525440;
         args_dev_chip00_16->dst_addr_hi = (uint32_t)(ptr_c1_l1_layout + 525440 >> 32);
-        args_dev_chip00_16->size = 262144;
+        args_dev_chip00_16->size = 131072;
         args_dev_chip00_16->gating_sp_addr = 0;
         args_dev_chip00_16->cond_node_index = 0;
         args_dev_chip00_16->scratchpad_ptr = (uint32_t)(uintptr_t)sp_dev_16;
@@ -2651,9 +2651,9 @@ int kernel_execution(){
         __snax_bingo_kernel_xdma_1d_copy_args_t* args_dev_chip00_17 = (__snax_bingo_kernel_xdma_1d_copy_args_t*)bingo_l1_alloc(0x00, 1, sizeof(__snax_bingo_kernel_xdma_1d_copy_args_t));
         args_dev_chip00_17->src_addr_lo = (uint32_t)(chiplet_addr_transform((uint64_t)((uintptr_t)layout_W2_right)));
         args_dev_chip00_17->src_addr_hi = (uint32_t)((chiplet_addr_transform((uint64_t)((uintptr_t)layout_W2_right))) >> 32);
-        args_dev_chip00_17->dst_addr_lo = (uint32_t)ptr_c1_l1_layout + 788480;
-        args_dev_chip00_17->dst_addr_hi = (uint32_t)(ptr_c1_l1_layout + 788480 >> 32);
-        args_dev_chip00_17->size = 262144;
+        args_dev_chip00_17->dst_addr_lo = (uint32_t)ptr_c1_l1_layout + 657408;
+        args_dev_chip00_17->dst_addr_hi = (uint32_t)(ptr_c1_l1_layout + 657408 >> 32);
+        args_dev_chip00_17->size = 131072;
         args_dev_chip00_17->gating_sp_addr = 0;
         args_dev_chip00_17->cond_node_index = 0;
         args_dev_chip00_17->scratchpad_ptr = (uint32_t)(uintptr_t)sp_dev_17;
@@ -2683,9 +2683,9 @@ int kernel_execution(){
         device_kernel_list_chip_00[19] = (uint32_t)(uintptr_t)get_device_function("__snax_bingo_kernel_dual_vc_l15_moe_down");
         // Node ID: 20 Node_ID0_Chiplet0_Cluster0_Core2_Kernel__host_bingo_kernel_idma (__host_bingo_kernel_idma)
         __host_bingo_kernel_idma_args_t* args_host_chip00_20 = (__host_bingo_kernel_idma_args_t*)bingo_l3_alloc(0x00, sizeof(__host_bingo_kernel_idma_args_t));
-        args_host_chip00_20->src_addr = (uint64_t)ptr_c0_l1_layout + 1150208;
+        args_host_chip00_20->src_addr = (uint64_t)ptr_c0_l1_layout + 888064;
         args_host_chip00_20->dst_addr = (uint64_t)ptr_l3_shared_down_out;
-        args_host_chip00_20->size = 131072;
+        args_host_chip00_20->size = 65536;
         args_host_chip00_20->scratchpad_ptr = (uint64_t)(uintptr_t)sp_host_20;
         host_arg_list_chip_00[0] = (uint64_t)(uintptr_t)args_host_chip00_20;
         host_kernel_list_chip_00[0] = (uint64_t)(uintptr_t)&__host_bingo_kernel_idma;
@@ -2713,9 +2713,9 @@ int kernel_execution(){
         device_kernel_list_chip_00[21] = (uint32_t)(uintptr_t)get_device_function("__snax_bingo_kernel_dual_vc_l15_moe_down");
         // Node ID: 23 Node_ID0_Chiplet0_Cluster0_Core2_Kernel__host_bingo_kernel_idma (__host_bingo_kernel_idma)
         __host_bingo_kernel_idma_args_t* args_host_chip00_23 = (__host_bingo_kernel_idma_args_t*)bingo_l3_alloc(0x00, sizeof(__host_bingo_kernel_idma_args_t));
-        args_host_chip00_23->src_addr = (uint64_t)ptr_c1_l1_layout + 1150208;
-        args_host_chip00_23->dst_addr = (uint64_t)ptr_l3_shared_down_out + 131072;
-        args_host_chip00_23->size = 131072;
+        args_host_chip00_23->src_addr = (uint64_t)ptr_c1_l1_layout + 888064;
+        args_host_chip00_23->dst_addr = (uint64_t)ptr_l3_shared_down_out + 65536;
+        args_host_chip00_23->size = 65536;
         args_host_chip00_23->scratchpad_ptr = (uint64_t)(uintptr_t)sp_host_23;
         host_arg_list_chip_00[1] = (uint64_t)(uintptr_t)args_host_chip00_23;
         host_kernel_list_chip_00[1] = (uint64_t)(uintptr_t)&__host_bingo_kernel_idma;
