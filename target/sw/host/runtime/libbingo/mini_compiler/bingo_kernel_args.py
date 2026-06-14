@@ -583,15 +583,65 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
             assignments[f"dma_slot_dma[{slot}]"] = "0"
             assignments[f"dma_slot_idma_seq[{slot}]"] = "0"
             assignments[f"dma_slot_xdma_seq[{slot}]"] = "0"
-            assignments[f"dma_slot_start_cc[{slot}]"] = "0"
-            assignments[f"dma_slot_end_cc[{slot}]"] = "0"
-        self._process_addr64(self.token_ids_addr, "token_ids_addr", assignments, handle_name_map)
-        self._process_addr64(self.input_A_l3_base, "input_A_l3_base", assignments, handle_name_map)
-        self._process_addr64(self.indiv_gate_B_l3, "indiv_gate_B_l3", assignments, handle_name_map)
-        self._process_addr64(self.indiv_up_B_l3, "indiv_up_B_l3", assignments, handle_name_map)
-        self._process_addr64(self.indiv_down_B_l3, "indiv_down_B_l3", assignments, handle_name_map)
-        self._process_addr64(self.output_l3_base, "output_l3_base", assignments, handle_name_map)
-        self._process_addr64(self.runtime_state_addr, "runtime_state_addr", assignments, handle_name_map)
+        swiglu_fields = (
+            "valid",
+            "input_A_addr",
+            "input_B_gate_addr",
+            "input_B_up_addr",
+            "output_D0_addr",
+            "output_D1_addr",
+            "M",
+            "K",
+            "N",
+            "array_shape",
+            "rescale_mult",
+            "rescale_shift",
+        )
+        down_fields = (
+            "valid",
+            "input_A_addr",
+            "input_B0_addr",
+            "input_B1_addr",
+            "output_D0_addr",
+            "output_D1_addr",
+            "M",
+            "K",
+            "N",
+            "array_shape",
+            "d_row_stride_override",
+            "rescale_mult",
+            "rescale_shift",
+        )
+        for block in range(2):
+            for field in swiglu_fields:
+                assignments[f"s1_call[{block}].{field}"] = "0"
+            for field in down_fields:
+                assignments[f"s3_call[{block}].{field}"] = "0"
+        for field in swiglu_fields:
+            assignments[f"s2_call.{field}"] = "0"
+        for field in down_fields:
+            assignments[f"s4_call.{field}"] = "0"
+        self._process_addr64(
+            self.token_ids_addr, "token_ids_addr", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.input_A_l3_base, "input_A_l3_base", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.indiv_gate_B_l3, "indiv_gate_B_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.indiv_up_B_l3, "indiv_up_B_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.indiv_down_B_l3, "indiv_down_B_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.output_l3_base, "output_l3_base", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.runtime_state_addr, "runtime_state_addr", assignments, handle_name_map
+        )
         self._process_addr32(self.l1_a_addr, "l1_a_addr", assignments, handle_name_map)
         self._process_addr32(self.l1_b_gate_addr, "l1_b_gate_addr", assignments, handle_name_map)
         self._process_addr32(self.l1_b_up_addr, "l1_b_up_addr", assignments, handle_name_map)

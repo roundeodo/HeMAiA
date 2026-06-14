@@ -20,6 +20,7 @@
 # L15 TCDM 布局（weights-first, padded A, bank coloring）:
 #   B0(W/gate) → B1(V/up) → W2_left → W2_right → A(token buf) → Mode0_D0 → Mode1_D0/D1
 #   a_row_stride = k0_bytes + a_pad = K0_total*2 + 32 bytes
+#   Mode1_D row stride follows a_row_stride as in the standalone L15 reference.
 #   b1_color=272, w2l_color=128, m1d0_color=256 (bank-rotation offsets)
 #
 # 参数说明（params.hjson → L15 全局变量对应关系）:
@@ -246,9 +247,10 @@ def place_tensors(globals_, layout):
     w_bytes = globals_["k0_s0_tiles"] * globals_["n0_s0_tiles"] * 16
     mode0_d_bytes = globals_["m_total"] * globals_["n0_total"] * 2
     w2_bytes = globals_["k1_s0_tiles"] * globals_["n1_s0_tiles"] * 16
-    # Mode-1 D output: VC0 writes the left half, VC1 writes the right half.
-    # Packed row stride = n1_total * 2 bytes (no gap between halves).
-    mode1_row_stride = globals_["n1_total"] * 2
+    # Mode-1 D output follows the standalone L15 reference layout: each token row
+    # uses the same padded stride as Mode-0 input A, with the logical down output
+    # at the front and zero padding at the end.
+    mode1_row_stride = a_row_stride
     mode1_padded_d_bytes = globals_["m_total"] * mode1_row_stride
 
     delta_local_b0 = colored_offset(0, layout.get("b0_color", 0))
@@ -308,8 +310,10 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1)
     mode0_d_m_stride = n0_tiles * d_stride1
     d_bound0 = 8
     beats_per_row = mesh_col // 4
-    # Packed Mode-1 D output row stride: total logical output width × INT16.
-    mode1_token_stride = n1_total * 2
+    # Mode-1 D output uses the same padded per-token row stride as Mode-0 A.
+    mode1_token_stride = a_row_stride
+    if mode1_token_stride < n1_total * 2:
+        raise ValueError("L15 Mode-1 output row stride is smaller than logical output")
     mode1_a_sstride = {0: [64, 8], 1: [8, 16], 2: [8, 32]}[array_shape]
     mode1_a_k_stride = {0: 128, 1: 64, 2: 16}[array_shape]
 
@@ -356,7 +360,7 @@ def build_shape_cfg(shape, globals_, golden_names, layout, placement, m_tiles=1)
         f".mode0_output_elems        = {m_tiles * mesh_row * n0_total}",
         f".mode1_output_elems        = {m_tiles * mesh_row * n1_total}",
         f".mode1_output_row_stride_bytes = {mode1_token_stride}",
-        f".mode1_padded_output_elems = {m_tiles * mesh_row * n1_total}",
+        f".mode1_padded_output_elems = {m_tiles * mesh_row * (mode1_token_stride // 2)}",
         f".mode0_d0_golden           = {golden_names[name][0]}",
         f".mode1_padded_golden       = {golden_names[name][1]}",
     ]
@@ -412,8 +416,10 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
     mode0_d_m_stride = n0_tiles * d_stride1
     d_bound0 = 8
     beats_per_row = mesh_col // 4
-    # Packed Mode-1 D output row stride: total logical output width × INT16.
-    mode1_token_stride = n1_total * 2
+    # Mode-1 D output uses the same padded per-token row stride as Mode-0 A.
+    mode1_token_stride = a_row_stride
+    if mode1_token_stride < n1_total * 2:
+        raise ValueError("L15 Mode-1 output row stride is smaller than logical output")
     mode1_a_sstride = {0: [64, 8], 1: [8, 16], 2: [8, 32]}[array_shape]
     mode1_a_k_stride = {0: 128, 1: 64, 2: 16}[array_shape]
 
@@ -532,7 +538,7 @@ def build_shape_cfg_flat_vals(shape, globals_, layout, placement, m_tiles=1):
         m_tiles * mesh_row * n1_total,
         # int32_t mode1_output_row_stride_bytes, mode1_padded_output_elems
         mode1_token_stride,
-        m_tiles * mesh_row * n1_total,
+        m_tiles * mesh_row * (mode1_token_stride // 2),
     ]
     assert len(vals) == 91, f"build_shape_cfg_flat_vals: expected 91, got {len(vals)}"
     return vals
@@ -655,7 +661,9 @@ def build_golden_arrays(logical_a, globals_, active_shapes):
             ],
             axis=1,
         ).reshape(-1)
-        row_elems = n1_total
+        row_elems = a_row_stride // 2
+        if row_elems < n1_total:
+            raise ValueError("L15 golden output row stride is smaller than logical output")
         mode1_padded = np.zeros((mesh_row, row_elems), dtype=np.int16)
         mode1_padded[:, :n1_total] = mode1_combined.reshape(mesh_row, n1_total)
         arrays[gname_mode1] = emit_i16_array(gname_mode1, mode1_padded.reshape(-1))
@@ -1177,10 +1185,10 @@ def emit_moe_data(**kw):
     # in ONE kernel call (no loop in the DFG node, the streamer loops internally).
     # To change token count: update router_M1/M2 and A_meshRow in params.hjson,
     #   then re-run: python3 multi_cluster_MoE_datagen.py
-    # M_tiles derivation: sdM1 = shared_down_M1 = M_total / meshRow = M_total / 8
+    # M_tiles derivation: sdM1 = shared_down_M1 = M_total / selected_shape.meshRow.
     _s0_shape = next(s for s in SHAPE_DIMS_ALL if s[0] == "S0")
     _shared_m_tiles = sdM1  # from params.hjson: shared_down_M1
-    _mode1_tok_stride = globals_["n1_total"] * 2  # bytes per logical output row
+    _mode1_tok_stride = a_row_stride  # bytes per padded output row
     flat_vals_shared = build_shape_cfg_flat_vals(
         _s0_shape, globals_, layout, placement, m_tiles=_shared_m_tiles
     )
@@ -1198,11 +1206,13 @@ def emit_moe_data(**kw):
     mode1_padded_bytes = placement["tcdm_end"] - placement["delta_local_mode1_d0"]
     b_data_length = k0_s0_tiles * n0_s0_tiles * 16
     w2_data_length = k1_s0_tiles * n1_s0_tiles * 16
+    l15_delta_cfg = placement["tcdm_end"]
+    l15_cfg_bytes = 91 * 4
     for nm, val in [
         ("l15_b_data_length", b_data_length),
         ("l15_w2_data_length", w2_data_length),
         ("l15_a_data_bytes", a_data_bytes),
-        ("l15_tcdm_size", placement["tcdm_end"]),
+        ("l15_tcdm_size", l15_delta_cfg + l15_cfg_bytes),
         ("l15_delta_local_b0", placement["delta_local_b0"]),
         ("l15_delta_local_b1", placement["delta_local_b1"]),
         ("l15_delta_local_w2l", placement["delta_local_w2l"]),
@@ -1210,6 +1220,8 @@ def emit_moe_data(**kw):
         ("l15_delta_local_a", placement["delta_local_a"]),
         ("l15_delta_local_mode1_d0", placement["delta_local_mode1_d0"]),
         ("l15_mode1_padded_bytes", mode1_padded_bytes),
+        ("l15_delta_cfg", l15_delta_cfg),
+        ("l15_cfg_bytes", l15_cfg_bytes),
     ]:
         data_str += [format_scalar_definition("uint32_t", nm, val)]
 

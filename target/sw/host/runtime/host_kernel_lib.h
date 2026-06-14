@@ -730,11 +730,196 @@ static inline uint32_t __host_moe_completed_before(const moe_schedule_t *schedul
 
 static inline void __host_moe_clear_dyn_arg(__snax_bingo_kernel_moe_dynamic_expert_args_t *arg)
 {
-    /* 4 stores per slot (vs 39 stores before): active=0 gates all device-side reads */
     arg->ctrl = 0u;              /* active=0; clears all packed control bits */
     arg->ntokens = 0u;
     arg->wait_for_peer_slots = 0u;
     arg->dma_slot_vd = 0u;       /* all 4 slots: valid=0 */
+    for (uint32_t i = 0; i < 2u; i++) {
+        arg->s1_call[i].valid = 0u;
+        arg->s3_call[i].valid = 0u;
+    }
+    arg->s2_call.valid = 0u;
+    arg->s4_call.valid = 0u;
+}
+
+static inline uint32_t __host_moe_shape_m(uint32_t shape)
+{
+    if (shape == 0u) return 8u;
+    if (shape == 1u) return 4u;
+    return 2u;
+}
+
+static inline uint32_t __host_moe_meshcol(uint32_t shape)
+{
+    if (shape == 0u) return 4u;
+    if (shape == 1u) return 8u;
+    return 16u;
+}
+
+static inline uint32_t __host_moe_s1_blocks(const __snax_bingo_kernel_moe_dynamic_expert_args_t *arg)
+{
+    return (arg->s1_block_count != 0u) ? arg->s1_block_count : arg->indiv_N2;
+}
+
+static inline uint32_t __host_moe_s3_blocks(const __snax_bingo_kernel_moe_dynamic_expert_args_t *arg)
+{
+    return (arg->s3_block_count != 0u) ? arg->s3_block_count : arg->indiv_down_N2;
+}
+
+static inline void __host_moe_fill_swiglu_call(
+    __snax_bingo_moe_dyn_swiglu_call_args_t *dst,
+    uint32_t A, uint32_t Bg, uint32_t Bu, uint32_t D0, uint32_t D1,
+    uint32_t M, uint32_t K, uint32_t N, uint32_t shape,
+    uint32_t rescale_mult, uint32_t rescale_shift)
+{
+    dst->valid = (M != 0u && K != 0u && N != 0u) ? 1u : 0u;
+    dst->input_A_addr = A;
+    dst->input_B_gate_addr = Bg;
+    dst->input_B_up_addr = Bu;
+    dst->output_D0_addr = D0;
+    dst->output_D1_addr = D1;
+    dst->M = M;
+    dst->K = K;
+    dst->N = N;
+    dst->array_shape = shape;
+    dst->rescale_mult = rescale_mult;
+    dst->rescale_shift = rescale_shift;
+}
+
+static inline void __host_moe_fill_down_call(
+    __snax_bingo_moe_dyn_down_call_args_t *dst,
+    uint32_t A, uint32_t B0, uint32_t B1, uint32_t D0, uint32_t D1,
+    uint32_t M, uint32_t K, uint32_t N, uint32_t shape,
+    uint32_t d_row_stride_override,
+    uint32_t rescale_mult, uint32_t rescale_shift)
+{
+    dst->valid = (M != 0u && K != 0u && N != 0u) ? 1u : 0u;
+    dst->input_A_addr = A;
+    dst->input_B0_addr = B0;
+    dst->input_B1_addr = B1;
+    dst->output_D0_addr = D0;
+    dst->output_D1_addr = D1;
+    dst->M = M;
+    dst->K = K;
+    dst->N = N;
+    dst->array_shape = shape;
+    dst->d_row_stride_override = d_row_stride_override;
+    dst->rescale_mult = rescale_mult;
+    dst->rescale_shift = rescale_shift;
+}
+
+static inline uint32_t __host_moe_prelower_task_arg(
+    __snax_bingo_kernel_moe_dynamic_expert_args_t *arg,
+    const moe_task_t *task)
+{
+    for (uint32_t i = 0; i < 2u; i++) {
+        arg->s1_call[i].valid = 0u;
+        arg->s3_call[i].valid = 0u;
+    }
+    arg->s2_call.valid = 0u;
+    arg->s4_call.valid = 0u;
+
+    if (task->ntokens == 0u) return BINGO_RET_SUCC;
+
+    uint32_t s1_blocks = __host_moe_s1_blocks(arg);
+    uint32_t s3_blocks = __host_moe_s3_blocks(arg);
+    if (s1_blocks > 2u || s3_blocks > 2u) {
+        printf_safe("[Host MoEExecute] prelower supports up to 2 S1/S3 blocks, got s1=%u s3=%u\r\n",
+                    (unsigned)s1_blocks, (unsigned)s3_blocks);
+        return BINGO_RET_FAIL;
+    }
+    if (arg->max_tokens_per_expert == 0u ||
+        task->ntokens > arg->max_tokens_per_expert ||
+        task->m_s2_exec > arg->max_tokens_per_expert / 2u ||
+        task->m_s4_exec > arg->max_tokens_per_expert / 2u) {
+        printf_safe("[Host MoEExecute] prelower bounds fail: ntok=%u ms2=%u ms4=%u max=%u\r\n",
+                    (unsigned)task->ntokens, (unsigned)task->m_s2_exec,
+                    (unsigned)task->m_s4_exec, (unsigned)arg->max_tokens_per_expert);
+        return BINGO_RET_FAIL;
+    }
+
+    uint32_t shape_s1 = (uint32_t)task->shape_s1;
+    uint32_t shape_s3 = (uint32_t)task->shape_s3;
+    uint32_t s1_shape_m = __host_moe_shape_m(shape_s1);
+    uint32_t s3_shape_m = __host_moe_shape_m(shape_s3);
+    uint32_t s1_row_bytes = arg->indiv_D_tile_bytes / arg->max_tokens_per_expert;
+    uint32_t s3_in_row_bytes = arg->indiv_D_tile_bytes / arg->max_tokens_per_expert;
+    uint32_t down_row_bytes = arg->indiv_down_D_tile_bytes / arg->max_tokens_per_expert;
+
+    if (task->skip_s1 == 0u) {
+        uint32_t n_per_block = arg->indiv_N_per_block / __host_moe_meshcol(shape_s1);
+        for (uint32_t n = 0; n < s1_blocks; n++) {
+            __host_moe_fill_swiglu_call(
+                &arg->s1_call[n],
+                arg->l1_a_addr,
+                arg->l1_b_gate_addr + n * arg->indiv_B_tile_bytes,
+                arg->l1_b_up_addr + n * arg->indiv_B_tile_bytes,
+                arg->l1_d_addr + n * s1_shape_m * s1_row_bytes,
+                arg->l1_d1_scratch_addr,
+                1u, arg->indiv_K1, n_per_block, shape_s1,
+                arg->rescale_mult, arg->rescale_shift);
+        }
+    }
+
+    if (task->skip_s2 == 0u && task->m_s2_exec != 0u) {
+        uint32_t full_n = s1_blocks * arg->indiv_N_per_block / __host_moe_meshcol(2u);
+        uint32_t a_offset = 0u;
+        uint32_t d_offset = 0u;
+        if (task->skip_s1 == 0u) {
+            a_offset = s1_shape_m * arg->A_token_bytes;
+            d_offset = s1_shape_m * s1_blocks * s1_row_bytes;
+        }
+        __host_moe_fill_swiglu_call(
+            &arg->s2_call,
+            arg->l1_a_addr + a_offset,
+            arg->l1_b_gate_addr,
+            arg->l1_b_up_addr,
+            arg->l1_d_addr + d_offset,
+            arg->l1_d1_scratch_addr,
+            task->m_s2_exec, arg->indiv_K1, full_n, 2u,
+            arg->rescale_mult, arg->rescale_shift);
+    }
+
+    if (task->skip_s3 == 0u) {
+        uint32_t n_per_block = arg->indiv_down_N_per_block / __host_moe_meshcol(shape_s3);
+        uint32_t full_row_bytes = s3_blocks * down_row_bytes;
+        for (uint32_t n = 0; n < s3_blocks; n++) {
+            __host_moe_fill_down_call(
+                &arg->s3_call[n],
+                arg->l1_d_addr,
+                arg->l1_b_down_addr + n * arg->indiv_down_B_tile_bytes,
+                arg->l1_b_down_addr + (s3_blocks + n) * arg->indiv_down_B_tile_bytes,
+                arg->l1_down_d_addr + n * down_row_bytes,
+                arg->l1_down_d_addr + s3_blocks * arg->indiv_down_D_tile_bytes + n * down_row_bytes,
+                1u, arg->indiv_down_K1, n_per_block, shape_s3,
+                full_row_bytes,
+                arg->rescale_mult, arg->rescale_shift);
+        }
+    }
+
+    if (task->skip_s4 == 0u && task->m_s4_exec != 0u) {
+        uint32_t n_per_block = arg->indiv_down_N_per_block / __host_moe_meshcol(2u);
+        uint32_t full_n = s3_blocks * n_per_block;
+        uint32_t a_offset = 0u;
+        uint32_t d_offset = 0u;
+        if (task->skip_s3 == 0u) {
+            uint32_t down_full_row_bytes = s3_blocks * down_row_bytes;
+            a_offset = s3_shape_m * s3_blocks * s3_in_row_bytes;
+            d_offset = s3_shape_m * down_full_row_bytes;
+        }
+        __host_moe_fill_down_call(
+            &arg->s4_call,
+            arg->l1_d_addr + a_offset,
+            arg->l1_b_down_addr,
+            arg->l1_b_down_addr + s3_blocks * arg->indiv_down_B_tile_bytes,
+            arg->l1_down_d_addr + d_offset,
+            arg->l1_down_d_addr + s3_blocks * arg->indiv_down_D_tile_bytes + d_offset,
+            task->m_s4_exec, arg->indiv_down_K1, full_n, 2u,
+            0u,
+            arg->rescale_mult, arg->rescale_shift);
+    }
+
+    return BINGO_RET_SUCC;
 }
 
 static inline void __host_moe_program_task_arg(__snax_bingo_kernel_moe_dynamic_expert_args_t *arg,
@@ -834,7 +1019,11 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
     }
 
     __snax_bingo_kernel_moe_dynamic_expert_args_t *task_args[MOE_MAX_TASKS];
-    for (uint32_t i = 0; i < MOE_MAX_TASKS; i++) task_args[i] = 0;
+    uint32_t saved_ctrl[MOE_MAX_TASKS];
+    for (uint32_t i = 0; i < MOE_MAX_TASKS; i++) {
+        task_args[i] = 0;
+        saved_ctrl[i] = 0u;
+    }
     uint32_t c2_slots = 0u;
     uint32_t c3_slots = 0u;
     int32_t final_cam[2] = {-1, -1};
@@ -869,8 +1058,19 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
             return BINGO_RET_FAIL;
         }
 
-        __host_moe_program_task_arg(dst_arg, task, local_slot, runtime_cluster_idx,
-                                    wait_for_peer_slots);
+        __host_moe_program_task_arg(
+            dst_arg, task, local_slot, runtime_cluster_idx, wait_for_peer_slots);
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_PRELOWER_START);
+        uint32_t prelower_rc = __host_moe_prelower_task_arg(dst_arg, task);
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_PRELOWER_END);
+        if (prelower_rc != BINGO_RET_SUCC) return prelower_rc;
+        /* Save ctrl and immediately zero it: ctrl=active is the activation gate.
+         * Device must not see active=1 until dma_slot_vd and all other fields
+         * are also written. The pre-lowered compute call args are already in
+         * this inactive L3 record, so the first L3->L1 flush transfers the
+         * exact bottom-level API parameters while the slot is still inactive. */
+        saved_ctrl[task_idx] = dst_arg->ctrl;
+        dst_arg->ctrl = 0u;
         task_args[task_idx] = dst_arg;
     }
 
@@ -898,12 +1098,22 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
     cam_state[0] = final_cam[0];
     cam_state[1] = final_cam[1];
 
+    // Phase 1: flush inactive L3 templates to L1. ctrl stays zero so device
+    // kernels cannot observe a partially programmed active slot.
     asm volatile("fence rw, rw" ::: "memory");
-    // Flush L3 staging → cluster L1 via system iDMA (one burst per cluster).
-    // sys_dma_blk_memcpy is blocking (polls done register) so L1 is valid on return.
     uint64_t stage_bytes = (uint64_t)num_slots * (uint64_t)slot_bytes;
     sys_dma_blk_memcpy(get_current_chip_id(), cfg->c2_dynamic_args_base, cfg->c2_stage_base, stage_bytes);
     sys_dma_blk_memcpy(get_current_chip_id(), cfg->c3_dynamic_args_base, cfg->c3_stage_base, stage_bytes);
+
+    // Phase 2: update ctrl in L3 and flush again. Device sees active=1 only
+    // after the complete inactive record has already reached L1.
+    for (uint32_t ti = 0; ti < schedule->n_tasks; ti++) {
+        if (task_args[ti] != 0) task_args[ti]->ctrl = saved_ctrl[ti];
+    }
+    asm volatile("fence w, w" ::: "memory");
+    sys_dma_blk_memcpy(get_current_chip_id(), cfg->c2_dynamic_args_base, cfg->c2_stage_base, stage_bytes);
+    sys_dma_blk_memcpy(get_current_chip_id(), cfg->c3_dynamic_args_base, cfg->c3_stage_base, stage_bytes);
+    asm volatile("fence rw, rw" ::: "memory");
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_EXECUTE_END);
     return BINGO_RET_SUCC;
 #endif

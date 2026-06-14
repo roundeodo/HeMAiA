@@ -560,6 +560,37 @@ typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
 typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
         __snax_bingo_kernel_dual_vc_l15_moe_down_args_t;
 
+typedef struct __attribute__((packed, aligned(4))) {
+  uint32_t valid;
+  uint32_t input_A_addr;
+  uint32_t input_B_gate_addr;
+  uint32_t input_B_up_addr;
+  uint32_t output_D0_addr;
+  uint32_t output_D1_addr;
+  uint32_t M;
+  uint32_t K;
+  uint32_t N;
+  uint32_t array_shape;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+} __snax_bingo_moe_dyn_swiglu_call_args_t;
+
+typedef struct __attribute__((packed, aligned(4))) {
+  uint32_t valid;
+  uint32_t input_A_addr;
+  uint32_t input_B0_addr;
+  uint32_t input_B1_addr;
+  uint32_t output_D0_addr;
+  uint32_t output_D1_addr;
+  uint32_t M;
+  uint32_t K;
+  uint32_t N;
+  uint32_t array_shape;
+  uint32_t d_row_stride_override;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+} __snax_bingo_moe_dyn_down_call_args_t;
+
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   /* ── ctrl: packed control word (19 bits used, written every round by Phase4) ──────
    * bit  0:      active             (1 = slot valid, Snitch will execute)
@@ -619,13 +650,17 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   uint32_t indiv_N_per_block;       // = indiv_N1 x meshCol(shape); shape-invariant constant
   uint32_t indiv_down_K1;
   uint32_t indiv_down_N_per_block;  // = indiv_down_N1 x vc_meshCol(shape); shape-invariant constant
-  // array_shape removed: derived at runtime from ctrl.shape_s1 / ctrl.shape_s3
+  // array_shape is now pre-lowered by the host into s1/s2/s3/s4 call args.
   uint32_t rescale_mult;
   uint32_t rescale_shift;
   uint32_t output_expert_stride_bytes;
   uint32_t max_tokens_per_expert;
   uint32_t s1_block_count;
   uint32_t s3_block_count;
+  __snax_bingo_moe_dyn_swiglu_call_args_t s1_call[2];
+  __snax_bingo_moe_dyn_swiglu_call_args_t s2_call;
+  __snax_bingo_moe_dyn_down_call_args_t s3_call[2];
+  __snax_bingo_moe_dyn_down_call_args_t s4_call;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_args_t;
 

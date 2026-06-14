@@ -113,6 +113,7 @@
 // BINGO_TRACE_HOST_MOE_REQUEST_BUILD wraps CAM state update + request->experts fill
 // BINGO_TRACE_HOST_MOE_SCHED        wraps only the moe_schedule() call inside Phase 3
 // BINGO_TRACE_HOST_MOE_EXECUTE      wraps entire __host_bingo_kernel_moe_execute body (Phase 4 args lowering)
+// BINGO_TRACE_HOST_MOE_PRELOWER     wraps scheduler-result -> node-level call args lowering inside Phase 4
 #define BINGO_TRACE_HOST_MOE_PREPARE_START       0x2F0
 #define BINGO_TRACE_HOST_MOE_PREPARE_END         0x2F1
 #define BINGO_TRACE_HOST_MOE_SCHED_START         0x2F2
@@ -123,6 +124,8 @@
 #define BINGO_TRACE_HOST_MOE_TOKEN_COUNT_END     0x2F7
 #define BINGO_TRACE_HOST_MOE_REQUEST_BUILD_START 0x2F8
 #define BINGO_TRACE_HOST_MOE_REQUEST_BUILD_END   0x2F9
+#define BINGO_TRACE_HOST_MOE_PRELOWER_START      0x2FA
+#define BINGO_TRACE_HOST_MOE_PRELOWER_END        0x2FB
 
 // Computation Kernels: Compute/Run Phase
 // IDMA
