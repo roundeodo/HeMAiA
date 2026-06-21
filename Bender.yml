@@ -100,6 +100,21 @@ sources:
   # auto-generated soc
   - target: occamy
     files:
+      # MoE scheduler
+      - ../Scheduler_hw/sched_pkg.sv
+      - ../Scheduler_hw/sched_bw_ok.sv
+      - ../Scheduler_hw/sched_mk_snap.sv
+      - ../Scheduler_hw/sched_pick_shapes.sv
+      - ../Scheduler_hw/sched_s2pf_pair.sv
+      - ../Scheduler_hw/sched_score_unit.sv
+      - ../Scheduler_hw/sched_candidate_eval_lane.sv
+      - ../Scheduler_hw/sched_candidate_generator.sv
+      - ../Scheduler_hw/sched_best_reduce.sv
+      - ../Scheduler_hw/sched_commit_unit.sv
+      - ../Scheduler_hw/sched_ghost_inject_unit.sv
+      - ../Scheduler_hw/sched_schedule_core.sv
+      - ../Scheduler_hw/moe_scheduler_reg_wrapper.sv
+
       # soc_ctrl
       - target/rtl/src/soc_ctrl/occamy_soc_reg_pkg.sv
       - target/rtl/src/soc_ctrl/occamy_soc_reg_top.sv

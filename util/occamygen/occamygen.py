@@ -11,6 +11,7 @@ import pathlib
 import sys
 import re
 import logging
+
 # logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 from subprocess import run
 import csv
@@ -20,13 +21,14 @@ from jsonref import JsonRef
 from mako.template import Template
 
 import occamy
+
 # from occamy import check_occamy_cfg, get_cluster_generators, generate_wrappers, generate_memories, get_cluster_cfg_list, generate_snitch
 
-sys.path.append(str(pathlib.Path(__file__).parent / '../'))
+sys.path.append(str(pathlib.Path(__file__).parent / "../"))
 from solder import solder, device_tree, util  # noqa: E402
 
 # Compile a regex to trim trailing whitespaces on lines.
-re_trailws = re.compile(r'[ \t\r]+$', re.MULTILINE)
+re_trailws = re.compile(r"[ \t\r]+$", re.MULTILINE)
 
 # Default name for all generated sources
 DEFAULT_NAME = "occamy"
@@ -38,18 +40,22 @@ def write_template(tpl_path, outdir, fname=None, **kwargs):
         outdir = pathlib.Path(outdir)
         if tpl_path.exists():
             tpl = Template(filename=str(tpl_path))
-            fname = tpl_path.with_suffix("").name.replace("occamy", kwargs["name"]) \
-                if not fname else fname
+            fname = (
+                tpl_path.with_suffix("").name.replace("occamy", kwargs["name"])
+                if not fname
+                else fname
+            )
             outdir.mkdir(parents=True, exist_ok=True)
             with open(outdir / fname, "w") as file:
                 code = tpl.render_unicode(**kwargs)
                 code = re_trailws.sub("", code)
                 file.write(code)
         else:
-            print(f'Could not find file {tpl_path}')
+            print(f"Could not find file {tpl_path}")
             raise FileNotFoundError
     else:
         print("No template file provided, skipping template generation.")
+
 
 def read_json_file(file):
     try:
@@ -60,134 +66,165 @@ def read_json_file(file):
         raise SystemExit(sys.exc_info()[1])
     return obj
 
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
     if isinstance(v, str):
-        if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        if v.lower() in ("yes", "true", "t", "y", "1"):
             return True
-        if v.lower() in ('no', 'false', 'f', 'n', '0'):
+        if v.lower() in ("no", "false", "f", "n", "0"):
             return False
     raise argparse.ArgumentTypeError("Boolean value expected.")
+
 
 def main():
     """Generate the Occamy system and all corresponding configuration files."""
     parser = argparse.ArgumentParser(prog="clustergen")
-    parser.add_argument("--cfg",
-                        "-c",
-                        metavar="file",
-                        type=argparse.FileType('r'),
-                        required=True,
-                        help="A cluster configuration file")
-    parser.add_argument("--outdir",
-                        "-o",
-                        type=pathlib.Path,
-                        default=None,
-                        help="Target directory. Required for any mode that "
-                             "emits files; may be omitted for --snitch-sw-only "
-                             "which writes into the bender-managed snax "
-                             "checkout instead.")
+    parser.add_argument(
+        "--cfg",
+        "-c",
+        metavar="file",
+        type=argparse.FileType("r"),
+        required=True,
+        help="A cluster configuration file",
+    )
+    parser.add_argument(
+        "--outdir",
+        "-o",
+        type=pathlib.Path,
+        default=None,
+        help="Target directory. Required for any mode that "
+        "emits files; may be omitted for --snitch-sw-only "
+        "which writes into the bender-managed snax "
+        "checkout instead.",
+    )
     # Parse arguments.
-    parser.add_argument("--top-sv",
-                        metavar="TOP_SV",
-                        help="Name of top-level file (output).")
-    parser.add_argument("--soc-sv",
-                        metavar="TOP_SYNC_SV",
-                        help="Name of synchronous SoC file (output).")
-    parser.add_argument("--pkg-sv",
-                        metavar="PKG_SV",
-                        help="Name of top-level package file (output)")
-    parser.add_argument("--quad",
-                        metavar="QUAD",
-                        help="Name of quadrant template file (output)")
-    parser.add_argument("--quad-ctrl",
-                        metavar="QUAD_CTRL",
-                        help="Name of quadrant controller template file (output)")
-    parser.add_argument("--quad-noc",
-                        metavar="QUAD_NOC",
-                        help="Name of quadrant NoC template file (output)")
-    parser.add_argument("--testharness-sv",
-                        metavar="TESTHARNESS_SV",
-                        help="Name of the testharness wrapper file (output).")    
-    parser.add_argument("--sim_with_interposer",
-                        metavar="SIM_WITH_INTERPOSER",
-                        type=str2bool,
-                        default=False,
-                        help="Generate testharness with interposer.")
-    parser.add_argument("--sim_with_mem_macro",
-                        metavar="SIM_WITH_MEM_MACRO",
-                        type=str2bool,
-                        default=False,
-                        help="Generate testharness with memory macro.")
-    parser.add_argument("--sim_with_pll",
-                        metavar="SIM_WITH_PLL",
-                        type=str2bool,
-                        default=False,
-                        help="Generate testharness with PLL.")    
-    parser.add_argument("--sim_with_verilator",
-                        metavar="SIM_WITH_VERILATOR",
-                        type=str2bool,
-                        default=False,
-                        help="Generate testharness for Verilator (no D2D, no interposer).")
-    parser.add_argument("--sim_with_netlist",
-                        metavar="SIM_WITH_NETLIST",
-                        type=str2bool,
-                        default=False,
-                        help="Generate testharness with netlist.")
-    parser.add_argument("--sim_with_jtag_check",
-                        metavar="SIM_WITH_JTAG_CHECK",
-                        type=str2bool,
-                        default=False,
-                        help="Generate testharness with JTAG debug check.")
-    parser.add_argument("--cva6-sv",
-                        metavar="CVA6_SV",
-                        help="Name of the CVA6 wrapper file (output).")
-    parser.add_argument("--snitch",
-                        metavar="SNITCH",
-                        help="Define this to generate Snitch Cluster.")
-    parser.add_argument("--snitch-sw-only",
-                        action="store_true",
-                        help="With --snitch, invoke snax's sw-snax-gen target "
-                             "instead of rtl-gen, i.e. regenerate only SW "
-                             "headers (streamer_csr_addr_map.h) via the "
-                             "StreamerSwHeaderGen entry point, with no SV "
-                             "emission.")
-    parser.add_argument("--bootdata",
-                        metavar="BOOTDATA",
-                        help="Name of the bootdata file (output)")
-    parser.add_argument("--cheader",
-                        metavar="CHEADER",
-                        help="Name of the cheader file (output)")
-    parser.add_argument("--csv",
-                        metavar="CSV",
-                        help="Name of the csv file (output)")
-    parser.add_argument("--xdma",
-                        action="store_true",
-                        help="Enable XDMA inside HeMAiA Mem System")
-    parser.add_argument("--chip",
-                        metavar="CHIP_TOP",
-                        help="(Optional) Chip Top-level")
-    parser.add_argument("--io",
-                        metavar="CHIP_IO",
-                        help="(Optional) Chip I/O Cell Wrapper")
-    parser.add_argument("--ctrl",
-                        metavar="SoC and Quad Ctrl",
-                        help="Name of SoC or Quadrant template file (output)")
+    parser.add_argument(
+        "--top-sv", metavar="TOP_SV", help="Name of top-level file (output)."
+    )
+    parser.add_argument(
+        "--soc-sv", metavar="TOP_SYNC_SV", help="Name of synchronous SoC file (output)."
+    )
+    parser.add_argument(
+        "--pkg-sv", metavar="PKG_SV", help="Name of top-level package file (output)"
+    )
+    parser.add_argument(
+        "--quad", metavar="QUAD", help="Name of quadrant template file (output)"
+    )
+    parser.add_argument(
+        "--quad-ctrl",
+        metavar="QUAD_CTRL",
+        help="Name of quadrant controller template file (output)",
+    )
+    parser.add_argument(
+        "--quad-noc",
+        metavar="QUAD_NOC",
+        help="Name of quadrant NoC template file (output)",
+    )
+    parser.add_argument(
+        "--xilinx-sv",
+        metavar="XILINX_SV",
+        help="Name of the Xilinx wrapper file (output).",
+    )
+    parser.add_argument(
+        "--testharness-sv",
+        metavar="TESTHARNESS_SV",
+        help="Name of the testharness wrapper file (output).",
+    )
+    parser.add_argument(
+        "--sim_with_interposer",
+        metavar="SIM_WITH_INTERPOSER",
+        type=str2bool,
+        default=False,
+        help="Generate testharness with interposer.",
+    )
+    parser.add_argument(
+        "--sim_with_mem_macro",
+        metavar="SIM_WITH_MEM_MACRO",
+        type=str2bool,
+        default=False,
+        help="Generate testharness with memory macro.",
+    )
+    parser.add_argument(
+        "--sim_with_pll",
+        metavar="SIM_WITH_PLL",
+        type=str2bool,
+        default=False,
+        help="Generate testharness with PLL.",
+    )
+    parser.add_argument(
+        "--sim_with_verilator",
+        metavar="SIM_WITH_VERILATOR",
+        type=str2bool,
+        default=False,
+        help="Generate testharness for Verilator (no D2D, no interposer).",
+    )
+    parser.add_argument(
+        "--sim_with_netlist",
+        metavar="SIM_WITH_NETLIST",
+        type=str2bool,
+        default=False,
+        help="Generate testharness with netlist.",
+    )
+    parser.add_argument(
+        "--sim_with_jtag_check",
+        metavar="SIM_WITH_JTAG_CHECK",
+        type=str2bool,
+        default=False,
+        help="Generate testharness with JTAG debug check.",
+    )
+    parser.add_argument(
+        "--cva6-sv", metavar="CVA6_SV", help="Name of the CVA6 wrapper file (output)."
+    )
+    parser.add_argument(
+        "--snitch", metavar="SNITCH", help="Define this to generate Snitch Cluster."
+    )
+    parser.add_argument(
+        "--snitch-sw-only",
+        action="store_true",
+        help="With --snitch, invoke snax's sw-snax-gen target "
+        "instead of rtl-gen, i.e. regenerate only SW "
+        "headers (streamer_csr_addr_map.h) via the "
+        "StreamerSwHeaderGen entry point, with no SV "
+        "emission.",
+    )
+    parser.add_argument(
+        "--bootdata", metavar="BOOTDATA", help="Name of the bootdata file (output)"
+    )
+    parser.add_argument(
+        "--cheader", metavar="CHEADER", help="Name of the cheader file (output)"
+    )
+    parser.add_argument("--csv", metavar="CSV", help="Name of the csv file (output)")
+    parser.add_argument(
+        "--xdma", action="store_true", help="Enable XDMA inside HeMAiA Mem System"
+    )
+    parser.add_argument("--chip", metavar="CHIP_TOP", help="(Optional) Chip Top-level")
+    parser.add_argument(
+        "--io", metavar="CHIP_IO", help="(Optional) Chip I/O Cell Wrapper"
+    )
+    parser.add_argument(
+        "--ctrl",
+        metavar="SoC and Quad Ctrl",
+        help="Name of SoC or Quadrant template file (output)",
+    )
     parser.add_argument("--graph", "-g", metavar="DOT")
     parser.add_argument("--memories", "-m", action="store_true")
     parser.add_argument("--wrapper", "-w", action="store_true")
     parser.add_argument("--am-cheader", "-D", metavar="ADDRMAP_CHEADER")
     parser.add_argument("--am-csv", "-aml", metavar="ADDRMAP_CSV")
-    parser.add_argument("--name", metavar="NAME",
-                        default=DEFAULT_NAME, help="System's name.")
+    parser.add_argument(
+        "--name", metavar="NAME", default=DEFAULT_NAME, help="System's name."
+    )
 
-    parser.add_argument("-v",
-                        "--verbose",
-                        help="increase output verbosity",
-                        action="store_true")
-    parser.add_argument("--gen-host-ld",
-                        action="store_true",
-                        help="Generate host.ld file for host build")
+    parser.add_argument(
+        "-v", "--verbose", help="increase output verbosity", action="store_true"
+    )
+    parser.add_argument(
+        "--gen-host-ld",
+        action="store_true",
+        help="Generate host.ld file for host build",
+    )
 
     args = parser.parse_args()
     occamy_root = pathlib.Path(__file__).parent / "../../"
@@ -201,7 +238,7 @@ def main():
 
     # If name argument provided, change config
     if args.name != DEFAULT_NAME:
-        occamy_cfg["cluster"]["name"] = args.name+"_cluster"
+        occamy_cfg["cluster"]["name"] = args.name + "_cluster"
         # occamy_cfg["clster"]["name"] = args.name
 
     # Check the outdir. In --snitch-sw-only mode occamygen emits nothing
@@ -266,8 +303,9 @@ def main():
     nr_s1_quadrants = occamy_cfg["nr_s1_quadrant"]
     nr_s1_clusters = len(occamy_cfg["clusters"])
 
-    core_per_cluster_list = [cluster_generator.cfg["nr_cores"]
-                             for cluster_generator in cluster_generators]
+    core_per_cluster_list = [
+        cluster_generator.cfg["nr_cores"] for cluster_generator in cluster_generators
+    ]
     #####################################
     # Now we create all the am for xbars
     #####################################
@@ -286,7 +324,7 @@ def main():
     # Quadrant crossbar address map
     am_quad_wide_xbar = am.new_node("quad_wide_xbar")
     am_quad_narrow_xbar = am.new_node("quad_narrow_xbar")
-    
+
     # We do not have multiple quadrants anymore
     # am_wide_xbar_quadrant_s1 = list()
     # am_narrow_xbar_quadrant_s1 = list()
@@ -311,25 +349,51 @@ def main():
     # Hence we are creating the master ports that connect to the xbars
     # 64bit SoC AXI Lite Peripherals
     am_soc_axi_lite_peripherals = occamy.am_connect_soc_lite_periph_xbar(
-        am, am_soc_axi_lite_periph_xbar, occamy_cfg)
+        am, am_soc_axi_lite_periph_xbar, occamy_cfg
+    )
     # 32bit SoC AXI Lite Narrow Peripherals
-    am_soc_axi_lite_narrow_peripherals, am_bootrom, am_clint = occamy.am_connect_soc_lite_narrow_periph_xbar(
-        am, am_soc_axi_lite_narrow_periph_xbar, occamy_cfg)
+    am_soc_axi_lite_narrow_peripherals, am_bootrom, am_clint = (
+        occamy.am_connect_soc_lite_narrow_periph_xbar(
+            am, am_soc_axi_lite_narrow_periph_xbar, occamy_cfg
+        )
+    )
 
     # 64bit Quad AXI Lite Peripherals
-    am_quad_axi_lite_peripherals, addrs_quad_axi_lite_peripherals = occamy.am_connect_quad_axi_lite_xbar(am, am_quad_axi_lite_xbar, occamy_cfg)
+    am_quad_axi_lite_peripherals, addrs_quad_axi_lite_peripherals = (
+        occamy.am_connect_quad_axi_lite_xbar(am, am_quad_axi_lite_xbar, occamy_cfg)
+    )
     # 32bit Quad AXI Lite Narrow Peripherals
-    am_quad_axi_lite_narrow_peripheral, am_quad_axi_lite_narrow_h2c_mailboxs, addrs_quad_axi_lite_narrow_peripherals = occamy.am_connect_quad_axi_lite_narrow_xbar(am, am_quad_axi_lite_narrow_xbar, occamy_cfg)
+    (
+        am_quad_axi_lite_narrow_peripheral,
+        am_quad_axi_lite_narrow_h2c_mailboxs,
+        addrs_quad_axi_lite_narrow_peripherals,
+    ) = occamy.am_connect_quad_axi_lite_narrow_xbar(
+        am, am_quad_axi_lite_narrow_xbar, occamy_cfg
+    )
 
     # SoC Narrow Xbar
-    am_spm_narrow, am_sys_idma_cfg, am_narrow_hemaia_xdma_ctrl_io, am_narrow_hemaia_xdma_cfg_io = occamy.am_connect_soc_narrow_xbar_mem(
-        am, am_soc_narrow_xbar, occamy_cfg)
+    (
+        am_spm_narrow,
+        am_sys_idma_cfg,
+        am_moe_scheduler,
+        am_narrow_hemaia_xdma_ctrl_io,
+        am_narrow_hemaia_xdma_cfg_io,
+    ) = occamy.am_connect_soc_narrow_xbar_mem(am, am_soc_narrow_xbar, occamy_cfg)
     # SoC Wide Xbar
-    am_wide_hemaia_mem, am_wide_hemaia_xdma_data_io, am_wide_zero_mem = occamy.am_connect_soc_wide_xbar_mem(
-        am, am_soc_wide_xbar, occamy_cfg)
+    am_wide_hemaia_mem, am_wide_hemaia_xdma_data_io, am_wide_zero_mem = (
+        occamy.am_connect_soc_wide_xbar_mem(am, am_soc_wide_xbar, occamy_cfg)
+    )
     # Quad Wide and Narrow Xbar
-    am_clusters, am_clusters_periph, am_clusters_leftover_spaces, addrs_clusters, addrs_clusters_periph, addrs_clusters_leftover_spaces = occamy.am_connect_quad_wide_and_narrow_xbar(
-        am, am_quad_wide_xbar, am_quad_narrow_xbar, cluster_generators)
+    (
+        am_clusters,
+        am_clusters_periph,
+        am_clusters_leftover_spaces,
+        addrs_clusters,
+        addrs_clusters_periph,
+        addrs_clusters_leftover_spaces,
+    ) = occamy.am_connect_quad_wide_and_narrow_xbar(
+        am, am_quad_wide_xbar, am_quad_narrow_xbar, cluster_generators
+    )
     ####################################################################
     # Then we connect between xbars
     ####################################################################
@@ -345,39 +409,39 @@ def main():
     am_soc_narrow_xbar.attach(am_soc_axi_lite_periph_xbar)
     am_soc_narrow_xbar.attach(am_soc_axi_lite_narrow_periph_xbar)
     am_soc_narrow_xbar.attach(am_soc_wide_xbar)
-    
+
     #####################
     # SoC wide Xbar     #
     #####################
     am_soc_wide_xbar.attach(am_quad_wide_xbar)
     am_soc_wide_xbar.attach(am_soc_narrow_xbar)
-    
+
     ###################################
     # 64 bit SoC AXI Lite Periph Xbar #
     ###################################
     # Mainly for spi and jtag
     am_soc_axi_lite_periph_xbar.attach(am_soc_narrow_xbar)
-    
+
     ########################
     # SoC to Quad AXI Xbar #
     ########################
     am_soc_to_quad_axi_xbar.attach(am_quad_narrow_xbar)
     am_soc_to_quad_axi_xbar.attach(am_quad_axi_lite_xbar)
     am_soc_to_quad_axi_xbar.attach(am_quad_axi_lite_narrow_xbar)
-    
+
     ########################
     # Quad to SoC AXI Xbar #
-    ########################    
+    ########################
     am_quad_to_soc_axi_xbar.attach(am_soc_narrow_xbar)
     am_quad_to_soc_axi_xbar.attach(am_quad_axi_lite_xbar)
     am_quad_to_soc_axi_xbar.attach(am_quad_axi_lite_narrow_xbar)
-    
+
     #############################
     # 64 bit Quad AXI Lite Xbar #
     #############################
     # For the Bingo HW Schedulers
     am_quad_axi_lite_xbar.attach(am_soc_to_quad_axi_xbar)
-    
+
     ########################
     # Quad Narrow AXI XBar #
     ########################
@@ -387,7 +451,7 @@ def main():
     ######################
     am_quad_wide_xbar.attach(am_soc_wide_xbar)
     ####################################################################
-    # Next we create the xbars according to am 
+    # Next we create the xbars according to am
     ####################################################################
     # The inputs are Xbar Slave ports
     # The outputs are Xbar Master ports
@@ -402,22 +466,22 @@ def main():
         clk="clk_periph_i",
         rst="rst_periph_ni",
         context="top_axi_lite_periph",
-        node=am_soc_axi_lite_periph_xbar)
+        node=am_soc_axi_lite_periph_xbar,
+    )
 
     soc_axi_lite_periph_xbar.add_input("soc")
     soc_axi_lite_periph_xbar.add_output_entry("soc", am_soc_narrow_xbar)
 
     # connect AXI lite peripherals
-    nr_axi_lite_peripherals = len(
-        occamy_cfg["peripherals"]["axi_lite_peripherals"])
+    nr_axi_lite_peripherals = len(occamy_cfg["peripherals"]["axi_lite_peripherals"])
     for p in range(nr_axi_lite_peripherals):
         soc_axi_lite_periph_xbar.add_input(
             occamy_cfg["peripherals"]["axi_lite_peripherals"][p]["name"]
         )
         if "address" in occamy_cfg["peripherals"]["axi_lite_peripherals"][p]:
             soc_axi_lite_periph_xbar.add_output_entry(
-            occamy_cfg["peripherals"]["axi_lite_peripherals"][p]["name"],
-            am_soc_axi_lite_peripherals[p]
+                occamy_cfg["peripherals"]["axi_lite_peripherals"][p]["name"],
+                am_soc_axi_lite_peripherals[p],
             )
     ###################################
     # 32 bit SoC AXI Lite Periph Xbar #
@@ -431,17 +495,19 @@ def main():
         rst="rst_periph_ni",
         fall_through=False,
         context="top_axi_lite_periph",
-        node=am_soc_axi_lite_narrow_periph_xbar)
+        node=am_soc_axi_lite_narrow_periph_xbar,
+    )
 
     soc_axi_lite_narrow_periph_xbar.add_input("soc")
 
     # connect Regbus peripherals
     nr_axi_lite_narrow_peripherals = len(
-        occamy_cfg["peripherals"]["axi_lite_narrow_peripherals"])
+        occamy_cfg["peripherals"]["axi_lite_narrow_peripherals"]
+    )
     for p in range(nr_axi_lite_narrow_peripherals):
         soc_axi_lite_narrow_periph_xbar.add_output_entry(
             occamy_cfg["peripherals"]["axi_lite_narrow_peripherals"][p]["name"],
-            am_soc_axi_lite_narrow_peripherals[p]
+            am_soc_axi_lite_narrow_peripherals[p],
         )
     # add bootrom and clint seperately
     soc_axi_lite_narrow_periph_xbar.add_output_entry("bootrom", am_bootrom)
@@ -466,7 +532,8 @@ def main():
         no_loopback=True,
         atop_support=False,
         context="soc",
-        node=am_soc_wide_xbar)
+        node=am_soc_wide_xbar,
+    )
 
     if occamy_cfg["hemaia_multichip"]["single_chip"] is False:
         # The chiplet output port does not have the rule; it is the default port
@@ -475,13 +542,14 @@ def main():
     soc_wide_xbar.add_output_entry("soc_narrow", am_soc_narrow_xbar)
     soc_wide_xbar.add_input("soc_narrow")
     soc_wide_xbar.add_input("sys_idma_mst")
-    soc_wide_xbar.add_output_multi_entries("hemaia_mem", [am_wide_hemaia_mem, am_wide_hemaia_xdma_data_io])
+    soc_wide_xbar.add_output_multi_entries(
+        "hemaia_mem", [am_wide_hemaia_mem, am_wide_hemaia_xdma_data_io]
+    )
     soc_wide_xbar.add_input("hemaia_mem")
 
     soc_wide_xbar.add_output_entry("wide_zero_mem", am_wide_zero_mem)
     # --> mask this route, forcing it through default wide xbar
-    soc_wide_xbar.add_output_entry("quad",
-                                    am_quad_wide_xbar)
+    soc_wide_xbar.add_output_entry("quad", am_quad_wide_xbar)
     soc_wide_xbar.add_input("quad")
 
     ###################
@@ -501,8 +569,9 @@ def main():
         fall_through=occamy_cfg["narrow_xbar"]["fall_through"],
         no_loopback=True,
         context="soc",
-        node=am_soc_narrow_xbar)
-    
+        node=am_soc_narrow_xbar,
+    )
+
     # Default port: wide xbar (Should stay on the first position)
     soc_narrow_xbar.add_output_entry("soc_wide", am_soc_wide_xbar)
     soc_narrow_xbar.add_input("soc_wide")
@@ -522,12 +591,17 @@ def main():
     soc_narrow_xbar.add_output_entry("periph", am_soc_axi_lite_periph_xbar)
     soc_narrow_xbar.add_output_entry("spm_narrow", am_spm_narrow)
     soc_narrow_xbar.add_output_entry("sys_idma_cfg", am_sys_idma_cfg)
-    soc_narrow_xbar.add_output_entry("axi_lite_narrow_periph",
-                                     am_soc_axi_lite_narrow_periph_xbar)
+    if am_moe_scheduler is not None:
+        soc_narrow_xbar.add_output_entry("moe_scheduler", am_moe_scheduler)
+    soc_narrow_xbar.add_output_entry(
+        "axi_lite_narrow_periph", am_soc_axi_lite_narrow_periph_xbar
+    )
 
     # hemaia mem system
     soc_narrow_xbar.add_input("hemaia_mem")
-    soc_narrow_xbar.add_output_multi_entries("hemaia_mem", [am_narrow_hemaia_xdma_ctrl_io, am_narrow_hemaia_xdma_cfg_io])
+    soc_narrow_xbar.add_output_multi_entries(
+        "hemaia_mem", [am_narrow_hemaia_xdma_ctrl_io, am_narrow_hemaia_xdma_cfg_io]
+    )
     #############
     # Quad Ctrl #
     #############
@@ -536,8 +610,8 @@ def main():
         64,
         soc_narrow_xbar.iw_out(),
         soc_narrow_xbar.uw,
-        chipidw=occamy_cfg["hemaia_multichip"]["chip_id_width"], 
-        name="quad_ctrl_soc_to_quad_xbar",  
+        chipidw=occamy_cfg["hemaia_multichip"]["chip_id_width"],
+        name="quad_ctrl_soc_to_quad_xbar",
         clk="clk_i",
         rst="rst_ni",
         max_slv_trans=occamy_cfg["narrow_xbar"]["max_slv_trans"],
@@ -545,22 +619,27 @@ def main():
         fall_through=occamy_cfg["narrow_xbar"]["fall_through"],
         latency_mode="axi_pkg::CUT_SLV_PORTS",
         context="quad_ctrl",
-        node=am_soc_to_quad_axi_xbar
+        node=am_soc_to_quad_axi_xbar,
     )
     quad_ctrl_soc_to_quad_xbar.add_input("soc_narrow")
-    quad_ctrl_soc_to_quad_xbar.add_output("clusters",
-                                          [*addrs_clusters, *addrs_clusters_periph])
-    quad_ctrl_soc_to_quad_xbar.add_output("quad_axi_lite", addrs_quad_axi_lite_peripherals)
-    quad_ctrl_soc_to_quad_xbar.add_output("quad_axi_lite_narrow", addrs_quad_axi_lite_narrow_peripherals)
-        
+    quad_ctrl_soc_to_quad_xbar.add_output(
+        "clusters", [*addrs_clusters, *addrs_clusters_periph]
+    )
+    quad_ctrl_soc_to_quad_xbar.add_output(
+        "quad_axi_lite", addrs_quad_axi_lite_peripherals
+    )
+    quad_ctrl_soc_to_quad_xbar.add_output(
+        "quad_axi_lite_narrow", addrs_quad_axi_lite_narrow_peripherals
+    )
 
     quad_ctrl_quad_to_soc_xbar = solder.AxiXbar(
         48,
         64,
-        soc_narrow_xbar.iw-1, # Very Important!!!!!!!!!! -1 because the quad to soc has two slave ports TODO: Make a clear documentation about this
+        soc_narrow_xbar.iw
+        - 1,  # Very Important!!!!!!!!!! -1 because the quad to soc has two slave ports TODO: Make a clear documentation about this
         soc_narrow_xbar.uw,
-        chipidw=occamy_cfg["hemaia_multichip"]["chip_id_width"], 
-        name="quad_ctrl_quad_to_soc_xbar",  
+        chipidw=occamy_cfg["hemaia_multichip"]["chip_id_width"],
+        name="quad_ctrl_quad_to_soc_xbar",
         clk="clk_i",
         rst="rst_ni",
         max_slv_trans=occamy_cfg["narrow_xbar"]["max_slv_trans"],
@@ -568,13 +647,18 @@ def main():
         fall_through=occamy_cfg["narrow_xbar"]["fall_through"],
         latency_mode="axi_pkg::CUT_MST_PORTS",
         context="quad_ctrl",
-        node=am_quad_to_soc_axi_xbar)
+        node=am_quad_to_soc_axi_xbar,
+    )
     quad_ctrl_quad_to_soc_xbar.add_input("clusters")
     quad_ctrl_quad_to_soc_xbar.add_input("quad_axi_lite")
     # Leave it be empty as the default port
     quad_ctrl_quad_to_soc_xbar.add_output("soc_narrow", [])
-    quad_ctrl_quad_to_soc_xbar.add_output("quad_axi_lite", addrs_quad_axi_lite_peripherals)
-    quad_ctrl_quad_to_soc_xbar.add_output("quad_axi_lite_narrow", addrs_quad_axi_lite_narrow_peripherals)
+    quad_ctrl_quad_to_soc_xbar.add_output(
+        "quad_axi_lite", addrs_quad_axi_lite_peripherals
+    )
+    quad_ctrl_quad_to_soc_xbar.add_output(
+        "quad_axi_lite_narrow", addrs_quad_axi_lite_narrow_peripherals
+    )
     ################################
     # Quad Ctrl 32bit AXI Lite mux #
     ################################
@@ -591,11 +675,14 @@ def main():
         max_mst_trans=occamy_cfg["narrow_xbar"]["max_mst_trans"],
         fall_through=False,
         context="quad_ctrl",
-        node=am_quad_axi_lite_narrow_xbar)
+        node=am_quad_axi_lite_narrow_xbar,
+    )
 
     quad_ctrl_axi_lite_narrow_mux.add_input("soc_to_quad")
     quad_ctrl_axi_lite_narrow_mux.add_input("quad_to_soc")
-    quad_ctrl_axi_lite_narrow_mux.add_output_entry("quad_ctrl_perpheral", am_quad_axi_lite_narrow_peripheral)
+    quad_ctrl_axi_lite_narrow_mux.add_output_entry(
+        "quad_ctrl_perpheral", am_quad_axi_lite_narrow_peripheral
+    )
     for i in range(nr_s1_clusters):
         quad_ctrl_axi_lite_narrow_mux.add_output_entry(
             "h2c_mailbox_{}".format(i), am_quad_axi_lite_narrow_h2c_mailboxs[i]
@@ -615,16 +702,21 @@ def main():
         max_mst_trans=occamy_cfg["narrow_xbar"]["max_mst_trans"],
         fall_through=False,
         context="quad_ctrl",
-        node=am_quad_axi_lite_xbar)
+        node=am_quad_axi_lite_xbar,
+    )
     quad_ctrl_axi_lite_xbar.add_input("soc_to_quad")
     quad_ctrl_axi_lite_xbar.add_input("quad_to_soc")
     quad_ctrl_axi_lite_xbar.add_input("bingo_hw_scheduler_read_local_task")
     quad_ctrl_axi_lite_xbar.add_input("bingo_hw_scheduler_write_remote_done")
     quad_ctrl_axi_lite_xbar.add_input("bingo_hw_scheduler_write_pm")
     quad_ctrl_axi_lite_xbar.add_output_entry("quad_to_soc", am_quad_to_soc_axi_xbar)
-    quad_ctrl_axi_lite_xbar.add_output_entry("bingo_hw_scheduler_chiplet_done_queue", am_quad_axi_lite_peripherals[0])
-    quad_ctrl_axi_lite_xbar.add_output_entry("bingo_hw_scheduler_host_ready_done_intf", am_quad_axi_lite_peripherals[1])
-    
+    quad_ctrl_axi_lite_xbar.add_output_entry(
+        "bingo_hw_scheduler_chiplet_done_queue", am_quad_axi_lite_peripherals[0]
+    )
+    quad_ctrl_axi_lite_xbar.add_output_entry(
+        "bingo_hw_scheduler_host_ready_done_intf", am_quad_axi_lite_peripherals[1]
+    )
+
     ##############
     # Quad XBars #
     ##############
@@ -643,12 +735,14 @@ def main():
         no_loopback=True,
         atop_support=False,
         context="quad",
-        node=am_quad_wide_xbar)
+        node=am_quad_wide_xbar,
+    )
     quad_wide_xbar.add_input("soc_wide")
     quad_wide_xbar.add_output_entry("soc_wide", am_soc_wide_xbar)
     for i in range(nr_s1_clusters):
-        quad_wide_xbar.add_output_multi_entries("cluster_{}".format(i),
-                                        [am_clusters[i], am_clusters_leftover_spaces[i]])
+        quad_wide_xbar.add_output_multi_entries(
+            "cluster_{}".format(i), [am_clusters[i], am_clusters_leftover_spaces[i]]
+        )
         quad_wide_xbar.add_input("cluster_{}".format(i))
 
     quad_narrow_xbar = solder.AxiXbar(
@@ -660,20 +754,22 @@ def main():
         name="quad_narrow_xbar",
         clk="clk_i",
         rst="rst_ni",
-        max_slv_trans=occamy_cfg["s1_quadrant"]["narrow_xbar"]
-        ["max_slv_trans"],
-        max_mst_trans=occamy_cfg["s1_quadrant"]["narrow_xbar"]
-        ["max_mst_trans"],
+        max_slv_trans=occamy_cfg["s1_quadrant"]["narrow_xbar"]["max_slv_trans"],
+        max_mst_trans=occamy_cfg["s1_quadrant"]["narrow_xbar"]["max_mst_trans"],
         fall_through=occamy_cfg["s1_quadrant"]["narrow_xbar"]["fall_through"],
         no_loopback=True,
         context="quad",
-        node=am_quad_narrow_xbar)
+        node=am_quad_narrow_xbar,
+    )
     quad_narrow_xbar.add_input("soc_to_quad")
     quad_narrow_xbar.add_output_entry("quad_to_soc", am_quad_to_soc_axi_xbar)
     for i in range(nr_s1_clusters):
-        quad_narrow_xbar.add_output_multi_entries("cluster_{}".format(i), [am_clusters[i], am_clusters_periph[i], am_clusters_leftover_spaces[i]])
+        quad_narrow_xbar.add_output_multi_entries(
+            "cluster_{}".format(i),
+            [am_clusters[i], am_clusters_periph[i], am_clusters_leftover_spaces[i]],
+        )
         quad_narrow_xbar.add_input("cluster_{}".format(i))
-    
+
     # wide_xbar_quadrant_s1.add_output("top", [])
     # wide_xbar_quadrant_s1.add_input("top")
 
@@ -725,78 +821,142 @@ def main():
     # Top-Level #
     #############
     if args.top_sv:
-        top_kwargs = occamy.get_top_kwargs(occamy_cfg, cluster_generators,
-                                    soc_axi_lite_narrow_periph_xbar, soc_wide_xbar, soc_narrow_xbar, soc2router_bus, router2soc_bus, util, args.name)
-        write_template(args.top_sv,
-                       outdir,
-                       fname="{}_top.sv".format(args.name),
-                       module=solder.code_module['top_axi_lite_periph'],
-                       soc_periph_xbar=soc_axi_lite_periph_xbar,
-                       **top_kwargs)
+        top_kwargs = occamy.get_top_kwargs(
+            occamy_cfg,
+            cluster_generators,
+            soc_axi_lite_narrow_periph_xbar,
+            soc_wide_xbar,
+            soc_narrow_xbar,
+            soc2router_bus,
+            router2soc_bus,
+            util,
+            args.name,
+        )
+        write_template(
+            args.top_sv,
+            outdir,
+            fname="{}_top.sv".format(args.name),
+            module=solder.code_module["top_axi_lite_periph"],
+            soc_periph_xbar=soc_axi_lite_periph_xbar,
+            **top_kwargs,
+        )
     ###########################
     # SoC (fully synchronous) #
     ###########################
     if args.soc_sv:
         soc_kwargs = occamy.get_soc_kwargs(
-            occamy_cfg, cluster_generators, soc_narrow_xbar, soc_wide_xbar, soc2router_bus, router2soc_bus, util, args.name)
-        write_template(args.soc_sv,
-                       outdir,
-                       module=solder.code_module['soc'],
-                       soc_periph_xbar=soc_axi_lite_periph_xbar,
-                       **soc_kwargs)
+            occamy_cfg,
+            cluster_generators,
+            soc_narrow_xbar,
+            soc_wide_xbar,
+            soc2router_bus,
+            router2soc_bus,
+            util,
+            args.name,
+        )
+        write_template(
+            args.soc_sv,
+            outdir,
+            module=solder.code_module["soc"],
+            soc_periph_xbar=soc_axi_lite_periph_xbar,
+            **soc_kwargs,
+        )
     #############
     # Quad CTRL #
     #############
     # The "module" will appear at the template file
     # The "module" is the "context" foe each xbar
-    # It groups the xbars together 
+    # It groups the xbars together
     if args.quad_ctrl:
         quad_ctrl_kwargs = occamy.get_quad_ctrl_kwargs(
-            occamy_cfg, soc_wide_xbar, soc_narrow_xbar, quad_ctrl_soc_to_quad_xbar, quad_ctrl_quad_to_soc_xbar, quad_ctrl_axi_lite_narrow_mux, quad_ctrl_axi_lite_xbar, cluster_generators,args.name)
-        write_template(args.quad_ctrl,
-                       outdir,
-                       module=solder.code_module['quad_ctrl'],
-                       **quad_ctrl_kwargs)
+            occamy_cfg,
+            soc_wide_xbar,
+            soc_narrow_xbar,
+            quad_ctrl_soc_to_quad_xbar,
+            quad_ctrl_quad_to_soc_xbar,
+            quad_ctrl_axi_lite_narrow_mux,
+            quad_ctrl_axi_lite_xbar,
+            cluster_generators,
+            args.name,
+        )
+        write_template(
+            args.quad_ctrl,
+            outdir,
+            module=solder.code_module["quad_ctrl"],
+            **quad_ctrl_kwargs,
+        )
     ########
     # Quad #
     ########
     if args.quad:
         if occamy_cfg["s1_quadrant"].get("noc_cfg", None):
-            quadrant_s1_noc_kwargs = occamy.get_quadrant_noc_kwargs(occamy_cfg, cluster_generators)
-            write_template(args.quad_noc,
-                        outdir,
-                        fname="{}_quad_noc.yml".format(args.name),
-                        **quadrant_s1_noc_kwargs)
+            quadrant_s1_noc_kwargs = occamy.get_quadrant_noc_kwargs(
+                occamy_cfg, cluster_generators
+            )
+            write_template(
+                args.quad_noc,
+                outdir,
+                fname="{}_quad_noc.yml".format(args.name),
+                **quadrant_s1_noc_kwargs,
+            )
             occamy.generate_floonoc(f"{outdir}/{args.name}_quad_noc.yml", outdir)
-        quadrant_kwargs = occamy.get_quadrant_kwargs(occamy_cfg, cluster_generators, soc_wide_xbar,
-                                              soc_narrow_xbar, quad_wide_xbar, quad_narrow_xbar, quad_ctrl_quad_to_soc_xbar, args.name)
+        quadrant_kwargs = occamy.get_quadrant_kwargs(
+            occamy_cfg,
+            cluster_generators,
+            soc_wide_xbar,
+            soc_narrow_xbar,
+            quad_wide_xbar,
+            quad_narrow_xbar,
+            quad_ctrl_quad_to_soc_xbar,
+            args.name,
+        )
         if nr_s1_quadrants > 0:
-            write_template(args.quad,
-                           outdir,
-                           fname="{}_quad.sv".format(args.name),
-                           module=solder.code_module['quad'],
-                           **quadrant_kwargs)
+            write_template(
+                args.quad,
+                outdir,
+                fname="{}_quad.sv".format(args.name),
+                module=solder.code_module["quad"],
+                **quadrant_kwargs,
+            )
         else:
             tpl_path = args.quad
             if tpl_path:
                 tpl_path = pathlib.Path(tpl_path).absolute()
                 if tpl_path.exists():
                     print(outdir, args.name)
-                    with open("{}/{}_quad.sv".format(outdir, args.name), 'w') as f:
+                    with open("{}/{}_quad.sv".format(outdir, args.name), "w") as f:
                         f.write("// no quad in this design")
+    ##################
+    # Xilinx Wrapper #
+    ##################
+    if args.xilinx_sv:
+        xilinx_kwargs = occamy.get_xilinx_kwargs(
+            occamy_cfg, soc_wide_xbar, soc_axi_lite_narrow_periph_xbar, args.name
+        )
+        write_template(
+            args.xilinx_sv,
+            outdir,
+            fname="{}_xilinx.sv".format(args.name),
+            module="",
+            **xilinx_kwargs,
+        )
+
     ###########
     # Package #
     ###########
     if args.pkg_sv:
-        pkg_kwargs = occamy.get_pkg_kwargs(occamy_cfg, cluster_generators, util, args.name)
-        write_template(args.pkg_sv, outdir, **pkg_kwargs,
-                       package=solder.code_package)
+        pkg_kwargs = occamy.get_pkg_kwargs(
+            occamy_cfg, cluster_generators, util, args.name
+        )
+        write_template(args.pkg_sv, outdir, **pkg_kwargs, package=solder.code_package)
 
     ################
     # CVA6 Wrapper #
     ################
     if args.cva6_sv:
-        cva6_kwargs = occamy.get_cva6_kwargs(occamy_cfg, cluster_generators, soc_narrow_xbar, util, args.name)
+        cva6_kwargs = occamy.get_cva6_kwargs(
+            occamy_cfg, cluster_generators, soc_narrow_xbar, util, args.name
+        )
         write_template(args.cva6_sv, outdir, **cva6_kwargs)
 
     ###################
@@ -804,7 +964,8 @@ def main():
     ###################
     if args.cheader:
         cheader_kwargs = occamy.get_cheader_kwargs(
-            occamy_cfg, cluster_generators, args.name)
+            occamy_cfg, cluster_generators, args.name
+        )
         write_template(args.cheader, outdir, **cheader_kwargs)
 
     ###################
@@ -818,8 +979,8 @@ def main():
     # ADDRMAP CSV #
     ###############
     if args.am_csv:
-        with open(args.am_csv, 'w', newline='') as csvfile:
-            csv_writer = csv.writer(csvfile, delimiter=',')
+        with open(args.am_csv, "w", newline="") as csvfile:
+            csv_writer = csv.writer(csvfile, delimiter=",")
             am.print_csv(csv_writer)
 
     ###############
@@ -835,37 +996,62 @@ def main():
             args.sim_with_netlist,
             args.sim_with_verilator,
             args.sim_with_jtag_check,
-            soc2router_bus, router2soc_bus, args.name)
+            soc2router_bus,
+            router2soc_bus,
+            args.name,
+        )
         # Template directory contains all .sv.tpl files
         tpl_dir = os.path.dirname(args.testharness_sv)
         # Generate testharness.sv, io_wrapper.sv, dut.sv → outdir (testharness/)
-        write_template(args.testharness_sv, outdir, fname="testharness.sv", **testharness_kwargs)
-        write_template(os.path.join(tpl_dir, "io_wrapper.sv.tpl"), outdir, fname="io_wrapper.sv", **testharness_kwargs)
-        write_template(os.path.join(tpl_dir, "dut.sv.tpl"), outdir, fname="dut.sv", **testharness_kwargs)
+        write_template(
+            args.testharness_sv, outdir, fname="testharness.sv", **testharness_kwargs
+        )
+        write_template(
+            os.path.join(tpl_dir, "io_wrapper.sv.tpl"),
+            outdir,
+            fname="io_wrapper.sv",
+            **testharness_kwargs,
+        )
+        write_template(
+            os.path.join(tpl_dir, "dut.sv.tpl"),
+            outdir,
+            fname="dut.sv",
+            **testharness_kwargs,
+        )
         # Generate util files → outdir/util/ (testharness/util/)
         util_outdir = os.path.join(str(outdir), "util")
         # Generate all load_binary and check_finish variants from a single template each,
         # overriding the sim flags to produce one file per mode.
         # The testharness `include picks the right one based on sim flags.
         variant_flags = {
-            "rtl":       {"sim_with_mem_macro": 0, "sim_with_netlist": 0},
+            "rtl": {"sim_with_mem_macro": 0, "sim_with_netlist": 0},
             "mem_macro": {"sim_with_mem_macro": 1, "sim_with_netlist": 0},
-            "netlist":   {"sim_with_mem_macro": 0, "sim_with_netlist": 1},
+            "netlist": {"sim_with_mem_macro": 0, "sim_with_netlist": 1},
         }
         for suffix, flags in variant_flags.items():
             variant_kwargs = {**testharness_kwargs, **flags}
-            write_template(os.path.join(tpl_dir, "load_binary.sv.tpl"), util_outdir, fname=f"load_binary_{suffix}.sv", **variant_kwargs)
-            write_template(os.path.join(tpl_dir, "check_finish.sv.tpl"), util_outdir, fname=f"check_finish_{suffix}.sv", **variant_kwargs)
+            write_template(
+                os.path.join(tpl_dir, "load_binary.sv.tpl"),
+                util_outdir,
+                fname=f"load_binary_{suffix}.sv",
+                **variant_kwargs,
+            )
+            write_template(
+                os.path.join(tpl_dir, "check_finish.sv.tpl"),
+                util_outdir,
+                fname=f"check_finish_{suffix}.sv",
+                **variant_kwargs,
+            )
 
     ############
     # BOOTDATA #
     ############
     if args.bootdata:
         bootdata_kwargs = occamy.get_bootdata_kwargs(
-            occamy_cfg, cluster_generators, args.name)
+            occamy_cfg, cluster_generators, args.name
+        )
         bootdata_fname = "bootdata.cc"
-        write_template(args.bootdata, outdir,
-                       bootdata_fname, **bootdata_kwargs)
+        write_template(args.bootdata, outdir, bootdata_fname, **bootdata_kwargs)
     ########
     # XDMA #
     ########
@@ -874,8 +1060,18 @@ def main():
         print("    Generate HeMAiA Compute Chip XDMA")
         print("------------------------------------------------")
         import importlib.util
+
         script_dir = pathlib.Path(__file__).parent.resolve()
-        snaxgen_path = script_dir / ".." / ".." / "deps" / "snitch_cluster" /  "util" / "snaxgen" / "snaxgen.py"
+        snaxgen_path = (
+            script_dir
+            / ".."
+            / ".."
+            / "deps"
+            / "snitch_cluster"
+            / "util"
+            / "snaxgen"
+            / "snaxgen.py"
+        )
         spec = importlib.util.spec_from_file_location("snaxgen", snaxgen_path)
         snaxgen = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(snaxgen)
@@ -883,7 +1079,16 @@ def main():
         gen_chisel_file = snaxgen.gen_chisel_file
         get_template = snaxgen.get_template
 
-        tpl_rtl_wrapper_file = script_dir / ".." / ".." / "deps" / "snitch_cluster" / "hw" / "templates" / "snax_xdma_wrapper.sv.tpl"
+        tpl_rtl_wrapper_file = (
+            script_dir
+            / ".."
+            / ".."
+            / "deps"
+            / "snitch_cluster"
+            / "hw"
+            / "templates"
+            / "snax_xdma_wrapper.sv.tpl"
+        )
 
         tpl_rtl_wrapper = get_template(tpl_rtl_wrapper_file)
 
@@ -895,17 +1100,22 @@ def main():
                 "data_width": occamy_cfg["data_width"],
                 "addr_width": occamy_cfg["addr_width"],
                 "tcdm": {
-                    "size": int(occamy_cfg["spm_wide"]["length"]/1024),
+                    "size": int(occamy_cfg["spm_wide"]["length"] / 1024),
                 },
                 "max_mem_size_kiB": unified_max_mem_size_kiB,
             },
             tpl=tpl_rtl_wrapper,
-            target_path=str(script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system") + "/",
-            file_name= "hemaia_xdma_wrapper.sv",
+            target_path=str(
+                script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system"
+            )
+            + "/",
+            file_name="hemaia_xdma_wrapper.sv",
         )
 
         gen_chisel_file(
-            chisel_path=str(script_dir / ".." / ".." / "deps" / "snitch_cluster" / "hw" / "chisel"),
+            chisel_path=str(
+                script_dir / ".." / ".." / "deps" / "snitch_cluster" / "hw" / "chisel"
+            ),
             chisel_param="snax.xdma.xdmaTop.XDMATopGen",
             gen_path=" --clusterName "
             + "hemaia"
@@ -919,26 +1129,53 @@ def main():
             # of the Chisel XDMA. It must match the wrapper's TCDMAddrWidth, which is
             # derived from the local SPM size (spm_wide.length here).
             + " --tcdmSize "
-            + str(int(occamy_cfg["spm_wide"]["length"]/1024))
+            + str(int(occamy_cfg["spm_wide"]["length"] / 1024))
             # hemaia_xdma_cfg was patched in memory by unify_xdma_max_mem_size
             # so the JSON below already carries the unified `max_mem_size_kiB`
             # for the Chisel side to consume.
             + " --xdmaCfg "
-            + hjson.dumpsJSON(obj=occamy_cfg["hemaia_xdma_cfg"], separators=(",", ":")).replace(" ", "")
+            + hjson.dumpsJSON(
+                obj=occamy_cfg["hemaia_xdma_cfg"], separators=(",", ":")
+            ).replace(" ", "")
             + " --hw-target-dir "
-            + str(script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system") + "/"
+            + str(script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system")
+            + "/"
             + " --sw-target-dir "
-            + str(script_dir / ".." / ".." / "target" / "sw" / "shared" / "vendor" / "xdma" / "hemaia-xdma-addr.h")
+            + str(
+                script_dir
+                / ".."
+                / ".."
+                / "target"
+                / "sw"
+                / "shared"
+                / "vendor"
+                / "xdma"
+                / "hemaia-xdma-addr.h"
+            ),
         )
         print("HeMAiA Chip XDMA generation finished")
 
-    if args.xdma is True and any(occamy_cfg["hemaia_multichip"]["testbench_cfg"]["hemaia_mem_chip"]) and occamy_cfg["hemaia_xdma_cfg"] is not None:
+    if (
+        args.xdma is True
+        and any(occamy_cfg["hemaia_multichip"]["testbench_cfg"]["hemaia_mem_chip"])
+        and occamy_cfg["hemaia_xdma_cfg"] is not None
+    ):
         print("------------------------------------------------")
         print("    Generate HeMAiA Mem Chip XDMA")
         print("------------------------------------------------")
         import importlib.util
+
         script_dir = pathlib.Path(__file__).parent.resolve()
-        snaxgen_path = script_dir / ".." / ".." / "deps" / "snitch_cluster" /  "util" / "snaxgen" / "snaxgen.py"
+        snaxgen_path = (
+            script_dir
+            / ".."
+            / ".."
+            / "deps"
+            / "snitch_cluster"
+            / "util"
+            / "snaxgen"
+            / "snaxgen.py"
+        )
         spec = importlib.util.spec_from_file_location("snaxgen", snaxgen_path)
         snaxgen = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(snaxgen)
@@ -946,7 +1183,16 @@ def main():
         gen_chisel_file = snaxgen.gen_chisel_file
         get_template = snaxgen.get_template
 
-        tpl_rtl_wrapper_file = script_dir / ".." / ".." / "deps" / "snitch_cluster" / "hw" / "templates" / "snax_xdma_wrapper.sv.tpl"
+        tpl_rtl_wrapper_file = (
+            script_dir
+            / ".."
+            / ".."
+            / "deps"
+            / "snitch_cluster"
+            / "hw"
+            / "templates"
+            / "snax_xdma_wrapper.sv.tpl"
+        )
 
         tpl_rtl_wrapper = get_template(tpl_rtl_wrapper_file)
 
@@ -958,17 +1204,27 @@ def main():
                 "data_width": occamy_cfg["data_width"],
                 "addr_width": occamy_cfg["addr_width"],
                 "tcdm": {
-                    "size": int(occamy_cfg["hemaia_multichip"]["testbench_cfg"]["hemaia_mem_chip"][0]["mem_size"]/1024),
+                    "size": int(
+                        occamy_cfg["hemaia_multichip"]["testbench_cfg"][
+                            "hemaia_mem_chip"
+                        ][0]["mem_size"]
+                        / 1024
+                    ),
                 },
                 "max_mem_size_kiB": unified_max_mem_size_kiB,
             },
             tpl=tpl_rtl_wrapper,
-            target_path=str(script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system") + "/",
-            file_name= "hemaia_mem_chip_xdma_wrapper.sv",
+            target_path=str(
+                script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system"
+            )
+            + "/",
+            file_name="hemaia_mem_chip_xdma_wrapper.sv",
         )
 
         gen_chisel_file(
-            chisel_path=str(script_dir / ".." / ".." / "deps" / "snitch_cluster" / "hw" / "chisel"),
+            chisel_path=str(
+                script_dir / ".." / ".." / "deps" / "snitch_cluster" / "hw" / "chisel"
+            ),
             chisel_param="snax.xdma.xdmaTop.XDMATopGen",
             gen_path=" --clusterName "
             + "hemaia_mem_chip"
@@ -984,19 +1240,38 @@ def main():
             # separate (carried via --xdmaCfg below) and drives the *cross-cluster*
             # pointer widths, which are unified across all XDMAs.
             + " --tcdmSize "
-            + str(int(occamy_cfg["hemaia_multichip"]["testbench_cfg"]["hemaia_mem_chip"][0]["mem_size"]/1024))
+            + str(
+                int(
+                    occamy_cfg["hemaia_multichip"]["testbench_cfg"]["hemaia_mem_chip"][
+                        0
+                    ]["mem_size"]
+                    / 1024
+                )
+            )
             # hemaia_xdma_cfg was patched in memory by unify_xdma_max_mem_size
             # so the JSON below already carries the unified `max_mem_size_kiB`
             # for the Chisel side to consume.
             + " --xdmaCfg "
-            + hjson.dumpsJSON(obj=occamy_cfg["hemaia_xdma_cfg"], separators=(",", ":")).replace(" ", "")
+            + hjson.dumpsJSON(
+                obj=occamy_cfg["hemaia_xdma_cfg"], separators=(",", ":")
+            ).replace(" ", "")
             + " --hw-target-dir "
-            + str(script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system") + "/"
+            + str(script_dir / ".." / ".." / "hw" / "hemaia" / "hemaia_mem_system")
+            + "/"
             + " --sw-target-dir "
-            + str(script_dir / ".." / ".." / "target" / "sw" / "shared" / "vendor" / "xdma" / "hemaia-mem-chip-xdma-addr.h")
+            + str(
+                script_dir
+                / ".."
+                / ".."
+                / "target"
+                / "sw"
+                / "shared"
+                / "vendor"
+                / "xdma"
+                / "hemaia-mem-chip-xdma-addr.h"
+            ),
         )
         print("HeMAiA Mem Chip XDMA generation finished")
-
 
     # # generate the loader script
     if args.gen_host_ld:
@@ -1004,33 +1279,47 @@ def main():
         print("    Generate host.ld")
         print("------------------------------------------------")
         import importlib.util
+
         script_dir = pathlib.Path(__file__).parent.resolve()
-        host_ld_tpl_file = script_dir / ".." / ".." / "target" / "sw" / "host" / "runtime" / "host.ld.tpl"
-        cfg={
+        host_ld_tpl_file = (
+            script_dir
+            / ".."
+            / ".."
+            / "target"
+            / "sw"
+            / "host"
+            / "runtime"
+            / "host.ld.tpl"
+        )
+        cfg = {
             "name": args.name,
             "spm_narrow": occamy_cfg["spm_narrow"],
             "spm_wide": occamy_cfg["spm_wide"],
         }
-        write_template(
-            host_ld_tpl_file,
-            outdir,
-            **cfg
-        )
+        write_template(host_ld_tpl_file, outdir, **cfg)
 
     ########
     # CHIP #
     ########
     if args.chip:
         chip_kwargs = occamy.get_chip_kwargs(
-            soc_wide_xbar, soc_narrow_xbar, soc_axi_lite_narrow_periph_xbar, soc2router_bus, router2soc_bus, occamy_cfg, cluster_generators, util, args.name)
+            soc_wide_xbar,
+            soc_narrow_xbar,
+            soc_axi_lite_narrow_periph_xbar,
+            soc2router_bus,
+            router2soc_bus,
+            occamy_cfg,
+            cluster_generators,
+            util,
+            args.name,
+        )
         write_template(args.chip, outdir, **chip_kwargs)
 
     ########
     # IO #
     ########
     if args.io:
-        io_kwargs = occamy.get_io_kwargs(
-            occamy_cfg, util, args.name)
+        io_kwargs = occamy.get_io_kwargs(occamy_cfg, util, args.name)
         write_template(args.io, outdir, **io_kwargs)
 
     ########

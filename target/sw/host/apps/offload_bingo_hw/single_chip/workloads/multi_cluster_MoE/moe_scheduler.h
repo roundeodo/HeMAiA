@@ -110,6 +110,29 @@ typedef struct {
     /* REMOVED: est_makespan_cc (timing no longer propagated to L3)            */
 } moe_schedule_t;
 
+/* ── RTL compact plan format -------------------------------------------------
+ * This mirrors the pure-slave scheduler RTL output after commit_unit:
+ * one entry is one actual cluster task.  Timing/snap fields are intentionally
+ * absent; S4 prefetch legality is carried by allow_s4pf.
+ */
+typedef struct {
+    moe_cluster_t cluster;
+    uint16_t      expert_id;
+    uint16_t      token_start_rank;
+    uint16_t      ntokens;
+    moe_shape_t   shape_s1;
+    moe_shape_t   shape_s3;
+    uint8_t       skip_s1;
+    uint8_t       skip_s3;
+    uint8_t       has_s2pf;
+} moe_hw_plan_desc_t;
+
+typedef struct {
+    uint8_t            valid;
+    moe_hw_plan_desc_t desc;
+    uint8_t            allow_s4pf;
+} moe_hw_plan_entry_t;
+
 /* ── Return codes ─────────────────────────────────────────────────────── */
 typedef enum {
     MOE_OK              =  0,
@@ -137,6 +160,21 @@ typedef enum {
  *  memory is used.
  * ───────────────────────────────────────────────────────────────────────── */
 moe_status_t moe_schedule(const moe_request_t *req, moe_schedule_t *out);
+
+/* Generate the same compact plan representation that the RTL scheduler emits.
+ * This is intended as the software golden model for RTL schedule_core tests.
+ */
+moe_status_t moe_make_hw_plan(const moe_request_t *req,
+                              moe_hw_plan_entry_t *plan,
+                              uint16_t *n_plan);
+
+/* Lower an RTL/software compact plan into the API-facing task/DMA schedule.
+ * CVA6 should use this after collecting all per-round RTL plan entries.
+ */
+moe_status_t moe_lower_hw_plan(const moe_request_t *req,
+                               const moe_hw_plan_entry_t *plan,
+                               uint16_t n_plan,
+                               moe_schedule_t *out);
 
 #ifdef __cplusplus
 }

@@ -68,6 +68,8 @@ typedef struct {
     uint8_t  pf_full;
     int32_t  s2pf_start, s2pf_end;
     uint32_t s2pf_bw;
+    uint8_t  s4pf_valid;
+    uint32_t s4pf_start;
     uint16_t ntok;
 } snap_t;
 
@@ -79,6 +81,7 @@ static snap_t snap_idle_at(uint32_t t)
     s.bw_s1=0; s.bw_s3=0; s.cur_eid=-1;
     s.pf_eid=-1; s.pf_start=-1; s.pf_end=-1; s.pf_bw=0; s.pf_full=0;
     s.s2pf_start=-1; s.s2pf_end=-1; s.s2pf_bw=0; s.ntok=0;
+    s.s4pf_valid=0; s.s4pf_start=0;
     return s;
 }
 
@@ -142,7 +145,7 @@ static snap_t apply_s2pf(snap_t sn, uint8_t s3, uint32_t ps)
  * ========================================================================= */
 typedef struct { uint32_t lo, hi, bw; } seg_t;
 
-static int snap_segs(const snap_t *s, seg_t out[4], int *n)
+static int snap_segs(const snap_t *s, seg_t out[5], int *n)
 {
     *n = 0;
     /* iv1: S1 DMA */
@@ -171,12 +174,16 @@ static int snap_segs(const snap_t *s, seg_t out[4], int *n)
     /* iv2: S3 DMA — always after iv1/iv4; active only when bw_s3>0 (no s2pf) */
     if (s->cur_eid>=0 && s->bw_s3>0u && s->dma3_end>s->s2_end)
         out[(*n)++]=(seg_t){s->s2_end, s->dma3_end, s->bw_s3};
+    /* iv5: S4 prefetch DMA — ShapeA gate/up during this task's S4 window.
+     * The duration and BW are fixed, so snap_t only stores valid+start. */
+    if (s->cur_eid>=0 && s->s4pf_valid)
+        out[(*n)++]=(seg_t){s->s4pf_start, s->s4pf_start+kTd1[0], kAlloc[0]};
     return 1;
 }
 
 static int bw_ok(const snap_t *a, const snap_t *b)
 {
-    seg_t sa[4], sb[4]; int na=0, nb=0;
+    seg_t sa[5], sb[5]; int na=0, nb=0;
     if (!snap_segs(a,sa,&na)) return 0;
     if (!snap_segs(b,sb,&nb)) return 0;
     for (int i=0;i<na;i++) for (int j=0;j<nb;j++) {
@@ -185,6 +192,32 @@ static int bw_ok(const snap_t *a, const snap_t *b)
         if (lo<hi && sa[i].bw+sb[j].bw>MAX_BW_CC) return 0;
     }
     return 1;
+}
+
+static int s4pf_local_ok(const snap_t *s)
+{
+    return (s->cur_eid>=0 && s->pf_eid==(int16_t)(-1) &&
+            s->dma1_end<=s->s4_start &&
+            s->s4_start+kTd1[0]<=s->task_end);
+}
+
+static snap_t apply_s4pf_ghost(snap_t s)
+{
+    if (s4pf_local_ok(&s)){
+        s.pf_eid=PF_EID_GHOST;
+        s.pf_end=(int32_t)s.task_end;
+        s.pf_full=0;
+        s.s4pf_valid=1u;
+        s.s4pf_start=s.s4_start;
+    }
+    return s;
+}
+
+static int s4pf_ok_with_peer(const snap_t *s, const snap_t *peer)
+{
+    if (!s4pf_local_ok(s)) return 0;
+    snap_t cand=apply_s4pf_ghost(*s);
+    return bw_ok(&cand, peer);
 }
 
 /* =========================================================================
@@ -385,11 +418,12 @@ typedef struct {
     uint8_t  cluster;          /* 0=C2, 1=C3 */
     uint8_t  shape_s1, shape_s3;
     uint8_t  skip_s1, skip_s3, has_s2pf;
+    uint8_t  allow_s4pf;
     uint32_t est_start, est_end, est_s2_end;
     uint32_t est_s2pf_start, est_dma1_end, est_s4_start;
 } plan_t;
 
-static plan_t plan_from_snap(const snap_t *sn, uint8_t cl,
+static plan_t plan_from_snap(const snap_t *sn, const snap_t *peer, uint8_t cl,
                               uint16_t tok_start, uint8_t s1, uint8_t s3)
 {
     plan_t p;
@@ -402,6 +436,7 @@ static plan_t plan_from_snap(const snap_t *sn, uint8_t cl,
     p.est_s2_end=sn->s2_end;
     p.est_s2pf_start=(sn->s2pf_start>=0)?(uint32_t)sn->s2pf_start:0u;
     p.est_dma1_end=sn->dma1_end; p.est_s4_start=sn->s4_start;
+    p.allow_s4pf=(uint8_t)(s4pf_ok_with_peer(sn, peer)?1u:0u);
     return p;
 }
 
@@ -419,9 +454,12 @@ typedef struct { uint32_t cost,snap_max,snap_min; uint8_t rem_len; int valid; } 
 static int cand_better(const ckey_t *b, uint32_t cost, uint32_t smx, uint32_t smn, uint8_t rl)
 {
     if (!b->valid) return 1;
-    if (cost<b->cost) return 1; if (cost>b->cost) return 0;
-    if (rl<b->rem_len) return 1; if (rl>b->rem_len) return 0;
-    if (smx<b->snap_max) return 1; if (smx>b->snap_max) return 0;
+    if (cost<b->cost) return 1;
+    if (cost>b->cost) return 0;
+    if (rl<b->rem_len) return 1;
+    if (rl>b->rem_len) return 0;
+    if (smx<b->snap_max) return 1;
+    if (smx>b->snap_max) return 0;
     if (smn>b->snap_min) return 1;
     return 0;
 }
@@ -453,19 +491,14 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
         int both_idle=(t2==t3);
 
         /* Inject PF_EID_GHOST into each cluster whose S4 window can fit a
-         * ShapeA S1 DMA (conservative lower-bound, no BW check here).
+         * ShapeA S1 DMA and whose S4PF segment does not violate BW against
+         * the peer cluster's current DMA timeline.
          * PF_EID_GHOST means "whoever gets assigned to this cluster next will
          * benefit from skip_s1"; lower_plan fills in the actual expert_id when
          * emitting the S4_PREFETCH DMA op.
          * Condition: pf_eid == -1 (no ghost and no initial cache yet). */
-        if (c2.cur_eid>=0 && c2.pf_eid==(int16_t)(-1) &&
-                c2.s4_start+kTd1[0]<=c2.task_end){
-            c2.pf_eid=PF_EID_GHOST; c2.pf_end=(int32_t)c2.task_end; c2.pf_full=0;
-        }
-        if (c3.cur_eid>=0 && c3.pf_eid==(int16_t)(-1) &&
-                c3.s4_start+kTd1[0]<=c3.task_end){
-            c3.pf_eid=PF_EID_GHOST; c3.pf_end=(int32_t)c3.task_end; c3.pf_full=0;
-        }
+        if (s4pf_ok_with_peer(&c2,&c3)) c2=apply_s4pf_ghost(c2);
+        if (s4pf_ok_with_peer(&c3,&c2)) c3=apply_s4pf_ghost(c3);
 
         uint8_t c2c0=(uint8_t)swiglu_hit(t0eid,&c2,tnow), c2f0=(uint8_t)down_hit(t0eid,&c2,tnow);
         uint8_t c3c0=(uint8_t)swiglu_hit(t0eid,&c3,tnow), c3f0=(uint8_t)down_hit(t0eid,&c3,tnow);
@@ -519,7 +552,7 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
                 /* Analytical: 3 time pts (idle_t + busy DMA hi-endpoints) x 1 shape */
                 uint32_t tpts[3]; int ntp=0;
                 tpts[ntp++]=idle_t;
-                { seg_t bsegs[4]; int nbsegs=0; snap_segs(busy_s,bsegs,&nbsegs);
+                { seg_t bsegs[5]; int nbsegs=0; snap_segs(busy_s,bsegs,&nbsegs);
                   for (int bi=0;bi<nbsegs&&ntp<3;bi++){
                     uint32_t ep=bsegs[bi].hi;
                     if (ep>idle_t){
@@ -543,7 +576,9 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
 
             rem_remove(rem,&nr,0u);
             if (!is_split){
-                plan_t pe=plan_from_snap(&best_sn,best_cl,0u,best_s1,best_s3);
+                plan_t pe=plan_from_snap(&best_sn,
+                                          best_cl==0u ? &c3 : &c2,
+                                          best_cl,0u,best_s1,best_s3);
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pe;
                 if (best_cl==0) c2=best_sn; else c3=best_sn;
             } else {
@@ -551,8 +586,8 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
                 uint8_t s1a2,s3a2,s1b2,s3b2;
                 pick_shapes(split_cut,(uint16_t)(t0ntok-split_cut),
                             c2c0,c2f0,c3c0,c3f0,tnow,&s1a2,&s3a2,&s1b2,&s3b2);
-                plan_t pea=plan_from_snap(&best_sn,0u,0u,s1a2,s3a2);
-                plan_t peb=plan_from_snap(&split_snb,1u,split_cut,s1b2,s3b2);
+                plan_t pea=plan_from_snap(&best_sn,&split_snb,0u,0u,s1a2,s3a2);
+                plan_t peb=plan_from_snap(&split_snb,&best_sn,1u,split_cut,s1b2,s3b2);
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pea;
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=peb;
                 c2=best_sn; c3=split_snb;
@@ -677,9 +712,9 @@ do { \
 
             /* Commit */
             if (bkey.valid){
-                plan_t pea=plan_from_snap(&bsna,0u,btok0_a,bs1a,bs3a);
+                plan_t pea=plan_from_snap(&bsna,&bsnb,0u,btok0_a,bs1a,bs3a);
                 pea.eid=beid_a; pea.ntok=bntok_a;
-                plan_t peb=plan_from_snap(&bsnb,1u,btok0_b,bs1b,bs3b);
+                plan_t peb=plan_from_snap(&bsnb,&bsna,1u,btok0_b,bs1b,bs3b);
                 peb.eid=beid_b; peb.ntok=bntok_b;
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pea;
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=peb;
@@ -688,7 +723,7 @@ do { \
             } else {
                 /* Fallback: assign top0 solo to C2 */
                 snap_t sf=mk_snap(tnow,2u,2u,t0ntok,t0eid,c2c0,c2f0);
-                plan_t pf=plan_from_snap(&sf,0u,0u,2u,2u);
+                plan_t pf=plan_from_snap(&sf,&c3,0u,0u,2u,2u);
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pf;
                 c2=sf; rem_remove(rem,&nr,0u);
                 /* No ghost rollback needed: PF_EID_GHOST in C3 stays valid;
@@ -707,7 +742,7 @@ do { \
             /* Analytical: 3 time pts (idle_t + busy DMA hi-endpoints) x 1 shape */
             uint32_t tpts[3]; int ntp=0;
             tpts[ntp++]=idle_t;
-            { seg_t bsegs[4]; int nbsegs=0; snap_segs(busy_sn,bsegs,&nbsegs);
+            { seg_t bsegs[5]; int nbsegs=0; snap_segs(busy_sn,bsegs,&nbsegs);
               for (int bi=0;bi<nbsegs&&ntp<3;bi++){
                 uint32_t ep=bsegs[bi].hi;
                 if (ep>idle_t){
@@ -743,13 +778,13 @@ do { \
 
             rem_remove(rem,&nr,0u);
             if (best_nbv){
-                plan_t pe=plan_from_snap(&best_nb,(uint8_t)idle_ci,0u,best_ns1,best_ns3);
+                plan_t pe=plan_from_snap(&best_nb,busy_sn,(uint8_t)idle_ci,0u,best_ns1,best_ns3);
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pe;
                 if (idle_ci==0) c2=best_nb; else c3=best_nb;
             } else {
                 uint8_t cch=(idle_ci==0)?c2c0:c3c0, cfh=(idle_ci==0)?c2f0:c3f0;
                 snap_t sf=mk_snap(idle_t,2u,2u,t0ntok,t0eid,cch,cfh);
-                plan_t pf=plan_from_snap(&sf,(uint8_t)idle_ci,0u,2u,2u);
+                plan_t pf=plan_from_snap(&sf,busy_sn,(uint8_t)idle_ci,0u,2u,2u);
                 if (*n_plan<MOE_MAX_TASKS) plan[(*n_plan)++]=pf;
                 if (idle_ci==0) c2=sf; else c3=sf;
             }
@@ -763,11 +798,43 @@ do { \
     return (c2.task_end>c3.task_end)?c2.task_end:c3.task_end;
 }
 
+static moe_hw_plan_entry_t hw_entry_from_plan(const plan_t *p)
+{
+    moe_hw_plan_entry_t e;
+    memset(&e, 0, sizeof(e));
+    e.valid=1u;
+    e.desc.cluster=(p->cluster==0u)?MOE_CLUSTER_C2:MOE_CLUSTER_C3;
+    e.desc.expert_id=(uint16_t)p->eid;
+    e.desc.token_start_rank=p->tok_start;
+    e.desc.ntokens=p->ntok;
+    e.desc.shape_s1=(moe_shape_t)p->shape_s1;
+    e.desc.shape_s3=(moe_shape_t)p->shape_s3;
+    e.desc.skip_s1=p->skip_s1;
+    e.desc.skip_s3=p->skip_s3;
+    e.desc.has_s2pf=p->has_s2pf;
+    e.allow_s4pf=p->allow_s4pf;
+    return e;
+}
+
+static void remove_dma_op(moe_schedule_t *out, uint16_t idx,
+                          uint16_t pending_idx[2], uint8_t pending_valid[2])
+{
+    if (idx>=out->n_dma_ops) return;
+    for (uint16_t i=idx;i+1u<out->n_dma_ops;i++) out->dma_ops[i]=out->dma_ops[i+1u];
+    out->n_dma_ops--;
+    for (uint8_t c=0;c<2u;c++){
+        if (pending_valid[c]&&pending_idx[c]>idx) pending_idx[c]--;
+    }
+}
+
 /* =========================================================================
- * Lowering: plan[] → moe_schedule_t
+ * Legacy timing lowering: plan[] → moe_schedule_t
+ *
+ * Kept as an internal reference for equivalence checks.  The public
+ * moe_schedule() path below uses the compact RTL-plan lowering instead.
  * ========================================================================= */
-static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
-                                const moe_request_t *req, moe_schedule_t *out)
+static moe_status_t lower_plan_timing(const plan_t *plan, uint8_t n_plan,
+                                      const moe_request_t *req, moe_schedule_t *out)
 {
     out->n_tasks=0; out->n_dma_ops=0;
 
@@ -781,7 +848,6 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
         moe_shape_t sh3=(moe_shape_t)p->shape_s3;
         uint32_t ntok_u=p->ntok;
         uint8_t  skip_s1=p->skip_s1, skip_s3=p->skip_s3, has_s2pf=p->has_s2pf;
-        uint32_t dma1_end=skip_s1?p->est_start:p->est_dma1_end;
 
         moe_task_t *tk=&out->tasks[out->n_tasks];
         /* (dma_slots[] removed from compact moe_task_t) */
@@ -859,11 +925,8 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
                  * so the initial cache is gone and we must prefetch next_eid. */
                 if (ci==0 && req->cache_eid_c2==next_eid && p->skip_s1) nc=1;
                 if (ci==1 && req->cache_eid_c3==next_eid && p->skip_s1) nc=1;
-                if (!nc){
-                    uint32_t s4s=p->est_s4_start;
-                    uint32_t pfd=kTd1[0]; /* ShapeA gate+up DMA = 45056 cc */
-                    if (dma1_end<=s4s && (s4s+pfd)<=p->est_end
-                            && out->n_dma_ops<MOE_MAX_DMA_OPS){
+                if (!nc && p->allow_s4pf){
+                    if (out->n_dma_ops<MOE_MAX_DMA_OPS){
                         moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
                         op->task_idx=(uint16_t)out->n_tasks;
                         op->expert_id=next_eid;
@@ -878,6 +941,164 @@ static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
     /* est_makespan_cc removed from compact moe_schedule_t */
     return MOE_OK;
 }
+
+moe_status_t moe_lower_hw_plan(const moe_request_t *req,
+                               const moe_hw_plan_entry_t *plan,
+                               uint16_t n_plan,
+                               moe_schedule_t *out)
+{
+    uint8_t pending_valid[2]={0u,0u};
+    uint16_t pending_op_idx[2]={0u,0u};
+    uint16_t pending_task_idx[2]={0u,0u};
+
+    if (!req||!plan||!out) return MOE_ERR_BAD_INPUT;
+    if (n_plan>MOE_MAX_TASKS) return MOE_ERR_OVERFLOW;
+
+    out->n_tasks=0; out->n_dma_ops=0;
+
+    for (uint16_t pi=0;pi<n_plan;pi++){
+        const moe_hw_plan_entry_t *pe=&plan[pi];
+        if (!pe->valid) continue;
+        if (out->n_tasks>=MOE_MAX_TASKS) return MOE_ERR_OVERFLOW;
+
+        const moe_hw_plan_desc_t *p=&pe->desc;
+        uint8_t ci=(p->cluster==MOE_CLUSTER_C3)?1u:0u;
+
+        if (pending_valid[ci]){
+            uint8_t nc=0;
+            uint16_t opi=pending_op_idx[ci];
+            uint16_t pti=pending_task_idx[ci];
+            if (ci==0u && req->cache_eid_c2==(int16_t)p->expert_id &&
+                    out->tasks[pti].skip_s1) nc=1u;
+            if (ci==1u && req->cache_eid_c3==(int16_t)p->expert_id &&
+                    out->tasks[pti].skip_s1) nc=1u;
+            if (nc){
+                remove_dma_op(out,opi,pending_op_idx,pending_valid);
+            } else {
+                out->dma_ops[opi].expert_id=(int16_t)p->expert_id;
+            }
+            pending_valid[ci]=0u;
+        }
+
+        moe_task_t *tk=&out->tasks[out->n_tasks];
+        uint32_t ntok_u=p->ntokens;
+        uint8_t skip_s1=p->skip_s1?1u:0u;
+        uint8_t skip_s3=p->skip_s3?1u:0u;
+        uint8_t has_s2pf=p->has_s2pf?1u:0u;
+
+        tk->cluster=p->cluster;
+        tk->expert_id=p->expert_id;
+        tk->token_start_rank=p->token_start_rank;
+        tk->ntokens=p->ntokens;
+        tk->shape_s1=p->shape_s1;
+        tk->shape_s3=p->shape_s3;
+        tk->dma_s1=skip_s1?MOE_DMA_NONE:(kAlloc[p->shape_s1]>=128u?MOE_DMA_BOTH:MOE_DMA_IDMA);
+        tk->dma_s3=skip_s3?MOE_DMA_NONE:(kAlloc[p->shape_s3]>=128u?MOE_DMA_BOTH:MOE_DMA_XDMA);
+        tk->skip_s1=skip_s1;
+        tk->skip_s3=skip_s3;
+
+        if (skip_s1){
+            uint32_t b2=(ntok_u+kFullMdim-1u)/kFullMdim;
+            tk->m_s2_exec=b2; tk->skip_s2=0u;
+        } else {
+            uint32_t tail=(ntok_u>kMdim[p->shape_s1])?(ntok_u-kMdim[p->shape_s1]):0u;
+            uint32_t b2=(tail+kFullMdim-1u)/kFullMdim;
+            tk->m_s2_exec=b2; tk->skip_s2=(b2==0u)?1u:0u;
+        }
+        if (skip_s3){
+            uint32_t b4=(ntok_u+kFullMdim-1u)/kFullMdim;
+            tk->m_s4_exec=b4; tk->skip_s4=0u;
+        } else {
+            uint32_t tail4=(ntok_u>kMdim[p->shape_s3])?(ntok_u-kMdim[p->shape_s3]):0u;
+            uint32_t b4=(tail4+kFullMdim-1u)/kFullMdim;
+            tk->m_s4_exec=b4; tk->skip_s4=(b4==0u)?1u:0u;
+        }
+
+        if (!skip_s1){
+            if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
+            moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
+            op->task_idx=(uint16_t)out->n_tasks;
+            op->expert_id=(int16_t)p->expert_id;
+            op->kind=MOE_DMA_OP_S1;
+            op->dma=(kAlloc[p->shape_s1]>=128u)?MOE_DMA_BOTH:MOE_DMA_IDMA;
+        }
+
+        if (!skip_s3 || has_s2pf){
+            if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
+            moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
+            op->task_idx=(uint16_t)out->n_tasks;
+            op->expert_id=(int16_t)p->expert_id;
+            op->dma=(kAlloc[p->shape_s3]>=128u)?MOE_DMA_BOTH:MOE_DMA_XDMA;
+            op->kind=has_s2pf?MOE_DMA_OP_S2_PREFETCH:MOE_DMA_OP_S3;
+        }
+
+        if (pe->allow_s4pf){
+            if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
+            pending_valid[ci]=1u;
+            pending_op_idx[ci]=out->n_dma_ops;
+            pending_task_idx[ci]=(uint16_t)out->n_tasks;
+            moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
+            op->task_idx=(uint16_t)out->n_tasks;
+            op->expert_id=-1;
+            op->kind=MOE_DMA_OP_S4_PREFETCH;
+            op->dma=MOE_DMA_IDMA;
+        }
+
+        out->n_tasks++;
+    }
+
+    for (uint8_t ci=0;ci<2u;ci++){
+        if (pending_valid[ci]){
+            remove_dma_op(out,pending_op_idx[ci],pending_op_idx,pending_valid);
+            pending_valid[ci]=0u;
+        }
+    }
+
+    return MOE_OK;
+}
+
+static moe_status_t lower_plan(const plan_t *plan, uint8_t n_plan,
+                               const moe_request_t *req, moe_schedule_t *out)
+{
+    moe_hw_plan_entry_t hw_plan[MOE_MAX_TASKS];
+    if (n_plan>MOE_MAX_TASKS) return MOE_ERR_OVERFLOW;
+    for (uint8_t i=0;i<n_plan;i++) hw_plan[i]=hw_entry_from_plan(&plan[i]);
+    return moe_lower_hw_plan(req,hw_plan,n_plan,out);
+}
+
+moe_status_t moe_make_hw_plan(const moe_request_t *req,
+                              moe_hw_plan_entry_t *plan,
+                              uint16_t *n_plan)
+{
+    plan_t sw_plan[MOE_MAX_TASKS];
+    uint8_t sw_n=0u;
+
+    if (!req||!plan||!n_plan) return MOE_ERR_BAD_INPUT;
+    if (req->n_experts==0u||req->n_experts>MOE_MAX_EXPERTS) return MOE_ERR_BAD_INPUT;
+    for (uint16_t i=0;i<req->n_experts;i++){
+        if (req->experts[i].ntokens==0u) return MOE_ERR_BAD_INPUT;
+    }
+
+    (void)moe_plan(req,sw_plan,&sw_n);
+    for (uint8_t i=0;i<sw_n;i++) plan[i]=hw_entry_from_plan(&sw_plan[i]);
+    *n_plan=sw_n;
+    return MOE_OK;
+}
+
+#ifdef MOE_SCHEDULER_ENABLE_LEGACY_CHECK
+moe_status_t moe_schedule_legacy_timing(const moe_request_t *req, moe_schedule_t *out)
+{
+    if (!req || !out) return MOE_ERR_BAD_INPUT;
+    uint16_t ne=req->n_experts;
+    if (ne==0u||ne>MOE_MAX_EXPERTS) return MOE_ERR_BAD_INPUT;
+    for (uint16_t i=0u;i<ne;i++) if (req->experts[i].ntokens==0u) return MOE_ERR_BAD_INPUT;
+
+    static plan_t plan[MOE_MAX_TASKS];
+    uint8_t n_plan=0;
+    (void)moe_plan(req,plan,&n_plan);
+    return lower_plan_timing(plan,n_plan,req,out);
+}
+#endif
 
 /* =========================================================================
  * Entry point

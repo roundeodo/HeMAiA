@@ -219,6 +219,11 @@
       address: 83886080, // 0x0500_0000
       length: 65536, // 64 kiB 0x1_0000
     },
+    moe_scheduler: {
+      address: 83951616, // 0x0501_0000
+      length: 4096,
+    },
+
     // Use Vendor PLL
     use_vendor_pll: false
     // backup boot address
