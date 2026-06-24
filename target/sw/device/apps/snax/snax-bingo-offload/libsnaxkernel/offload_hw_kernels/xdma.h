@@ -32,6 +32,26 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_xdma_1d_copy(void *arg)
         uint32_t data_size = ((uint32_t *)arg)[4];
         bingo_kernel_scratchpad_t* sp = BINGO_GET_SP(arg, __snax_bingo_kernel_xdma_1d_copy_args_t);
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
+#if BINGO_DEBUG_LEVEL >= 1
+        if (data_size == 512u) {
+            volatile int16_t *src_dbg = (volatile int16_t *)(uintptr_t)src_addr;
+            volatile int16_t *dst_dbg = (volatile int16_t *)(uintptr_t)dst_addr;
+            printf_safe("[ROUTER_XDMA_DBG] pre src=0x%08x_%08x dst=0x%08x_%08x size=%u\r\n",
+                        (uint32_t)(src_addr >> 32), (uint32_t)src_addr,
+                        (uint32_t)(dst_addr >> 32), (uint32_t)dst_addr,
+                        data_size);
+            printf_safe("[ROUTER_XDMA_DBG] src16_pre %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n",
+                        src_dbg[0], src_dbg[1], src_dbg[2], src_dbg[3],
+                        src_dbg[4], src_dbg[5], src_dbg[6], src_dbg[7],
+                        src_dbg[8], src_dbg[9], src_dbg[10], src_dbg[11],
+                        src_dbg[12], src_dbg[13], src_dbg[14], src_dbg[15]);
+            printf_safe("[ROUTER_XDMA_DBG] dst16_pre %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n",
+                        dst_dbg[0], dst_dbg[1], dst_dbg[2], dst_dbg[3],
+                        dst_dbg[4], dst_dbg[5], dst_dbg[6], dst_dbg[7],
+                        dst_dbg[8], dst_dbg[9], dst_dbg[10], dst_dbg[11],
+                        dst_dbg[12], dst_dbg[13], dst_dbg[14], dst_dbg[15]);
+        }
+#endif
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_CFG_START);
         // xdma_memcpy_1d_fast_full_addr: 30 CSR writes (vs 60 for
         // xdma_disable_all_extensions+xdma_memcpy_1d_full_addr).
@@ -40,8 +60,23 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_xdma_1d_copy(void *arg)
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_CFG_END);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_RUN_START);
         int task_id = xdma_start();
+#if BINGO_DEBUG_LEVEL >= 1
+        if (data_size == 512u) {
+            printf_safe("[ROUTER_XDMA_DBG] started task_id=%d\r\n", task_id);
+        }
+#endif
         xdma_wait_task(src_addr, dst_addr, task_id);
         BINGO_TRACE_MARKER(BINGO_TRACE_XDMA_RUN_END);
+#if BINGO_DEBUG_LEVEL >= 1
+        if (data_size == 512u) {
+            volatile int16_t *dst_dbg = (volatile int16_t *)(uintptr_t)dst_addr;
+            printf_safe("[ROUTER_XDMA_DBG] dst16_post %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\r\n",
+                        dst_dbg[0], dst_dbg[1], dst_dbg[2], dst_dbg[3],
+                        dst_dbg[4], dst_dbg[5], dst_dbg[6], dst_dbg[7],
+                        dst_dbg[8], dst_dbg[9], dst_dbg[10], dst_dbg[11],
+                        dst_dbg[12], dst_dbg[13], dst_dbg[14], dst_dbg[15]);
+        }
+#endif
         XDMA_DEBUG_PRINT("XDMA copy completed\n");
         XDMA_DEBUG_PRINT("SRC ADDR = %lx\n", src_addr);
         XDMA_DEBUG_PRINT("DST ADDR = %lx\n", dst_addr);

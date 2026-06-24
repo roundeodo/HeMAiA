@@ -36,6 +36,14 @@ if NODE37_DIAG_MODE not in VALID_NODE37_DIAG_MODES:
 
 print(f"BINGO_NODE37_DIAG: {NODE37_DIAG_MODE}")
 
+ROUTER_ONLY_MODE = os.environ.get("BINGO_ROUTER_ONLY", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+print(f"BINGO_ROUTER_ONLY: {int(ROUTER_ONLY_MODE)}")
+
 
 def parse_inorder_completion_core_ids() -> set[int]:
     raw_core_ids = os.environ.get("BINGO_INORDER_CORE_IDS", "0").strip().lower()
@@ -153,6 +161,23 @@ def load_workload_config(args):
         hw_cfg = hjson.loads(hw_file.read())
 
     merged_config = {**param_cfg, **hw_cfg}
+    if ROUTER_ONLY_MODE:
+        # Match multi_cluster_MoE's router GEMM shape so the fast single-cluster
+        # micro-test exercises the same dual_vc_gemm_full reader/writer contract.
+        merged_config.update(
+            {
+                "array_shape": 0,
+                "A_meshRow": 8,
+                "A_tileSize": 8,
+                "down_meshCol": 8,
+                "router_M1": 4,
+                "router_K1": 128,
+                "router_N1": 1,
+                "router_M2": 1,
+                "router_K2": 1,
+                "router_N2": 2,
+            }
+        )
     merged_config["emit_mini_golden"] = args.emit_mini_golden
     return merged_config
 
@@ -192,6 +217,7 @@ def define_workload_params(**kwargs):
 
     params = {
         "app_name": "single_cluster_MoE",
+        "router_only_mode": ROUTER_ONLY_MODE,
         "num_double_buffers": num_double_buffers,
         "meshRow_A": meshRow_A,
         "tileSize_A": tileSize_A,
@@ -252,6 +278,19 @@ def define_workload_params(**kwargs):
     params["router_D_tileSize"] = (
         params["router_M1"] * params["router_N1"] * meshRow * meshCol * 2
     )
+    if ROUTER_ONLY_MODE:
+        params["router_A_tileSize"] = (
+            params["router_M2"]
+            * params["router_M1"]
+            * meshRow_A
+            * (params["router_K1"] * tileSize_A * 2 + 32)
+        )
+    params["router_B_vc_stride"] = params["router_B_tileSize"]
+    params["router_D_vc_stride"] = params["router_D_tileSize"]
+    params["router_D_total_bytes"] = (
+        params["router_D_tileSize"] * params["router_M2"] * params["router_N2"]
+    )
+    params["router_vc_N"] = params["router_N1"]
 
     # Shared expert gate+up (dual-VC SwiGLU)
     params["shared_swish_glu_A_tileSize"] = (
@@ -456,6 +495,42 @@ def define_memory_handles(params):
     """Defines memory symbols and handles."""
     mem_handles = {}
     mem_handles["L3_Sym_Input_A"] = BingoMemSymbol("input_A")
+
+    if params.get("router_only_mode", False):
+        chip_id = 0
+        cluster_id = 0
+        mem_handles["L3_Sym_Router_Input_A"] = BingoMemSymbol("input_A")
+        mem_handles["L3_Sym_Router_B"] = BingoMemSymbol("router_B")
+        mem_handles["L3_Sym_Golden_Router_Scores"] = BingoMemSymbol(
+            "golden_router_scores_i16"
+        )
+        mem_handles["L1_Buf_Router_A"] = BingoMemAlloc(
+            "l1_router_a",
+            size=params["router_A_tileSize"],
+            mem_level="L1",
+            chip_id=chip_id,
+            cluster_id=cluster_id,
+        )
+        mem_handles["L1_Buf_Router_B"] = BingoMemAlloc(
+            "l1_router_b",
+            size=params["router_B_tileSize"] * params["router_N2"],
+            mem_level="L1",
+            chip_id=chip_id,
+            cluster_id=cluster_id,
+        )
+        mem_handles["L1_Buf_Router_D"] = BingoMemAlloc(
+            "l1_router_d",
+            size=params["router_D_total_bytes"],
+            mem_level="L1",
+            chip_id=chip_id,
+            cluster_id=cluster_id,
+        )
+        mem_handles["L3_Alloc_Router_HW_Output"] = BingoMemAlloc(
+            "l3_router_hw_out",
+            size=params["router_D_total_bytes"],
+            mem_level="L3",
+        )
+        return mem_handles
 
     # Define memory Symbol
     # =========================================================================
@@ -1007,6 +1082,106 @@ def enforce_in_order_completion_per_core(bingo_dfg: BingoDFG) -> None:
         prev_node_per_lane[lane] = node
 
 
+def create_router_only_dfg(params, mem_handles):
+    """Fast micro-test for the multi_cluster router GEMM kernel."""
+    bingo_dfg = BingoDFG(
+        num_chiplets=1,
+        num_clusters_per_chiplet=4,
+        num_cores_per_cluster=2,
+        is_host_as_acc=True,
+        chiplet_ids=[0x00],
+    )
+
+    gemm_core_id = 0
+    dma_core_id = 1
+    host_core_id = 2
+
+    node_load_A = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=0,
+        assigned_core_id=dma_core_id,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mem_handles["L3_Sym_Router_Input_A"],
+            dst_addr=mem_handles["L1_Buf_Router_A"],
+            size=params["router_A_tileSize"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_load_A)
+
+    node_load_B = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=0,
+        assigned_core_id=dma_core_id,
+        kernel_name="__snax_bingo_kernel_idma_1d_copy",
+        kernel_args=SnaxBingoKernelIdma1dCopyArgs(
+            src_addr=mem_handles["L3_Sym_Router_B"],
+            dst_addr=mem_handles["L1_Buf_Router_B"],
+            size=params["router_B_tileSize"] * params["router_N2"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_load_B)
+
+    node_router_gemm = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=0,
+        assigned_core_id=gemm_core_id,
+        kernel_name="__snax_bingo_kernel_dual_vc_gemm_full",
+        kernel_args=SnaxBingoKernelDualVcGemmFullArgs(
+            input_A_addr=mem_handles["L1_Buf_Router_A"],
+            input_B0_addr=mem_handles["L1_Buf_Router_B"],
+            input_B1_addr=addr_with_optional_offset(
+                mem_handles["L1_Buf_Router_B"], params["router_B_vc_stride"]
+            ),
+            output_D0_addr=mem_handles["L1_Buf_Router_D"],
+            output_D1_addr=addr_with_optional_offset(
+                mem_handles["L1_Buf_Router_D"], params["router_D_vc_stride"]
+            ),
+            M=params["router_M1"],
+            K=params["router_K1"],
+            N=params["router_vc_N"],
+            array_shape=params["array_shape"],
+            rescale_mult=1,
+            rescale_shift=0,
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_router_gemm)
+    bingo_dfg.bingo_add_edge(node_load_A, node_router_gemm)
+    bingo_dfg.bingo_add_edge(node_load_B, node_router_gemm)
+
+    node_store_D = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=0,
+        assigned_core_id=host_core_id,
+        kernel_name="__host_bingo_kernel_idma",
+        kernel_args=HostBingoKernelIdmaArgs(
+            src_addr=mem_handles["L1_Buf_Router_D"],
+            dst_addr=mem_handles["L3_Alloc_Router_HW_Output"],
+            size=params["router_D_total_bytes"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_store_D)
+    bingo_dfg.bingo_add_edge(node_router_gemm, node_store_D)
+
+    node_check_D = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=0,
+        assigned_core_id=host_core_id,
+        kernel_name="__host_bingo_kernel_check_result",
+        kernel_args=HostBingoKernelCheckResultArgs(
+            golden_data_addr=mem_handles["L3_Sym_Golden_Router_Scores"],
+            output_data_addr=mem_handles["L3_Alloc_Router_HW_Output"],
+            data_size=params["router_D_total_bytes"],
+            name="router_raw_scores_i16",
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_check_D)
+    bingo_dfg.bingo_add_edge(node_store_D, node_check_D)
+
+    enforce_in_order_completion_per_core(bingo_dfg)
+    return bingo_dfg
+
+
 def create_dfg(params, mem_handles):
     """L15 MoE full FFN DFG：单次顺序执行，基线 timing 测试。
 
@@ -1026,6 +1201,9 @@ def create_dfg(params, mem_handles):
       dma_W2:  dual_dma W2l(64KB)‖W2r(64KB)      →  ~3,024 cc  (~3× CDC开销)
       compute: l15_full (Mode-0 SwiGLU+Mode-1 down) → ~19,855 cc
     """
+    if params.get("router_only_mode", False):
+        return create_router_only_dfg(params, mem_handles)
+
     N2 = params["shared_swish_glu_M2"]  # = 1 (sM2 M方向外循环，仅1次L15调用)
     w_bytes = params["l15_w_bytes"]  # = 262144 = 256KB，B0(gate)/B1(up) 各自大小
     delta_b1 = params["l15_delta_b1"]  # = 262416，B1 TCDM偏移

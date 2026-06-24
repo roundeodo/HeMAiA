@@ -78,14 +78,19 @@ void extract_top_k_indices_and_scores(
     uint32_t mc_mask = cfg->mesh_col - 1;
     uint32_t row_stride = cfg->router_n1 * cfg->mesh_row * cfg->mesh_col;
     uint32_t col_stride = cfg->mesh_row * cfg->mesh_col;
+    uint32_t tile_stride = cfg->router_m1 * row_stride;
+    uint32_t experts_per_n2_tile = cfg->router_n1 * cfg->mesh_col;
     uint32_t k = cfg->individual_expert_number_k;
 
     for (uint32_t r = 0; r < valid_tokens_in_block; r++)
     {
         for (uint32_t c = 0; c < cfg->expert_number_each_layer; c++)
         {
-            uint32_t mem_idx = (r >> mr_shift) * row_stride +
-                               (c >> mc_shift) * col_stride +
+            uint32_t n2 = c / experts_per_n2_tile;
+            uint32_t n1 = (c >> mc_shift) - n2 * cfg->router_n1;
+            uint32_t mem_idx = n2 * tile_stride +
+                               (r >> mr_shift) * row_stride +
+                               n1 * col_stride +
                                (r & mr_mask) * cfg->mesh_col +
                                (c & mc_mask);
             local_score[c] = (int32_t)sram_raw_score_buffer[mem_idx];  // sign-extend INT16→INT32

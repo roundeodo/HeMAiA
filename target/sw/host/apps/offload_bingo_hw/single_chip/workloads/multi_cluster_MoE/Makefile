@@ -43,7 +43,25 @@ $(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(DATA_CFG) $(HW_CFG)
 # Build settings
 ############### 
 # 启用 O(E) 快速调度路径（去掉此行则退回原版 O(E³×N⁴) 完整搜索）
-USER_FLAGS += -DMOE_SCHEDULE_FAST
+# The top-level HeMAiA Makefile forwards USER_FLAGS as a command-line
+# variable to recursive makes.  Plain "USER_FLAGS +=" assignments in this
+# workload Makefile would then be ignored by GNU make, so use "override" for
+# workload-local compile switches that must survive top-level builds.
+override USER_FLAGS += -DMOE_SCHEDULE_FAST
+
+# Optional production path: use the RTL scheduler MMIO slave for compact-plan
+# generation, then lower that compact plan on CVA6 into the existing MoE API
+# schedule.  Keep disabled by default so software-vs-hardware A/B builds can
+# use the same workload.
+MOE_HW_SCHEDULER ?= 0
+MOE_HW_SCHEDULER_CHECK ?= 0
+ifeq ($(MOE_HW_SCHEDULER), 1)
+override USER_FLAGS += -DMOE_ENABLE_HW_SCHEDULER
+endif
+ifeq ($(MOE_HW_SCHEDULER_CHECK), 1)
+override USER_FLAGS += -DMOE_ENABLE_HW_SCHEDULER_CHECK
+endif
+
 SRCS += $(MK_DIR)/moe_scheduler.c
 INCDIRS += $(MK_DIR)
 # Add the DATA_H to partial outputs

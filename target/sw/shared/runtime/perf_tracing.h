@@ -114,6 +114,11 @@
 // BINGO_TRACE_HOST_MOE_SCHED        wraps only the moe_schedule() call inside Phase 3
 // BINGO_TRACE_HOST_MOE_EXECUTE      wraps entire __host_bingo_kernel_moe_execute body (Phase 4 args lowering)
 // BINGO_TRACE_HOST_MOE_PRELOWER     wraps scheduler-result -> node-level call args lowering inside Phase 4
+// BINGO_TRACE_HOST_MOE_HW_SCHED     wraps CVA6 MMIO driving of the RTL scheduler
+// BINGO_TRACE_HOST_MOE_HW_LOWER     wraps RTL compact-plan -> moe_schedule_t lowering
+// BINGO_TRACE_HOST_MOE_PREPARE_INIT wraps pointer checks + request/schedule zero-init
+// BINGO_TRACE_HOST_MOE_SCHED_PRINT  wraps optional UART schedule dump
+// BINGO_TRACE_HOST_MOE_EXEC_*       split Phase 4 args programming and L3->L1 flushes
 #define BINGO_TRACE_HOST_MOE_PREPARE_START       0x2F0
 #define BINGO_TRACE_HOST_MOE_PREPARE_END         0x2F1
 #define BINGO_TRACE_HOST_MOE_SCHED_START         0x2F2
@@ -126,6 +131,26 @@
 #define BINGO_TRACE_HOST_MOE_REQUEST_BUILD_END   0x2F9
 #define BINGO_TRACE_HOST_MOE_PRELOWER_START      0x2FA
 #define BINGO_TRACE_HOST_MOE_PRELOWER_END        0x2FB
+#define BINGO_TRACE_HOST_MOE_HW_SCHED_START      0x2FC
+#define BINGO_TRACE_HOST_MOE_HW_SCHED_END        0x2FD
+#define BINGO_TRACE_HOST_MOE_HW_LOWER_START      0x2FE
+#define BINGO_TRACE_HOST_MOE_HW_LOWER_END        0x2FF
+#define BINGO_TRACE_HOST_MOE_PREPARE_INIT_START  0x300
+#define BINGO_TRACE_HOST_MOE_PREPARE_INIT_END    0x301
+#define BINGO_TRACE_HOST_MOE_SCHED_PRINT_START   0x302
+#define BINGO_TRACE_HOST_MOE_SCHED_PRINT_END     0x303
+#define BINGO_TRACE_HOST_MOE_EXEC_INIT_START     0x304
+#define BINGO_TRACE_HOST_MOE_EXEC_INIT_END       0x305
+#define BINGO_TRACE_HOST_MOE_EXEC_PROGRAM_START  0x306
+#define BINGO_TRACE_HOST_MOE_EXEC_PROGRAM_END    0x307
+#define BINGO_TRACE_HOST_MOE_EXEC_DMA_FILL_START 0x308
+#define BINGO_TRACE_HOST_MOE_EXEC_DMA_FILL_END   0x309
+#define BINGO_TRACE_HOST_MOE_EXEC_CAM_START      0x30A
+#define BINGO_TRACE_HOST_MOE_EXEC_CAM_END        0x30B
+#define BINGO_TRACE_HOST_MOE_EXEC_FLUSH0_START   0x30C
+#define BINGO_TRACE_HOST_MOE_EXEC_FLUSH0_END     0x30D
+#define BINGO_TRACE_HOST_MOE_EXEC_FLUSH1_START   0x30E
+#define BINGO_TRACE_HOST_MOE_EXEC_FLUSH1_END     0x30F
 
 // Computation Kernels: Compute/Run Phase
 // IDMA

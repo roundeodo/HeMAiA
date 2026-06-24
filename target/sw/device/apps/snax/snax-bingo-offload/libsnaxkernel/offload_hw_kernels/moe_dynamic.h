@@ -50,6 +50,10 @@
 // D writer: 4-lane postproc, single-port output = always 1 channel
 #define MOE_DUAL_VC_CHAN_EN_D              0x00000001u
 
+#ifndef BINGO_DEBUG_LEVEL
+#define BINGO_DEBUG_LEVEL 0
+#endif
+
 // Zero a TCDM byte range on the current core.  Use this only for bytes that
 // are semantically padding or intentionally invalid; clearing valid output
 // payload would hide writer coverage bugs.
@@ -308,27 +312,36 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_gemm_full(void *arg)
         return BINGO_RET_FAIL;
     }
 
-    // A: INT16, 6-dim temporal, 2-dim spatial (hw req., S_STRIDE_NUM_READER_0=2)
-    int32_t Asl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), 0 };
+    // A: INT16 token-contiguous rows.  multi_cluster_MoE routes the same
+    // input_A buffer used by the dynamic path: each token has K*tileSize*2
+    // payload bytes followed by 32B L3 padding.  The GEMM reader skips the
+    // padding by using a padded row stride while only streaming payload bytes.
+    uint32_t a_row_stride = K * tileSize * 2u + 32u;
+    int32_t Asl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), (int32_t)a_row_stride };
     int32_t Atb[6]       = { (int32_t)K, (int32_t)N, (int32_t)M, 1, 1, 1 };
-    int32_t Ats[6]       = { (int32_t)(meshRow * tileSize * 2), 0,
-                              (int32_t)(K * meshRow * tileSize * 2), 0, 0, 0 };
+    int32_t Ats[6]       = { (int32_t)(tileSize * 2), 0,
+                              (int32_t)(meshRow * a_row_stride), 0, 0, 0 };
     int32_t chan_en_A[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_A(array_shape) };
 
-    // B0: INT4 packed, 4-dim temporal, 2-dim spatial (hw req., S_STRIDE_NUM_READER_1=2)
-    // n_b_chan: active B channels per shape (S0=2, S1=4, S2=8)
-    uint32_t n_b_chan     = (array_shape == 0u) ? 2u : (array_shape == 1u) ? 4u : 8u;
+    // B0: INT4 packed, 4-dim temporal, 2-dim spatial.  Use the same canonical
+    // mode-1 B reader layout as the L15/reference kernels: per K tile the
+    // stream advances by 16B, while the second spatial stride covers the full
+    // K section.  A zero second spatial stride aliases active B channels and
+    // produces router scores that are self-consistent for TopK but not equal
+    // to the datagen GEMM.
+    uint32_t n_b_chan      = (array_shape == 0u) ? 2u : (array_shape == 1u) ? 4u : 8u;
     int32_t B_stream_bytes = (int32_t)(n_b_chan * (MOE_DUAL_VC_BANK_WIDTH / 8));
-    int32_t B0sl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), 0 };
-    int32_t B0tb[4]       = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
-    int32_t B0ts[4]       = { B_stream_bytes, (int32_t)(K * B_stream_bytes), 0, 0 };
-    int32_t chan_en_B0[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
+    uint32_t b_k_section   = K * tileSize * 2u;
+    int32_t B0sl[2]        = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), (int32_t)b_k_section };
+    int32_t B0tb[4]        = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
+    int32_t B0ts[4]        = { (int32_t)(tileSize * 2u), (int32_t)(K * B_stream_bytes), 0, 0 };
+    int32_t chan_en_B0[1]  = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
 
-    // B1: INT4 packed, same layout as B0, 2-dim spatial (hw req., S_STRIDE_NUM_READER_2=2)
-    int32_t B1sl[2]       = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), 0 };
-    int32_t B1tb[4]       = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
-    int32_t B1ts[4]       = { B_stream_bytes, (int32_t)(K * B_stream_bytes), 0, 0 };
-    int32_t chan_en_B1[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
+    // B1: INT4 packed, same canonical mode-1 layout as B0.
+    int32_t B1sl[2]        = { (int32_t)(MOE_DUAL_VC_BANK_WIDTH / 8), (int32_t)b_k_section };
+    int32_t B1tb[4]        = { (int32_t)K, (int32_t)N, (int32_t)M, 1 };
+    int32_t B1ts[4]        = { (int32_t)(tileSize * 2u), (int32_t)(K * B_stream_bytes), 0, 0 };
+    int32_t chan_en_B1[1]  = { (int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape) };
 
     // D0: INT16, 4-dim temporal (VC0 output, 4-lane postproc: 1ch, 8 bytes/beat)
     // NOTE: For L15 layout mode-1 down-proj, use __snax_bingo_kernel_dual_vc_l15_moe_full.
@@ -342,6 +355,31 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_gemm_full(void *arg)
     int32_t D1tb[4]       = { 8, (int32_t)N, (int32_t)M, 1 };
     int32_t D1ts[4]       = { 8, 64, (int32_t)(N * 64), 0 };
     int32_t chan_en_D1[1] = { (int32_t)MOE_DUAL_VC_CHAN_EN_D };
+
+#if BINGO_DEBUG_LEVEL >= 1
+    if (M == 4u && K == 128u && N == 1u && array_shape == 0u) {
+        volatile int16_t *A_dbg = (volatile int16_t *)(uintptr_t)A_addr;
+        volatile uint8_t *B0_dbg = (volatile uint8_t *)(uintptr_t)B0_addr;
+        volatile uint8_t *B1_dbg = (volatile uint8_t *)(uintptr_t)B1_addr;
+        printf_safe("[ROUTER_GEMM_DBG] args A=0x%08x B0=0x%08x B1=0x%08x D0=0x%08x D1=0x%08x M=%u K=%u N=%u shape=%u\r\n",
+                    A_addr, B0_addr, B1_addr, D0_addr, D1_addr, M, K, N, array_shape);
+        printf_safe("[ROUTER_GEMM_DBG] D_layout D0_row_stride=64 D1_minus_D0=%u D_tile_bytes=%u\r\n",
+                    (uint32_t)(D1_addr - D0_addr), (uint32_t)(M * N * 64u));
+        printf_safe("[ROUTER_GEMM_DBG] A16[0..7]=%d %d %d %d %d %d %d %d\r\n",
+                    A_dbg[0], A_dbg[1], A_dbg[2], A_dbg[3],
+                    A_dbg[4], A_dbg[5], A_dbg[6], A_dbg[7]);
+        printf_safe("[ROUTER_GEMM_DBG] B0u8[0..15]=%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\r\n",
+                    B0_dbg[0], B0_dbg[1], B0_dbg[2], B0_dbg[3],
+                    B0_dbg[4], B0_dbg[5], B0_dbg[6], B0_dbg[7],
+                    B0_dbg[8], B0_dbg[9], B0_dbg[10], B0_dbg[11],
+                    B0_dbg[12], B0_dbg[13], B0_dbg[14], B0_dbg[15]);
+        printf_safe("[ROUTER_GEMM_DBG] B1u8[0..15]=%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\r\n",
+                    B1_dbg[0], B1_dbg[1], B1_dbg[2], B1_dbg[3],
+                    B1_dbg[4], B1_dbg[5], B1_dbg[6], B1_dbg[7],
+                    B1_dbg[8], B1_dbg[9], B1_dbg[10], B1_dbg[11],
+                    B1_dbg[12], B1_dbg[13], B1_dbg[14], B1_dbg[15]);
+    }
+#endif
 
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
     moe_set_dual_versacore_streamer_csr(
@@ -369,6 +407,18 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_gemm_full(void *arg)
     moe_start_dual_vc_and_streamer();
     moe_wait_dual_vc_and_streamer();
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
+#if BINGO_DEBUG_LEVEL >= 1
+    if (M == 4u && K == 128u && N == 1u && array_shape == 0u) {
+        volatile int16_t *D0_dbg = (volatile int16_t *)(uintptr_t)D0_addr;
+        volatile int16_t *D1_dbg = (volatile int16_t *)(uintptr_t)D1_addr;
+        printf_safe("[ROUTER_GEMM_DBG] D0_16[0..7]=%d %d %d %d %d %d %d %d\r\n",
+                    D0_dbg[0], D0_dbg[1], D0_dbg[2], D0_dbg[3],
+                    D0_dbg[4], D0_dbg[5], D0_dbg[6], D0_dbg[7]);
+        printf_safe("[ROUTER_GEMM_DBG] D1_16[0..7]=%d %d %d %d %d %d %d %d\r\n",
+                    D1_dbg[0], D1_dbg[1], D1_dbg[2], D1_dbg[3],
+                    D1_dbg[4], D1_dbg[5], D1_dbg[6], D1_dbg[7]);
+    }
+#endif
     return BINGO_RET_SUCC;
 }
 
@@ -495,9 +545,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
 }
 /* ── Schedule verification debug: controlled by BINGO_DEBUG_LEVEL compile flag ──
  * Pass DEBUG_LEVEL=1 to make (→ -DBINGO_DEBUG_LEVEL=1) to enable slot prints. ── */
-#ifndef BINGO_DEBUG_LEVEL
-#define BINGO_DEBUG_LEVEL 0
-#endif
 #define MOE_DYN_DEBUG_SCHED_VERIFY (BINGO_DEBUG_LEVEL >= 1)
 
 /* ── ctrl-word field extractors ─────────────────────────────────────────────

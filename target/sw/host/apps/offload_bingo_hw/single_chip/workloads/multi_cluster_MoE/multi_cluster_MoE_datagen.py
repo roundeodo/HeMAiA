@@ -122,7 +122,13 @@ def emit_u8_array_lit(name, values):
 
 
 def find_top_k(scores_2D, k):
-    return np.argsort(scores_2D, axis=1)[:, ::-1][:, :k].astype(np.uint16)
+    expert_ids = np.arange(scores_2D.shape[1])
+    out = np.empty((scores_2D.shape[0], k), dtype=np.uint16)
+    for r, row in enumerate(scores_2D):
+        # Match find_top_k_expert(): sort by descending score, keep lower
+        # expert id first on ties because the C bubble pass swaps only on ">".
+        out[r] = np.lexsort((expert_ids, -row))[:k]
+    return out
 
 
 def pack_int4(values_flat):
@@ -157,6 +163,43 @@ def rescale_down_32to16(arr_int32, input_zp=0, mult=1, output_zp=0, shift=0):
         shifted_value = multiplied
     out = shifted_value.astype(np.int32).astype(np.int64) + int(output_zp)
     return np.clip(out, -32768, 32767).astype(np.int16)
+
+
+def router_scores_to_hw_d_layout(
+    scores,
+    rM1,
+    rN1,
+    rM2,
+    rN2,
+    meshRow,
+    meshCol,
+    mult=1,
+    shift=0,
+):
+    """Return router GEMM D in the same int16 layout consumed by host TopK."""
+    scores_i16 = rescale_down_32to16(scores, mult=mult, shift=shift)
+    M_total, N_router = scores_i16.shape
+    row_stride = rN1 * meshRow * meshCol
+    tile_stride = rM1 * row_stride
+    experts_per_n2_tile = rN1 * meshCol
+    out = np.zeros(rM2 * rN2 * tile_stride, dtype=np.int16)
+
+    for t in range(M_total):
+        m2 = t // (rM1 * meshRow)
+        local_t = t - m2 * (rM1 * meshRow)
+        for e in range(N_router):
+            n2 = e // experts_per_n2_tile
+            n1 = (e // meshCol) - n2 * rN1
+            idx = (
+                m2 * rN2 * tile_stride
+                + n2 * tile_stride
+                + (local_t // meshRow) * row_stride
+                + n1 * meshRow * meshCol
+                + (local_t % meshRow) * meshCol
+                + (e % meshCol)
+            )
+            out[idx] = scores_i16[t, e]
+    return out
 
 
 def apply_silu_vectorized(arr_int16):
@@ -896,8 +939,9 @@ def emit_moe_data(**kw):
     ]:
         data_str += [format_scalar_definition("uint32_t", nm, val)]
 
-    # input_A (tiled layout with per-token L3 padding for 1 DMA/token gather)
-    log("generating input_A (INT16, tiled, with 32B/token L3 padding)")
+    # input_A: token-contiguous INT16 rows with 32B/token L3 padding.
+    # Router and dynamic gather both consume this physical input buffer.
+    log("generating input_A (INT16, token-contiguous, with 32B/token L3 padding)")
     A_phys = np.random.randint(
         -256, 255, size=(rM2, rM1, meshRow_A, K1_A, tileSize_A), dtype=np.int16
     )
@@ -915,19 +959,18 @@ def emit_moe_data(**kw):
     if pad:
         A_flat = np.pad(A_flat, (0, pad), constant_values=0)
     data_str += [format_vector_definition("uint8_t", "input_A", A_flat)]
-    A_tiled_phys = np.ascontiguousarray(A_phys.transpose(0, 1, 3, 2, 4))
-    A_tiled_flat = A_tiled_phys.view(np.uint8).reshape(-1)
-    pad = (-len(A_tiled_flat)) % 64
-    if pad:
-        A_tiled_flat = np.pad(A_tiled_flat, (0, pad), constant_values=0)
-    data_str += [format_vector_definition("uint8_t", "input_A_tiled", A_tiled_flat)]
 
     # router_B
     log("generating router_B (INT4 packed)")
     rB_values = np.random.randint(
         -7, 7, size=(rN2, rK2 * rK1, rN1, tileSize, meshCol), dtype=np.int8
     )
-    data_str += [format_vector_definition("uint8_t", "router_B", pack_int4(rB_values))]
+    # Hardware B streamer order is (N2, N1, K, meshCol, tileSize).  Keep the
+    # logical rB_values tensor in (N2, K, N1, tileSize, meshCol) for golden
+    # construction, but emit the byte stream in the order consumed by
+    # dual_vc_gemm_full.
+    rB_stream = np.ascontiguousarray(rB_values.transpose(0, 2, 1, 4, 3))
+    data_str += [format_vector_definition("uint8_t", "router_B", pack_int4(rB_stream))]
 
     # TopK golden
     log("computing TopK")
@@ -936,7 +979,15 @@ def emit_moe_data(**kw):
         rB_values.transpose(0, 2, 4, 1, 3).reshape(N_router, K_total).T.astype(np.int32)
     )
     scores = A_mat @ rB_mat
-    topk_idx = find_top_k(scores, top_k)
+    scores_i16 = rescale_down_32to16(scores, mult=1, shift=0)
+    router_d_i16 = router_scores_to_hw_d_layout(
+        scores, rM1, rN1, rM2, rN2, meshRow, meshCol, mult=1, shift=0
+    )
+    # Runtime TopK consumes the INT16 router GEMM output buffer, then
+    # sign-extends each score to INT32 before comparing.  The golden TopK must
+    # therefore use the same saturated INT16 scores, not the full INT32
+    # accumulators.
+    topk_idx = find_top_k(scores_i16.astype(np.int32), top_k)
     exp_counts = np.zeros(num_indiv_experts, dtype=np.uint32)
     for t in range(M_total):
         for s in range(top_k):
@@ -945,6 +996,11 @@ def emit_moe_data(**kw):
     data_str += [
         format_vector_definition(
             "uint16_t", "golden_topk_indices", topk_idx.reshape(-1)
+        )
+    ]
+    data_str += [
+        format_vector_definition(
+            "int16_t", "golden_router_scores_i16", router_d_i16.reshape(-1)
         )
     ]
     data_str += [
@@ -961,7 +1017,10 @@ def emit_moe_data(**kw):
     )
     data_str += [
         format_vector_definition(
-            "uint8_t", "indiv_gate_B", pack_int4(gB_phys), alignment=128
+            "uint8_t",
+            "indiv_gate_B",
+            pack_int4(np.ascontiguousarray(gB_phys.transpose(0, 1, 2, 3, 5, 4))),
+            alignment=128,
         )
     ]
     data_str += [
@@ -980,7 +1039,10 @@ def emit_moe_data(**kw):
     )
     data_str += [
         format_vector_definition(
-            "uint8_t", "indiv_up_B", pack_int4(uB_phys), alignment=64
+            "uint8_t",
+            "indiv_up_B",
+            pack_int4(np.ascontiguousarray(uB_phys.transpose(0, 1, 2, 3, 5, 4))),
+            alignment=64,
         )
     ]
     dB_phys = np.random.randint(
@@ -991,7 +1053,10 @@ def emit_moe_data(**kw):
     )
     data_str += [
         format_vector_definition(
-            "uint8_t", "indiv_down_B", pack_int4(dB_phys), alignment=64
+            "uint8_t",
+            "indiv_down_B",
+            pack_int4(np.ascontiguousarray(dB_phys.transpose(0, 1, 2, 3, 4, 6, 5))),
+            alignment=64,
         )
     ]
 
@@ -1006,7 +1071,10 @@ def emit_moe_data(**kw):
         )
         data_str += [
             format_vector_definition(
-                "uint8_t", "shared_gate_B", pack_int4(sgB), alignment=128
+                "uint8_t",
+                "shared_gate_B",
+                pack_int4(np.ascontiguousarray(sgB.transpose(0, 1, 2, 3, 5, 4))),
+                alignment=128,
             )
         ]
         data_str += [
@@ -1025,7 +1093,10 @@ def emit_moe_data(**kw):
         )
         data_str += [
             format_vector_definition(
-                "uint8_t", "shared_up_B", pack_int4(suB), alignment=64
+                "uint8_t",
+                "shared_up_B",
+                pack_int4(np.ascontiguousarray(suB.transpose(0, 1, 2, 3, 5, 4))),
+                alignment=64,
             )
         ]
         sdB = np.random.randint(
@@ -1036,7 +1107,10 @@ def emit_moe_data(**kw):
         )
         data_str += [
             format_vector_definition(
-                "uint8_t", "shared_down_B", pack_int4(sdB), alignment=64
+                "uint8_t",
+                "shared_down_B",
+                pack_int4(np.ascontiguousarray(sdB.transpose(0, 1, 2, 3, 4, 6, 5))),
+                alignment=64,
             )
         ]
 
@@ -1086,7 +1160,6 @@ def emit_moe_data(**kw):
         ("router_B_tilesize", rB_tile),
         ("indiv_B_tilesize", iB_tile),
         ("indiv_down_B_tilesize", idB_tile),
-        ("shared_A_tilesize", sA_tile),
         ("shared_B_tilesize", sB_tile),
         ("shared_D_tilesize", sD_tile),
         ("shared_down_D_tilesize", sdD_tile),

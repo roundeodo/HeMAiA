@@ -14,10 +14,11 @@
     array_shape: 0
 
     // Dynamic expert task slots per individual-expert cluster.
-    // Reduced from 16→4: new struct is 256B (vs 512B), so 4×256=1024B per cluster.
-    // Current generated DFG provides 4 runtime slots per cluster. The host lowering
-    // fails if moe_schedule() emits more than 4 tasks for either C2 or C3.
-    moe_dynamic_slot_count: 4
+    // This must cover the largest number of scheduled tasks assigned to either
+    // C2 or C3. Router TopK can emit more than 4 active experts per side, so
+    // keep the runtime slot count aligned with main_bingo.py's conservative
+    // default instead of truncating Phase 4 lowering.
+    moe_dynamic_slot_count: 32
 
     // Router: K_total=1024, N_router=8, M_total=1×4×8=32 tokens
     router_K1: 128

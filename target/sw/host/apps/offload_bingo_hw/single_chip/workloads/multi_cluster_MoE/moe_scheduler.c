@@ -21,6 +21,7 @@
 #include "moe_scheduler.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 /* =========================================================================
  * Shape constants (indexed 0=A, 1=B, 2=C)

@@ -94,6 +94,61 @@ def softmax_golden_model(raw_scores_2D, expert_number_k, softmax_scale):
     return top_k_indices, top_k_probability
 
 
+def rescale_down_32to16(arr_int32, input_zp=0, mult=1, output_zp=0, shift=0):
+    result = arr_int32.astype(np.int64) - int(input_zp)
+    multiplied = result * np.int64(mult)
+    if shift > 0:
+        shifted_one = np.int64(1) << (shift - 1)
+        shifted_data = multiplied + shifted_one
+        scaled_32 = np.where(
+            result >= 0,
+            shifted_data + np.int64(1 << 30),
+            shifted_data - np.int64(1 << 30),
+        )
+        correct_shift = np.where(shift > 31, scaled_32, shifted_data)
+        shifted_value = correct_shift >> shift
+    else:
+        shifted_value = multiplied
+    out = shifted_value.astype(np.int32).astype(np.int64) + int(output_zp)
+    return np.clip(out, -32768, 32767).astype(np.int16)
+
+
+def router_scores_to_hw_d_layout(
+    scores,
+    rM1,
+    rN1,
+    rM2,
+    rN2,
+    meshRow,
+    meshCol,
+    mult=1,
+    shift=0,
+):
+    scores_i16 = rescale_down_32to16(scores, mult=mult, shift=shift)
+    M_total, N_router = scores_i16.shape
+    row_stride = rN1 * meshRow * meshCol
+    tile_stride = rM1 * row_stride
+    experts_per_n2_tile = rN1 * meshCol
+    out = np.zeros(rM2 * rN2 * tile_stride, dtype=np.int16)
+
+    for t in range(M_total):
+        m2 = t // (rM1 * meshRow)
+        local_t = t - m2 * (rM1 * meshRow)
+        for e in range(N_router):
+            n2 = e // experts_per_n2_tile
+            n1 = (e // meshCol) - n2 * rN1
+            idx = (
+                m2 * rN2 * tile_stride
+                + n2 * tile_stride
+                + (local_t // meshRow) * row_stride
+                + n1 * meshRow * meshCol
+                + (local_t % meshRow) * meshCol
+                + (e % meshCol)
+            )
+            out[idx] = scores_i16[t, e]
+    return out
+
+
 def swish_glu_golden_model(gate_data, up_data, scale_in, scale_out):
     gate_f = gate_data.astype(np.float32) * scale_in
     up_f = up_data.astype(np.float32) * scale_in
@@ -107,6 +162,27 @@ def emit_MoE_data(**kwargs):
     MoE_config = parse_header_config(os.path.join(CURRENT_DIR, "MoE_common_variable.h"))
     data_str = []
     full_golden_data = kwargs.get("full_golden_data", False)
+    router_only_mode = os.environ.get("BINGO_ROUTER_ONLY", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if router_only_mode:
+        kwargs.update(
+            {
+                "array_shape": 0,
+                "A_meshRow": 8,
+                "A_tileSize": 8,
+                "down_meshCol": 8,
+                "router_M1": 4,
+                "router_K1": 128,
+                "router_N1": 1,
+                "router_M2": 1,
+                "router_K2": 1,
+                "router_N2": 2,
+            }
+        )
 
     # ---- Resolve hardware template (single-VC or dual-VC) ----
     core_tmpl = kwargs.get("snax_versacore_core_template") or kwargs.get(
@@ -257,7 +333,12 @@ def emit_MoE_data(**kwargs):
     A_phys = np.random.randint(
         -256, 255, size=(rM2, rM1, meshRow_A, K1_A, tileSize_A), dtype=np.int16
     )
-    A_flat = A_phys.view(np.uint8).reshape(-1)
+    if router_only_mode:
+        A_token_data = A_phys.reshape(M_total, K1_A * tileSize_A).view(np.uint8)
+        A_token_pad = np.zeros((M_total, 32), dtype=np.uint8)
+        A_flat = np.concatenate([A_token_data, A_token_pad], axis=1).reshape(-1)
+    else:
+        A_flat = A_phys.view(np.uint8).reshape(-1)
     pad = (-len(A_flat)) % 64
     if pad:
         A_flat = np.pad(A_flat, (0, pad), constant_values=0)
@@ -282,9 +363,40 @@ def emit_MoE_data(**kwargs):
     router_B_phys = np.random.randint(
         -7, 7, size=(rN2, rK2 * rK1, rN1, tileSize, meshCol), dtype=np.int8
     )
+    # The B streamer feeds VersaCore in (N2, N1, K, meshCol, tileSize) order.
+    # Keep router_B_phys in logical datagen shape for golden construction, but
+    # pack the physical byte stream in the order consumed by the hardware.
+    router_B_stream = np.ascontiguousarray(router_B_phys.transpose(0, 2, 1, 4, 3))
     data_str += [
-        format_vector_definition("uint8_t", "router_B", pack_int4(router_B_phys))
+        format_vector_definition("uint8_t", "router_B", pack_int4(router_B_stream))
     ]
+
+    if router_only_mode:
+        rB_mat = (
+            router_B_phys.transpose(0, 2, 4, 1, 3)
+            .reshape(N_router, K_total)
+            .astype(np.int32)
+        )
+        router_scores = A_matrix @ rB_mat.T
+        router_d_i16 = router_scores_to_hw_d_layout(
+            router_scores, rM1, rN1, rM2, rN2, meshRow, meshCol, mult=1, shift=0
+        )
+        data_str += [
+            format_vector_definition(
+                "int16_t", "golden_router_scores_i16", router_d_i16.reshape(-1)
+            )
+        ]
+        data_str += [
+            format_vector_definition(
+                "int8_t", "layer_output", np.zeros(1, dtype=np.int8)
+            )
+        ]
+        log_progress(
+            "router-only data: "
+            f"A={len(A_flat)}B B={len(pack_int4(router_B_stream))}B "
+            f"D_golden={router_d_i16.nbytes}B"
+        )
+        return data_str
 
     log_progress("generating shared expert gate/up B (INT4 packed)")
 
@@ -303,7 +415,11 @@ def emit_MoE_data(**kwargs):
         format_vector_definition(
             "uint8_t",
             "shared_experts_gate_B",
-            pack_int4(shared_experts_gate_B_phys),
+            pack_int4(
+                np.ascontiguousarray(
+                    shared_experts_gate_B_phys.transpose(0, 1, 3, 2, 5, 4)
+                )
+            ),
         )
     ]
 
@@ -317,7 +433,11 @@ def emit_MoE_data(**kwargs):
         format_vector_definition(
             "uint8_t",
             "shared_experts_up_projection_B",
-            pack_int4(shared_experts_up_projection_B_phys),
+            pack_int4(
+                np.ascontiguousarray(
+                    shared_experts_up_projection_B_phys.transpose(0, 1, 3, 2, 5, 4)
+                )
+            ),
         )
     ]
 
@@ -347,7 +467,13 @@ def emit_MoE_data(**kwargs):
         format_vector_definition(
             "uint8_t",
             "shared_experts_down_projection_B",
-            pack_int4(shared_experts_down_projection_B_phys),
+            pack_int4(
+                np.ascontiguousarray(
+                    shared_experts_down_projection_B_phys.transpose(
+                        0, 1, 2, 4, 3, 6, 5
+                    )
+                )
+            ),
         )
     ]
 
@@ -367,7 +493,11 @@ def emit_MoE_data(**kwargs):
         format_vector_definition(
             "uint8_t",
             "individual_experts_gate_B",
-            pack_int4(individual_experts_gate_B_phys),
+            pack_int4(
+                np.ascontiguousarray(
+                    individual_experts_gate_B_phys.transpose(0, 1, 3, 2, 5, 4)
+                )
+            ),
         )
     ]
 
@@ -381,7 +511,11 @@ def emit_MoE_data(**kwargs):
         format_vector_definition(
             "uint8_t",
             "individual_experts_up_projection_B",
-            pack_int4(individual_experts_up_projection_B_phys),
+            pack_int4(
+                np.ascontiguousarray(
+                    individual_experts_up_projection_B_phys.transpose(0, 1, 3, 2, 5, 4)
+                )
+            ),
         )
     ]
 
@@ -401,7 +535,13 @@ def emit_MoE_data(**kwargs):
         format_vector_definition(
             "uint8_t",
             "individual_experts_down_projection_B",
-            pack_int4(individual_experts_down_projection_B_phys),
+            pack_int4(
+                np.ascontiguousarray(
+                    individual_experts_down_projection_B_phys.transpose(
+                        0, 1, 2, 4, 3, 6, 5
+                    )
+                )
+            ),
         )
     ]
 
