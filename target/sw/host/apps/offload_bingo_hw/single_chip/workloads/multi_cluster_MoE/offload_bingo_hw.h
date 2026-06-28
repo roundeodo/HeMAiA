@@ -540,6 +540,7 @@ int kernel_execution(){
         // 1. Memory Allocations
         uint64_t ptr_c0_l1_layout = bingo_l1_alloc(0x00, 0, 954988);
         uint64_t ptr_c1_l1_layout = bingo_l1_alloc(0x00, 1, 954988);
+        uint64_t ptr_c2_indiv_active_state = bingo_l1_alloc(0x00, 2, 64);
         uint64_t ptr_c2_indiv_dyn_args = bingo_l1_alloc(0x00, 2, 20480);
         uint64_t ptr_c2_indiv_l1_a = bingo_l1_alloc(0x00, 2, 65536);
         uint64_t ptr_c2_indiv_l1_b_down = bingo_l1_alloc(0x00, 2, 262144);
@@ -548,6 +549,7 @@ int kernel_execution(){
         uint64_t ptr_c2_indiv_l1_d = bingo_l1_alloc(0x00, 2, 32768);
         uint64_t ptr_c2_indiv_l1_d1_scratch = bingo_l1_alloc(0x00, 2, 16384);
         uint64_t ptr_c2_indiv_l1_down_d = bingo_l1_alloc(0x00, 2, 65536);
+        uint64_t ptr_c3_indiv_active_state = bingo_l1_alloc(0x00, 3, 64);
         uint64_t ptr_c3_indiv_dyn_args = bingo_l1_alloc(0x00, 3, 20480);
         uint64_t ptr_c3_indiv_l1_a = bingo_l1_alloc(0x00, 3, 65536);
         uint64_t ptr_c3_indiv_l1_b_down = bingo_l1_alloc(0x00, 3, 262144);
@@ -568,7 +570,7 @@ int kernel_execution(){
         uint64_t ptr_l3_expert_token_offsets = bingo_l3_alloc(0x00, 36);
         uint64_t ptr_l3_indiv_down_out = bingo_l3_alloc(0x00, 524288);
         uint64_t ptr_l3_moe_request = bingo_l3_alloc(0x00, 256);
-        uint64_t ptr_l3_moe_runtime_state = bingo_l3_alloc(0x00, 16);
+        uint64_t ptr_l3_moe_runtime_state = bingo_l3_alloc(0x00, 64);
         uint64_t ptr_l3_moe_schedule = bingo_l3_alloc(0x00, 32768);
         uint64_t ptr_l3_router_out = bingo_l3_alloc(0x00, 512);
         uint64_t ptr_l3_shared_down_out = bingo_l3_alloc(0x00, 133120);
@@ -933,6 +935,7 @@ int kernel_execution(){
         args_host_chip00_26->hardware_output_buffer_addr = (uint64_t)ptr_l3_router_out;
         args_host_chip00_26->global_indices_out_addr = (uint64_t)ptr_l3_topk_idx;
         args_host_chip00_26->global_scores_out_addr = (uint64_t)ptr_l3_topk_scores;
+        args_host_chip00_26->expert_token_counts_out_addr = (uint64_t)ptr_l3_expert_counts;
         args_host_chip00_26->expert_number_each_layer = 8;
         args_host_chip00_26->individual_expert_number_k = 2;
         args_host_chip00_26->mesh_row = 8;
@@ -955,6 +958,12 @@ int kernel_execution(){
         args_host_chip00_27->topk_indices_l3 = (uint64_t)ptr_l3_topk_idx;
         args_host_chip00_27->M_total = 32;
         args_host_chip00_27->top_k = 2;
+        args_host_chip00_27->expert_token_counts_valid = 1;
+        args_host_chip00_27->runtime_state_addr = (uint64_t)ptr_l3_moe_runtime_state;
+        args_host_chip00_27->c2_stage_base = (uint64_t)ptr_l3_c2_stage;
+        args_host_chip00_27->c3_stage_base = (uint64_t)ptr_l3_c3_stage;
+        args_host_chip00_27->dynamic_arg_slot_bytes = 640;
+        args_host_chip00_27->dynamic_num_slots = 32;
         args_host_chip00_27->scratchpad_ptr = (uint64_t)(uintptr_t)sp_host_27;
         host_arg_list_chip_00[4] = (uint64_t)(uintptr_t)args_host_chip00_27;
         host_kernel_list_chip_00[4] = (uint64_t)(uintptr_t)&__host_bingo_kernel_moe_prepare_request;
@@ -987,6 +996,8 @@ int kernel_execution(){
         args_host_chip00_28->c3_l1_d1_scratch = (uint64_t)ptr_c3_indiv_l1_d1_scratch;
         args_host_chip00_28->output_l3_addr = (uint64_t)ptr_l3_indiv_down_out;
         args_host_chip00_28->runtime_state_addr = (uint64_t)ptr_l3_moe_runtime_state;
+        args_host_chip00_28->c2_active_state_l1_addr = (uint64_t)ptr_c2_indiv_active_state;
+        args_host_chip00_28->c3_active_state_l1_addr = (uint64_t)ptr_c3_indiv_active_state;
         args_host_chip00_28->A_token_bytes = 2048;
         args_host_chip00_28->indiv_B_expert_stride = 262144;
         args_host_chip00_28->indiv_down_B_expert_stride = 262144;
@@ -1018,6 +1029,8 @@ int kernel_execution(){
         args_host_chip00_28->scratchpad_ptr = (uint64_t)(uintptr_t)sp_host_28;
         host_arg_list_chip_00[5] = (uint64_t)(uintptr_t)args_host_chip00_28;
         host_kernel_list_chip_00[5] = (uint64_t)(uintptr_t)&__host_bingo_kernel_moe_execute;
+        // One-time initialization of C2/C3 dynamic slot templates.
+        if (__host_moe_init_stage_templates(args_host_chip00_28) != BINGO_RET_SUCC) return BINGO_RET_FAIL;
         // Node ID: 29 Node_ID0_Chiplet0_Cluster0_Core2_Kernel__host_bingo_kernel_entry (__host_bingo_kernel_entry)
         host_arg_list_chip_00[6] = 0;
         host_kernel_list_chip_00[6] = (uint64_t)(uintptr_t)&__host_bingo_kernel_entry;

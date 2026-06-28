@@ -11,6 +11,7 @@
 
 #include "chip_id.h"
 #include "io.h"
+#include "perf_tracing.h"
 #include "uart.h"
 #include "moe_scheduler.h"
 
@@ -30,11 +31,24 @@
 #define MOE_SCHED_PLAN1     0x48u
 #define MOE_SCHED_PLAN_META 0x50u
 #define MOE_SCHED_MAKESPAN  0x58u
+#define MOE_SCHED_HEAD_PUSH 0x60u
+#define MOE_SCHED_ROUND_COMMIT 0x68u
+#define MOE_SCHED_HEAD_PUSH0   0x70u
+#define MOE_SCHED_HEAD_PUSH1   0x78u
+#define MOE_SCHED_PLAN_FIFO_STATUS 0x80u
+#define MOE_SCHED_PLAN_FIFO_META   0x88u
+#define MOE_SCHED_PLAN_FIFO_DATA0  0x90u
+#define MOE_SCHED_PLAN_FIFO_DATA1  0x98u
+#define MOE_SCHED_PLAN_FIFO_POP    0xa0u
 
 #define MOE_SCHED_CTRL_INIT         (1ull << 0)
 #define MOE_SCHED_CTRL_START        (1ull << 1)
 #define MOE_SCHED_CTRL_REMOVE_READY (1ull << 2)
 #define MOE_SCHED_CTRL_PLAN_POP     (1ull << 3)
+
+#define MOE_SCHED_COMMIT_PLAN_POP     (1ull << 0)
+#define MOE_SCHED_COMMIT_REMOVE_READY (1ull << 1)
+#define MOE_SCHED_COMMIT_START_NEXT   (1ull << 2)
 
 #define MOE_SCHED_STATUS_BUSY         (1ull << 0)
 #define MOE_SCHED_STATUS_DONE         (1ull << 1)
@@ -61,40 +75,45 @@ typedef struct {
 } moe_sched_head_t;
 
 typedef struct {
-    uint8_t cluster;
-    uint8_t eid;
-    uint16_t ntok;
-    uint16_t tok_start;
-    uint8_t s1;
-    uint8_t s3;
-    uint8_t skip_s1;
-    uint8_t skip_s3;
-    uint8_t has_s2pf;
-    uint8_t allow_s4pf;
-} moe_sched_task_t;
-
-typedef struct {
     uint16_t eid;
     uint16_t ntokens;
     uint16_t best_conc;
     uint8_t active;
 } moe_sched_rem_item_t;
 
+typedef int (*moe_sched_plan_entry_cb_t)(const moe_hw_plan_entry_t *entry,
+                                         void *ctx);
+
 static inline uintptr_t moe_sched_base(void)
 {
     return (uintptr_t)chiplet_addr_transform((uint64_t)MOE_SCHED_LOCAL_BASE);
 }
 
-static inline void moe_sched_write64(uint32_t off, uint64_t value)
+static inline void moe_sched_fence(void)
+{
+    asm volatile("fence iorw, iorw" ::: "memory");
+}
+
+static inline void moe_sched_write64_relaxed(uint32_t off, uint64_t value)
 {
     writed(value, moe_sched_base() + (uintptr_t)off);
-    asm volatile("fence iorw, iorw" ::: "memory");
+}
+
+static inline uint64_t moe_sched_read64_relaxed(uint32_t off)
+{
+    return readd(moe_sched_base() + (uintptr_t)off);
+}
+
+static inline void moe_sched_write64(uint32_t off, uint64_t value)
+{
+    moe_sched_write64_relaxed(off, value);
+    moe_sched_fence();
 }
 
 static inline uint64_t moe_sched_read64(uint32_t off)
 {
-    asm volatile("fence iorw, iorw" ::: "memory");
-    return readd(moe_sched_base() + (uintptr_t)off);
+    moe_sched_fence();
+    return moe_sched_read64_relaxed(off);
 }
 
 static inline uint64_t moe_sched_pack_config(uint8_t cache_eid_c2,
@@ -121,21 +140,26 @@ static inline uint64_t moe_sched_pack_head(moe_sched_head_t h)
     return word;
 }
 
-static inline moe_sched_task_t moe_sched_unpack_task(uint64_t word)
+static inline uint64_t moe_sched_pack_round_commit(uint32_t plan_pop,
+                                                   uint32_t remove_ready,
+                                                   uint32_t start_next,
+                                                   uint32_t push_count,
+                                                   uint32_t consumed_count)
 {
-    moe_sched_task_t task;
-    memset(&task, 0, sizeof(task));
-    task.has_s2pf   = (uint8_t)((word >> 0) & 0x1u);
-    task.skip_s3    = (uint8_t)((word >> 1) & 0x1u);
-    task.skip_s1    = (uint8_t)((word >> 2) & 0x1u);
-    task.s3         = (uint8_t)((word >> 3) & 0x3u);
-    task.s1         = (uint8_t)((word >> 5) & 0x3u);
-    task.tok_start  = (uint16_t)((word >> 7) & 0x1ffu);
-    task.ntok       = (uint16_t)((word >> 16) & 0x1ffu);
-    task.eid        = (uint8_t)((word >> 25) & 0x3fu);
-    task.cluster    = (uint8_t)((word >> 31) & 0x1u);
-    task.allow_s4pf = (uint8_t)((word >> 32) & 0x1u);
-    return task;
+    uint64_t word = 0;
+
+    if (plan_pop != 0u) {
+        word |= MOE_SCHED_COMMIT_PLAN_POP;
+    }
+    if (remove_ready != 0u) {
+        word |= MOE_SCHED_COMMIT_REMOVE_READY;
+    }
+    if (start_next != 0u) {
+        word |= MOE_SCHED_COMMIT_START_NEXT;
+    }
+    word |= ((uint64_t)(push_count & 0x3u) << 4);
+    word |= ((uint64_t)(consumed_count & 0xffu) << 8);
+    return word;
 }
 
 static inline uint16_t moe_sched_best_conc(uint16_t ntok)
@@ -143,11 +167,32 @@ static inline uint16_t moe_sched_best_conc(uint16_t ntok)
     return (uint16_t)(((ntok + 3u) >> 2) * 6u);
 }
 
+static inline int moe_sched_note_unique_eid(uint8_t eid,
+                                            uint8_t removed_eids[2],
+                                            uint32_t *removed_count)
+{
+    if (removed_eids == NULL || removed_count == NULL) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < *removed_count; i++) {
+        if (removed_eids[i] == eid) {
+            return 0;
+        }
+    }
+    if (*removed_count >= 2u) {
+        return -1;
+    }
+    removed_eids[*removed_count] = eid;
+    (*removed_count)++;
+    return 0;
+}
+
 static inline int moe_sched_wait_done(uint64_t *status_out)
 {
     for (uint32_t i = 0; i < MOE_SCHED_TIMEOUT_POLLS; i++) {
-        uint64_t status = moe_sched_read64(MOE_SCHED_STATUS);
+        uint64_t status = moe_sched_read64_relaxed(MOE_SCHED_STATUS);
         if ((status & MOE_SCHED_STATUS_DONE) != 0u) {
+            moe_sched_fence();
             if (status_out != NULL) {
                 *status_out = status;
             }
@@ -155,17 +200,10 @@ static inline int moe_sched_wait_done(uint64_t *status_out)
         }
     }
     if (status_out != NULL) {
-        *status_out = moe_sched_read64(MOE_SCHED_STATUS);
+        moe_sched_fence();
+        *status_out = moe_sched_read64_relaxed(MOE_SCHED_STATUS);
     }
     return -1;
-}
-
-static inline void moe_sched_clear_heads(void)
-{
-    moe_sched_write64(MOE_SCHED_HEAD0, 0);
-    moe_sched_write64(MOE_SCHED_HEAD1, 0);
-    moe_sched_write64(MOE_SCHED_HEAD2, 0);
-    moe_sched_write64(MOE_SCHED_HEAD3, 0);
 }
 
 static inline uint8_t moe_sched_cache_to_rtl(int16_t cache_eid)
@@ -211,83 +249,163 @@ static inline int moe_sched_make_sorted_rem(const moe_request_t *req,
     return 0;
 }
 
-static inline void moe_sched_write_head_slot(uint8_t slot, moe_sched_head_t head)
+static inline int moe_sched_remove_active_eid(moe_sched_rem_item_t *rem,
+                                              uint16_t n_experts,
+                                              uint8_t eid,
+                                              uint16_t *active_count,
+                                              uint16_t *total_conc)
+{
+    if (rem == NULL || active_count == NULL || total_conc == NULL ||
+        *active_count == 0u) {
+        return -1;
+    }
+
+    for (uint16_t i = 0; i < n_experts; i++) {
+        if (rem[i].eid == eid) {
+            if (rem[i].active == 0u) {
+                return -2;
+            }
+            rem[i].active = 0u;
+            *active_count = (uint16_t)(*active_count - 1u);
+            *total_conc = (uint16_t)(*total_conc - rem[i].best_conc);
+            return 0;
+        }
+    }
+    return -3;
+}
+
+static inline void moe_sched_write_head_slot_relaxed(uint8_t slot, moe_sched_head_t head)
 {
     uint64_t word = moe_sched_pack_head(head);
 
     switch (slot) {
-    case 0: moe_sched_write64(MOE_SCHED_HEAD0, word); break;
-    case 1: moe_sched_write64(MOE_SCHED_HEAD1, word); break;
-    case 2: moe_sched_write64(MOE_SCHED_HEAD2, word); break;
-    default: moe_sched_write64(MOE_SCHED_HEAD3, word); break;
+    case 0: moe_sched_write64_relaxed(MOE_SCHED_HEAD0, word); break;
+    case 1: moe_sched_write64_relaxed(MOE_SCHED_HEAD1, word); break;
+    case 2: moe_sched_write64_relaxed(MOE_SCHED_HEAD2, word); break;
+    default: moe_sched_write64_relaxed(MOE_SCHED_HEAD3, word); break;
     }
 }
 
-static inline void moe_sched_write_round_context(const moe_request_t *req,
-                                                 const moe_sched_rem_item_t *rem,
-                                                 uint16_t active_count,
-                                                 uint16_t total_conc)
+static inline moe_sched_head_t moe_sched_head_from_rem(const moe_sched_rem_item_t *rem,
+                                                       uint16_t idx)
 {
-    uint8_t h = 0;
+    moe_sched_head_t head;
 
-    moe_sched_write64(
-        MOE_SCHED_CONFIG,
-        moe_sched_pack_config(moe_sched_cache_to_rtl(req->cache_eid_c2),
-                              moe_sched_cache_to_rtl(req->cache_eid_c3),
-                              (uint8_t)active_count,
-                              total_conc));
-
-    moe_sched_clear_heads();
-
-    for (uint16_t i = 0; i < req->n_experts && h < 4u; i++) {
-        if (rem[i].active == 0u) {
-            continue;
-        }
-
-        moe_sched_head_t head = {
-            .valid = 1u,
-            .rem_index = (uint8_t)i,
-            .eid = (uint8_t)rem[i].eid,
-            .ntok = rem[i].ntokens,
-            .input_order = (uint8_t)i,
-            .best_conc = rem[i].best_conc,
-        };
-        moe_sched_write_head_slot(h, head);
-        h++;
-    }
+    head.valid = 1u;
+    head.rem_index = (uint8_t)idx;
+    head.eid = (uint8_t)rem[idx].eid;
+    head.ntok = rem[idx].ntokens;
+    head.input_order = (uint8_t)idx;
+    head.best_conc = rem[idx].best_conc;
+    return head;
 }
 
-static inline moe_hw_plan_entry_t moe_sched_entry_from_task(moe_sched_task_t task)
+static inline int moe_sched_emit_plan_entry(moe_hw_plan_entry_t *plan,
+                                            uint16_t *out_n,
+                                            moe_sched_plan_entry_cb_t cb,
+                                            void *cb_ctx,
+                                            uint8_t removed_eids[2],
+                                            uint32_t *removed_count,
+                                            uint64_t plan_word)
 {
     moe_hw_plan_entry_t entry;
-    memset(&entry, 0, sizeof(entry));
-    entry.valid = 1u;
-    entry.desc.cluster = task.cluster ? MOE_CLUSTER_C3 : MOE_CLUSTER_C2;
-    entry.desc.expert_id = task.eid;
-    entry.desc.token_start_rank = task.tok_start;
-    entry.desc.ntokens = task.ntok;
-    entry.desc.shape_s1 = (moe_shape_t)task.s1;
-    entry.desc.shape_s3 = (moe_shape_t)task.s3;
-    entry.desc.skip_s1 = task.skip_s1;
-    entry.desc.skip_s3 = task.skip_s3;
-    entry.desc.has_s2pf = task.has_s2pf;
-    entry.allow_s4pf = task.allow_s4pf;
-    return entry;
-}
 
-static inline int moe_sched_remove_one(moe_sched_rem_item_t *rem,
-                                       uint16_t n_experts,
-                                       uint16_t idx,
-                                       uint16_t *active_count,
-                                       uint16_t *total_conc)
-{
-    if (rem == NULL || active_count == NULL || total_conc == NULL ||
-        idx >= n_experts || rem[idx].active == 0u || *active_count == 0u) {
+    entry.valid = 1u;
+    entry.desc.cluster =
+        ((plan_word >> 31) & 0x1u) ? MOE_CLUSTER_C3 : MOE_CLUSTER_C2;
+    entry.desc.expert_id = (uint16_t)((plan_word >> 25) & 0x3fu);
+    entry.desc.token_start_rank = (uint16_t)((plan_word >> 7) & 0x1ffu);
+    entry.desc.ntokens = (uint16_t)((plan_word >> 16) & 0x1ffu);
+    entry.desc.shape_s1 = (moe_shape_t)((plan_word >> 5) & 0x3u);
+    entry.desc.shape_s3 = (moe_shape_t)((plan_word >> 3) & 0x3u);
+    entry.desc.skip_s1 = (uint8_t)((plan_word >> 2) & 0x1u);
+    entry.desc.skip_s3 = (uint8_t)((plan_word >> 1) & 0x1u);
+    entry.desc.has_s2pf = (uint8_t)((plan_word >> 0) & 0x1u);
+    entry.allow_s4pf = (uint8_t)((plan_word >> 32) & 0x1u);
+
+    if (out_n == NULL || *out_n >= MOE_MAX_TASKS) {
         return -1;
     }
-    rem[idx].active = 0u;
-    *active_count = (uint16_t)(*active_count - 1u);
-    *total_conc = (uint16_t)(*total_conc - rem[idx].best_conc);
+    if (plan != NULL) {
+        plan[*out_n] = entry;
+    }
+    (*out_n)++;
+    if (cb != NULL && cb(&entry, cb_ctx) != 0) {
+        return -2;
+    }
+    if (moe_sched_note_unique_eid((uint8_t)entry.desc.expert_id,
+                                  removed_eids, removed_count) != 0) {
+        return -3;
+    }
+    return 0;
+}
+
+static inline int moe_sched_drain_plan_words_cb(moe_hw_plan_entry_t *plan,
+                                                uint16_t *out_n,
+                                                moe_sched_plan_entry_cb_t cb,
+                                                void *cb_ctx,
+                                                uint8_t removed_eids[2],
+                                                uint32_t *removed_count,
+                                                uint32_t plan_count,
+                                                uint32_t slot_valid,
+                                                uint32_t round,
+                                                uint32_t verbose);
+
+static inline int moe_sched_drain_plan_head_cb(moe_hw_plan_entry_t *plan,
+                                               uint16_t *out_n,
+                                               moe_sched_plan_entry_cb_t cb,
+                                               void *cb_ctx,
+                                               uint8_t removed_eids[2],
+                                               uint32_t *removed_count,
+                                               uint32_t round,
+                                               uint32_t verbose)
+{
+    uint64_t meta = moe_sched_read64_relaxed(MOE_SCHED_PLAN_FIFO_META);
+    uint32_t plan_count = (uint32_t)(meta & 0x3u);
+    uint32_t slot_valid = (uint32_t)((meta >> 8) & 0x3u);
+
+    return moe_sched_drain_plan_words_cb(plan, out_n, cb, cb_ctx,
+                                         removed_eids, removed_count,
+                                         plan_count, slot_valid,
+                                         round, verbose);
+}
+
+static inline int moe_sched_drain_plan_words_cb(moe_hw_plan_entry_t *plan,
+                                                uint16_t *out_n,
+                                                moe_sched_plan_entry_cb_t cb,
+                                                void *cb_ctx,
+                                                uint8_t removed_eids[2],
+                                                uint32_t *removed_count,
+                                                uint32_t plan_count,
+                                                uint32_t slot_valid,
+                                                uint32_t round,
+                                                uint32_t verbose)
+{
+    if (plan_count == 0u || plan_count > 2u || slot_valid == 0u) {
+        if (verbose != 0u) {
+            printf_safe("[SCHED_DRV] bad plan metadata round=%u count=%u slot_valid=0x%x\r\n",
+                        round, plan_count, slot_valid);
+        }
+        return -1;
+    }
+    if (*out_n + (uint16_t)plan_count > MOE_MAX_TASKS) {
+        return -2;
+    }
+
+    uint64_t plan_word0 = moe_sched_read64_relaxed(MOE_SCHED_PLAN_FIFO_DATA0);
+    if (moe_sched_emit_plan_entry(plan, out_n, cb, cb_ctx, removed_eids,
+                                  removed_count, plan_word0) != 0) {
+        return -3;
+    }
+
+    if (plan_count == 2u) {
+        uint64_t plan_word1 = moe_sched_read64_relaxed(MOE_SCHED_PLAN_FIFO_DATA1);
+        if (moe_sched_emit_plan_entry(plan, out_n, cb, cb_ctx, removed_eids,
+                                      removed_count, plan_word1) != 0) {
+            return -4;
+        }
+    }
+
     return 0;
 }
 
@@ -296,75 +414,77 @@ static inline int moe_sched_drain_plan_head(moe_hw_plan_entry_t *plan,
                                             uint32_t round,
                                             uint32_t verbose)
 {
-    uint64_t meta = moe_sched_read64(MOE_SCHED_PLAN_META);
-    uint32_t plan_count = (uint32_t)(meta & 0x3u);
-    uint32_t slot_valid = (uint32_t)((meta >> 8) & 0x3u);
-
-    if (plan_count == 0u || plan_count > 2u || slot_valid == 0u) {
-        if (verbose != 0u) {
-            printf_safe("[SCHED_DRV] bad plan metadata round=%u meta=0x%lx\r\n",
-                        round, meta);
-        }
-        return -1;
+    int rc = moe_sched_drain_plan_head_cb(plan, out_n, NULL, NULL, NULL, NULL,
+                                          round, verbose);
+    if (rc == 0) {
+        moe_sched_fence();
+        moe_sched_write64(MOE_SCHED_PLAN_FIFO_POP, 1u);
     }
-    if (*out_n + (uint16_t)plan_count > MOE_MAX_TASKS) {
-        return -2;
-    }
-
-    uint64_t plan_word0 = moe_sched_read64(MOE_SCHED_PLAN0);
-    plan[(*out_n)++] = moe_sched_entry_from_task(moe_sched_unpack_task(plan_word0));
-
-    if (plan_count == 2u) {
-        uint64_t plan_word1 = moe_sched_read64(MOE_SCHED_PLAN1);
-        plan[(*out_n)++] = moe_sched_entry_from_task(moe_sched_unpack_task(plan_word1));
-    }
-
-    moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_PLAN_POP);
-    return 0;
+    return rc;
 }
 
-static inline int moe_sched_hw_make_plan_mmio(const moe_request_t *req,
-                                              moe_hw_plan_entry_t *plan,
-                                              uint16_t *n_plan,
-                                              uint32_t verbose)
+static inline int moe_sched_hw_make_plan_mmio_cb(const moe_request_t *req,
+                                                 moe_hw_plan_entry_t *plan,
+                                                 uint16_t *n_plan,
+                                                 moe_sched_plan_entry_cb_t cb,
+                                                 void *cb_ctx,
+                                                 uint32_t verbose)
 {
     moe_sched_rem_item_t rem[MOE_MAX_EXPERTS];
     uint16_t out_n = 0;
     uint32_t round = 0;
     uint16_t active_count = 0;
     uint16_t total_conc = 0;
+    uint16_t next_rem_pos = 0;
 
-    if (req == NULL || plan == NULL || n_plan == NULL ||
+    if (req == NULL || n_plan == NULL ||
         req->n_experts == 0u || req->n_experts > MOE_MAX_EXPERTS ||
         req->n_experts > MOE_SCHED_E_MAX) {
         return -1;
     }
 
-    memset(rem, 0, sizeof(rem));
-    if (moe_sched_make_sorted_rem(req, rem, &total_conc) != 0) {
+    BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_SORT_START);
+    int sort_rc = moe_sched_make_sorted_rem(req, rem, &total_conc);
+    BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_SORT_END);
+    if (sort_rc != 0) {
         return -2;
     }
-    active_count = req->n_experts;
 
-    moe_sched_write64(
+    BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_INIT_WRITE_START);
+    active_count = req->n_experts;
+    next_rem_pos = (req->n_experts < 4u) ? req->n_experts : 4u;
+
+    moe_sched_write64_relaxed(
         MOE_SCHED_CONFIG,
         moe_sched_pack_config(moe_sched_cache_to_rtl(req->cache_eid_c2),
                               moe_sched_cache_to_rtl(req->cache_eid_c3),
-                              0u, 0u));
-    moe_sched_clear_heads();
+                              (uint8_t)active_count,
+                              total_conc));
+    for (uint8_t s = 0; s < 4u; s++) {
+        moe_sched_head_t head = {0};
+        if (s < req->n_experts) {
+            head = moe_sched_head_from_rem(rem, s);
+        }
+        moe_sched_write_head_slot_relaxed(s, head);
+    }
+    moe_sched_fence();
     moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_INIT);
-
-    moe_sched_write_round_context(req, rem, active_count, total_conc);
     moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_START);
+    BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_INIT_WRITE_END);
 
     while (1) {
         uint64_t status;
-        uint64_t remove;
-        uint32_t remove_count;
-        uint32_t remove_idx0;
-        uint32_t remove_idx1;
+        uint32_t status_remove_count;
+        uint32_t status_plan_count;
+        uint32_t status_slot_valid;
+        uint8_t removed_eids[2] = {0};
+        uint32_t removed_count = 0;
+        uint32_t push_count = 0;
 
-        if (moe_sched_wait_done(&status) != 0) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_WAIT_START);
+        int wait_rc = moe_sched_wait_done(&status);
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_WAIT_END);
+        if (wait_rc != 0) {
             if (verbose != 0u) {
                 printf_safe("[SCHED_DRV] timeout round=%u status=0x%lx\r\n",
                             round, status);
@@ -372,8 +492,10 @@ static inline int moe_sched_hw_make_plan_mmio(const moe_request_t *req,
             return -3;
         }
 
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_READ_REMOVE_START);
         if ((status & MOE_SCHED_STATUS_REMOVE_VALID) == 0u ||
             (status & MOE_SCHED_STATUS_PLAN_VALID) == 0u) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_READ_REMOVE_END);
             if (verbose != 0u) {
                 printf_safe("[SCHED_DRV] invalid status round=%u status=0x%lx\r\n",
                             round, status);
@@ -381,52 +503,88 @@ static inline int moe_sched_hw_make_plan_mmio(const moe_request_t *req,
             return -4;
         }
 
-        remove = moe_sched_read64(MOE_SCHED_REMOVE);
-        remove_count = (uint32_t)(remove & 0x3u);
-        remove_idx0 = (uint32_t)((remove >> 2) & 0x7fu);
-        remove_idx1 = (uint32_t)((remove >> (2 + MOE_SCHED_NR_W)) & 0x7fu);
-
-        if (remove_count == 0u || remove_count > 2u ||
-            remove_count > active_count) {
+        status_remove_count = (uint32_t)((status >> 8) & 0x3u);
+        status_plan_count = (uint32_t)((status >> 16) & 0x3u);
+        status_slot_valid = (uint32_t)((status >> 24) & 0x3u);
+        if (status_remove_count == 0u || status_remove_count > 2u ||
+            status_remove_count > active_count) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_READ_REMOVE_END);
             if (verbose != 0u) {
-                printf_safe("[SCHED_DRV] bad remove metadata round=%u remove=0x%lx active=%u\r\n",
-                            round, remove, active_count);
+                printf_safe("[SCHED_DRV] bad remove count round=%u status=0x%lx active=%u\r\n",
+                            round, status, active_count);
             }
             return -5;
         }
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_READ_REMOVE_END);
 
-        if (moe_sched_remove_one(rem, req->n_experts, (uint16_t)remove_idx0,
-                                 &active_count, &total_conc) != 0) {
-            if (verbose != 0u) {
-                printf_safe("[SCHED_DRV] bad remove_idx0 round=%u idx=%u\r\n",
-                            round, remove_idx0);
-            }
-            return -7;
-        }
-        if (remove_count == 2u &&
-            moe_sched_remove_one(rem, req->n_experts, (uint16_t)remove_idx1,
-                                 &active_count, &total_conc) != 0) {
-            if (verbose != 0u) {
-                printf_safe("[SCHED_DRV] bad remove_idx1 round=%u idx=%u\r\n",
-                            round, remove_idx1);
-            }
-            return -8;
-        }
-
-        moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_REMOVE_READY);
-
-        if (active_count != 0u) {
-            moe_sched_write_round_context(req, rem, active_count, total_conc);
-            moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_START);
-        }
-
-        if (moe_sched_drain_plan_head(plan, &out_n, round, verbose) != 0) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_DRAIN_PLAN_START);
+        int drain_rc = moe_sched_drain_plan_words_cb(plan, &out_n, cb, cb_ctx,
+                                                     removed_eids,
+                                                     &removed_count,
+                                                     status_plan_count,
+                                                     status_slot_valid,
+                                                     round, verbose);
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_DRAIN_PLAN_END);
+        if (drain_rc != 0) {
             return -9;
         }
 
+        if (removed_count != status_remove_count) {
+            if (verbose != 0u) {
+                printf_safe("[SCHED_DRV] remove/plan mismatch round=%u status_count=%u plan_unique=%u\r\n",
+                            round, status_remove_count, removed_count);
+            }
+            return -10;
+        }
+
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_HEAD_UPDATE_START);
+        for (uint32_t r = 0; r < removed_count; r++) {
+            int remove_rc = moe_sched_remove_active_eid(rem, req->n_experts,
+                                                        removed_eids[r],
+                                                        &active_count,
+                                                        &total_conc);
+            if (remove_rc != 0) {
+                BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_HEAD_UPDATE_END);
+                if (verbose != 0u) {
+                    printf_safe("[SCHED_DRV] remove eid failed round=%u eid=%u rc=%d\r\n",
+                                round, removed_eids[r], remove_rc);
+                }
+                return -7;
+            }
+        }
+
+        for (uint32_t p = 0; p < removed_count && next_rem_pos < req->n_experts; p++) {
+            while (next_rem_pos < req->n_experts &&
+                   rem[next_rem_pos].active == 0u) {
+                next_rem_pos++;
+            }
+            if (next_rem_pos >= req->n_experts) {
+                break;
+            }
+            moe_sched_head_t new_head = moe_sched_head_from_rem(rem, next_rem_pos);
+            uint32_t head_reg = (push_count == 0u) ?
+                MOE_SCHED_HEAD_PUSH0 : MOE_SCHED_HEAD_PUSH1;
+            moe_sched_write64_relaxed(head_reg, moe_sched_pack_head(new_head));
+            next_rem_pos++;
+            push_count++;
+        }
+
+        if (active_count != 0u) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_RESTART_START);
+        }
+        moe_sched_fence();
+        moe_sched_write64(
+            MOE_SCHED_ROUND_COMMIT,
+            moe_sched_pack_round_commit(1u, 1u, active_count != 0u,
+                                        push_count, removed_count));
+        if (active_count != 0u) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_RESTART_END);
+        }
+        BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_HEAD_UPDATE_END);
+
         if (verbose != 0u) {
-            printf_safe("[SCHED_DRV] round=%u status=0x%lx remove=0x%lx out_n=%u active=%u\r\n",
-                        round, status, remove, out_n, active_count);
+            printf_safe("[SCHED_DRV] round=%u status=0x%lx removed=%u out_n=%u active=%u\r\n",
+                        round, status, removed_count, out_n, active_count);
         }
 
         round++;
@@ -437,6 +595,15 @@ static inline int moe_sched_hw_make_plan_mmio(const moe_request_t *req,
 
     *n_plan = out_n;
     return 0;
+}
+
+static inline int moe_sched_hw_make_plan_mmio(const moe_request_t *req,
+                                              moe_hw_plan_entry_t *plan,
+                                              uint16_t *n_plan,
+                                              uint32_t verbose)
+{
+    return moe_sched_hw_make_plan_mmio_cb(req, plan, n_plan, NULL, NULL,
+                                          verbose);
 }
 
 static inline uint64_t moe_sched_plan_signature(const moe_hw_plan_entry_t *entry)

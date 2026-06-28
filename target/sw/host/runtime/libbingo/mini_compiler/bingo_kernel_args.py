@@ -440,6 +440,7 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
         indiv_down_B_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         output_l3_base: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         runtime_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        active_state_l1_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         l1_a_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         l1_b_gate_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         l1_b_up_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
@@ -478,6 +479,7 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
         self.indiv_down_B_l3 = indiv_down_B_l3
         self.output_l3_base = output_l3_base
         self.runtime_state_addr = runtime_state_addr
+        self.active_state_l1_addr = active_state_l1_addr
         self.l1_a_addr = l1_a_addr
         self.l1_b_gate_addr = l1_b_gate_addr
         self.l1_b_up_addr = l1_b_up_addr
@@ -641,6 +643,12 @@ class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
         )
         self._process_addr64(
             self.runtime_state_addr, "runtime_state_addr", assignments, handle_name_map
+        )
+        self._process_addr32(
+            self.active_state_l1_addr,
+            "active_state_l1_addr",
+            assignments,
+            handle_name_map,
         )
         self._process_addr32(self.l1_a_addr, "l1_a_addr", assignments, handle_name_map)
         self._process_addr32(self.l1_b_gate_addr, "l1_b_gate_addr", assignments, handle_name_map)
@@ -1157,11 +1165,13 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
         mesh_col: int,
         router_m1: int,
         router_n1: int,
+        expert_token_counts_out_addr: Union[BingoMemAlloc, str, int] = 0,
     ):
         self.total_tokens = total_tokens
         self.hardware_output_buffer_addr = hardware_output_buffer_addr
         self.global_indices_out_addr = global_indices_out_addr
         self.global_scores_out_addr = global_scores_out_addr
+        self.expert_token_counts_out_addr = expert_token_counts_out_addr
         self.expert_number_each_layer = expert_number_each_layer
         self.individual_expert_number_k = individual_expert_number_k
         self.mesh_row = mesh_row
@@ -1201,6 +1211,14 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
             split_64bit=False,
             as_64bit=True,
         )
+        self._process_addr(
+            self.expert_token_counts_out_addr,
+            "expert_token_counts_out_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
         assignments["expert_number_each_layer"] = str(self.expert_number_each_layer)
         assignments["individual_expert_number_k"] = str(self.individual_expert_number_k)
         assignments["mesh_row"] = str(self.mesh_row)
@@ -1226,6 +1244,12 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         topk_indices_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         M_total: int,
         top_k: int,
+        expert_token_counts_valid: int = 0,
+        runtime_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c2_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c3_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        dynamic_arg_slot_bytes: int = 0,
+        dynamic_num_slots: int = 0,
     ):
         self.expert_token_counts_addr = expert_token_counts_addr
         self.cam_state_addr = cam_state_addr
@@ -1238,6 +1262,12 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         self.topk_indices_l3 = topk_indices_l3
         self.M_total = M_total
         self.top_k = top_k
+        self.expert_token_counts_valid = expert_token_counts_valid
+        self.runtime_state_addr = runtime_state_addr
+        self.c2_stage_base = c2_stage_base
+        self.c3_stage_base = c3_stage_base
+        self.dynamic_arg_slot_bytes = dynamic_arg_slot_bytes
+        self.dynamic_num_slots = dynamic_num_slots
 
     def get_struct_name(self) -> str:
         return "__host_bingo_kernel_moe_prepare_request_args_t"
@@ -1313,6 +1343,33 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         )
         assignments["M_total"] = str(self.M_total)
         assignments["top_k"] = str(self.top_k)
+        assignments["expert_token_counts_valid"] = str(self.expert_token_counts_valid)
+        self._process_addr(
+            self.runtime_state_addr,
+            "runtime_state_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.c2_stage_base,
+            "c2_stage_base",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.c3_stage_base,
+            "c3_stage_base",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        assignments["dynamic_arg_slot_bytes"] = str(self.dynamic_arg_slot_bytes)
+        assignments["dynamic_num_slots"] = str(self.dynamic_num_slots)
         return assignments
 
 

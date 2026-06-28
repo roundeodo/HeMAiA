@@ -91,12 +91,12 @@ static inline uint32_t scheduler_mmio_smoke_round(void)
     moe_sched_task_t task0 = moe_sched_unpack_task(plan0);
 
     uint32_t remove_count = (uint32_t)(remove & 0x3u);
-    uint32_t remove_idx0 = (uint32_t)((remove >> 2) & 0x7fu);
+    uint32_t remove_slot_mask = (uint32_t)((remove >> 4) & 0xfu);
     uint32_t plan_count = (uint32_t)(meta & 0x3u);
     uint32_t slot_valid = (uint32_t)((meta >> 8) & 0x3u);
 
-    printf_safe("[SCHED_SMOKE] remove=0x%lx count=%u idx0=%u\r\n",
-                remove, remove_count, remove_idx0);
+    printf_safe("[SCHED_SMOKE] remove=0x%lx count=%u slot_mask=0x%x\r\n",
+                remove, remove_count, remove_slot_mask);
     printf_safe("[SCHED_SMOKE] meta=0x%lx plan_count=%u slot_valid=0x%x\r\n",
                 meta, plan_count, slot_valid);
     printf_safe("[SCHED_SMOKE] plan0=0x%lx cluster=%u eid=%u ntok=%u tok_start=%u s1=%u s3=%u skip_s1=%u skip_s3=%u has_s2pf=%u allow_s4pf=%u\r\n",
@@ -105,7 +105,7 @@ static inline uint32_t scheduler_mmio_smoke_round(void)
                 task0.has_s2pf, task0.allow_s4pf);
     printf_safe("[SCHED_SMOKE] makespan=%lu\r\n", makespan);
 
-    if (remove_count != 1u || remove_idx0 != 0u) {
+    if (remove_count != 1u || remove_slot_mask != 0x1u) {
         printf_safe("[SCHED_SMOKE] unexpected remove result\r\n");
         errors++;
     }

@@ -208,42 +208,6 @@ static inline void moe_wait_dual_vc_and_streamer(void)
            csrr_ss(STREAMER_WRITER1_BUSY_CSR)) {}
 }
 
-// ============================================================
-// Addr-only helpers for block-fashion loops:
-// When M/K/N/shape/strides are unchanged, only the base pointers
-// differ between blocks.  Write 3 or 4 CSRs instead of all 85/77.
-// ============================================================
-
-// SwiGLU block loop: B_gate, B_up, D0 change; A and D1 are constant.
-static inline void moe_set_dual_vc_addrs_swiglu(
-    uint32_t Bg_addr, uint32_t Bu_addr, uint32_t D0_addr)
-{
-    csrw_ss(BASE_PTR_READER_1_LOW, Bg_addr);
-    csrw_ss(BASE_PTR_READER_2_LOW, Bu_addr);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, D0_addr);
-}
-
-// GEMM block loop: B0, B1, D0, D1 all change; A is constant.
-static inline void moe_set_dual_vc_addrs_gemm(
-    uint32_t B0_addr, uint32_t B1_addr, uint32_t D0_addr, uint32_t D1_addr)
-{
-    csrw_ss(BASE_PTR_READER_1_LOW, B0_addr);
-    csrw_ss(BASE_PTR_READER_2_LOW, B1_addr);
-    csrw_ss(BASE_PTR_WRITER_0_LOW, D0_addr);
-    csrw_ss(BASE_PTR_WRITER_1_LOW, D1_addr);
-}
-
-// DEPRECATED (k8_8x4_4lane): Bank replication is no longer needed.
-// The 4-lane postproc D writer (1 channel, CHAN_EN_D=0x01) writes to all banks
-// sequentially via natural bank rotation. The Mode-1 A reader accesses the same
-// contiguous output region without any manual copy.
-static inline void moe_dual_vc_swiglu_bank_replicate(
-    uint32_t M, uint32_t N, uint32_t array_shape, uint32_t D0_addr)
-{
-    (void)M; (void)N; (void)array_shape; (void)D0_addr;
-    // No-op: bank replication not required for k8_8x4_4lane 4-lane postproc hw.
-}
-
 // gemm_minimal_silu: like gemm_minimal but also updates the SiLU extension CSR.
 // Saves ~45 CSR writes compared to gemm_full when shape (M,K,N,strides) is unchanged.
 // Use when: same shape as a preceding gemm_full, only addresses + silu_enable differ.
@@ -587,6 +551,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
 #define MOE_DYN_DMA_BOTH             3u
 #define MOE_DYN_RT_C2_DONE           0u
 #define MOE_DYN_RT_C3_DONE           1u
+#define MOE_DYN_RT_C2_ACTIVE_SLOTS   2u
+#define MOE_DYN_RT_C3_ACTIVE_SLOTS   3u
 
 static inline uint32_t __moe_dyn_shape_m(uint32_t shape)
 {
@@ -1025,6 +991,19 @@ static inline volatile uint32_t *__moe_dyn_runtime_state(
     return (volatile uint32_t *)(uintptr_t)cfg->runtime_state_addr;
 }
 
+static inline uint32_t __moe_dyn_slot_active_this_round(
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+{
+    uint32_t ctrl = cfg->ctrl;
+    if (MOE_DYN_CTRL_ACTIVE(ctrl) == 0u || cfg->ntokens == 0u) return 0u;
+
+    volatile uint32_t *state =
+        (volatile uint32_t *)(uintptr_t)cfg->active_state_l1_addr;
+    uint32_t active_idx = (MOE_DYN_CTRL_CLUSTER(ctrl) == 0u) ?
+        MOE_DYN_RT_C2_ACTIVE_SLOTS : MOE_DYN_RT_C3_ACTIVE_SLOTS;
+    return (MOE_DYN_CTRL_SLOT_ID(ctrl) < state[active_idx]) ? 1u : 0u;
+}
+
 static inline void __moe_dyn_wait_task_start(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
 {
@@ -1151,41 +1130,6 @@ static inline uint32_t __moe_dyn_copy_down_weight_block(
         __moe_dyn_l1_wide(cfg->l1_b_down_addr + left_off), left_src,
         __moe_dyn_l1_wide(cfg->l1_b_down_addr + right_off), right_src,
         cfg->indiv_down_B_tile_bytes);
-}
-
-static inline uint32_t __moe_dyn_copy_one(uint32_t binding,
-                                          uint64_t dst_addr,
-                                          uint64_t src_addr,
-                                          uint32_t bytes)
-{
-    if (bytes == 0u || binding == 0u) return BINGO_RET_SUCC;
-    if (!__moe_dyn_dma_is_valid(binding)) return BINGO_RET_FAIL;
-
-    if (binding == 2u) {
-        int32_t xdma_task = __moe_dyn_xdma_start_copy(dst_addr, src_addr, bytes);
-        __moe_dyn_wait_xdma(dst_addr, src_addr, xdma_task);
-        return BINGO_RET_SUCC;
-    }
-
-    if (binding == 3u && bytes > 1u) {
-        uint32_t first_bytes = bytes / 2u;
-        uint32_t second_bytes = bytes - first_bytes;
-        int32_t xdma_task = __moe_dyn_xdma_start_copy(dst_addr + first_bytes,
-                                                      src_addr + first_bytes,
-                                                      second_bytes);
-        __moe_dyn_idma_copy(dst_addr, src_addr, first_bytes);
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_START);
-        snrt_dma_wait_all();
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_END);
-        __moe_dyn_wait_xdma(dst_addr + first_bytes, src_addr + first_bytes, xdma_task);
-        return BINGO_RET_SUCC;
-    }
-
-    __moe_dyn_idma_copy(dst_addr, src_addr, bytes);
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_START);
-    snrt_dma_wait_all();
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_END);
-    return BINGO_RET_SUCC;
 }
 
 static inline uint32_t __moe_dyn_copy_pair(uint32_t binding,
@@ -1406,7 +1350,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *
     printf_safe("[PROBE gs C%d] ctrl=0x%08x ntok=%u\r\n",
                 snrt_cluster_idx(), cfg->ctrl, cfg->ntokens);
 #endif
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u) return BINGO_RET_SUCC;
+    if (!__moe_dyn_slot_active_this_round(cfg)) return BINGO_RET_SUCC;
     __moe_dyn_wait_task_start(cfg);
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_START);
@@ -1497,7 +1441,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
                     snrt_cluster_idx(), n, cfg->ctrl, cfg->ntokens, s1_blocks);
     }
 #endif
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u || n >= s1_blocks) {
+    if (!__moe_dyn_slot_active_this_round(cfg) || n >= s1_blocks) {
         return BINGO_RET_SUCC;
     }
 #if MOE_DYN_DEBUG_SCHED_VERIFY
@@ -1553,7 +1497,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
                     snrt_cluster_idx(), n, cfg->ctrl, cfg->ntokens);
     }
 #endif
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u || n >= 2u) {
+    if (!__moe_dyn_slot_active_this_round(cfg) || n >= 2u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
@@ -1583,8 +1527,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         __moe_dyn_block_cfg(arg, &n);
     uint32_t ctrl = cfg->ctrl;
-    uint32_t ntokens = cfg->ntokens;
-    if (MOE_DYN_CTRL_ACTIVE(ctrl) == 0u || ntokens == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg)) {
         return BINGO_RET_SUCC;
     }
     if (MOE_DYN_CTRL_SKIP_S3(ctrl) != 0u) return BINGO_RET_SUCC;
@@ -1619,8 +1562,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_blo
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         __moe_dyn_block_cfg(arg, &n);
     uint32_t ctrl = cfg->ctrl;
-    uint32_t ntokens = cfg->ntokens;
-    if (MOE_DYN_CTRL_ACTIVE(ctrl) == 0u || ntokens == 0u || n >= 2u) {
+    if (!__moe_dyn_slot_active_this_round(cfg) || n >= 2u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
@@ -1648,7 +1590,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
     uint32_t slot = MOE_DYN_DMA_SLOT_S2_PREFETCH;
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg) || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
         return BINGO_RET_SUCC;
     }
     if (cfg->dma_slot_expert_id[slot] < 0) return BINGO_RET_FAIL;
@@ -1673,7 +1615,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
     uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg) || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
         return BINGO_RET_SUCC;
     }
     if (cfg->dma_slot_expert_id[slot] < 0) return BINGO_RET_FAIL;
@@ -1704,7 +1646,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg)) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
@@ -1746,8 +1688,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
     uint32_t ctrl = cfg->ctrl;
-    uint32_t ntokens = cfg->ntokens;
-    if (MOE_DYN_CTRL_ACTIVE(ctrl) == 0u || ntokens == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg)) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
@@ -1807,7 +1748,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store(void *arg)
 
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
-    if (MOE_DYN_CTRL_ACTIVE(cfg->ctrl) == 0u || cfg->ntokens == 0u) return BINGO_RET_SUCC;
+    if (!__moe_dyn_slot_active_this_round(cfg)) return BINGO_RET_SUCC;
 
     uint32_t row_bytes = cfg->indiv_down_D_tile_bytes / cfg->max_tokens_per_expert;
     uint32_t s3_blocks = __moe_dyn_s3_block_count(cfg);

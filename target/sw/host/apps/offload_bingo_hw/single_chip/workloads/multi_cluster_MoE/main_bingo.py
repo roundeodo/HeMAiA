@@ -124,7 +124,7 @@ MOE_DYNAMIC_SLOT_COUNT = 32
 # records never overlap and the host runtime sizeof guard passes.
 MOE_DYNAMIC_ARG_SLOT_BYTES = 640
 MOE_SCHEDULE_BYTES = 32768
-MOE_RUNTIME_STATE_BYTES = 16
+MOE_RUNTIME_STATE_BYTES = 64
 ENABLE_PHASE3_PHASE4 = True
 # 当 ENABLE_PHASE3_PHASE4=True 时，此开关进一步控制是否展开 individual slot 执行链。
 # 设为 False 时：DFG 在 node_execute 之后截止。node_execute 仍然完整执行
@@ -380,13 +380,35 @@ def patch_moe_header_preamble(header_path: str) -> None:
         "#define MOE_ENABLE_DYNAMIC_BASELINE\n"
         '#include "host.h"\n'
     )
-    if required in content:
-        return
-
     generated = '#include "libbingo/bingo_api.h"\n#include "host.h"\n'
-    if generated not in content:
+    if required not in content and generated not in content:
         raise RuntimeError("Cannot locate generated host include preamble")
-    content = content.replace(generated, required, 1)
+    if required not in content:
+        content = content.replace(generated, required, 1)
+
+    init_call_marker = "__host_moe_init_stage_templates("
+    if init_call_marker not in content:
+        pattern = re.compile(
+            r"(?P<indent>\s*)(?P<var>args_host_chip00_\d+)"
+            r"->scratchpad_ptr = \(uint64_t\)\(uintptr_t\)sp_host_\d+;\n"
+            r"(?P=indent)host_arg_list_chip_00\[\d+\] = "
+            r"\(uint64_t\)\(uintptr_t\)(?P=var);\n"
+            r"(?P=indent)host_kernel_list_chip_00\[\d+\] = "
+            r"\(uint64_t\)\(uintptr_t\)&__host_bingo_kernel_moe_execute;\n"
+        )
+
+        def _insert_stage_template_init(match: re.Match) -> str:
+            indent = match.group("indent")
+            var = match.group("var")
+            return (
+                match.group(0)
+                + f"{indent}// One-time initialization of C2/C3 dynamic slot templates.\n"
+                + f"{indent}if (__host_moe_init_stage_templates({var}) != BINGO_RET_SUCC) return BINGO_RET_FAIL;\n"
+            )
+
+        content, n = pattern.subn(_insert_stage_template_init, content, count=1)
+        if n != 1:
+            raise RuntimeError("Cannot locate MoEExecute args block for stage template init")
 
     with open(header_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -942,6 +964,13 @@ def define_memory_handles(params):
         mh[f"{prefix}_Dyn_Args"] = BingoMemAlloc(
             f"{prefix.lower()}_dyn_args",
             size=params["dynamic_slot_count"] * params["dynamic_arg_slot_bytes"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_Active_State"] = BingoMemAlloc(
+            f"{prefix.lower()}_active_state",
+            size=MOE_RUNTIME_STATE_BYTES,
             mem_level="L1",
             chip_id=chip,
             cluster_id=cid,
@@ -1526,6 +1555,7 @@ def create_dfg(params, mh):
             hardware_output_buffer_addr=mh["L3_Alloc_Router_Output"],
             global_indices_out_addr=mh["L3_Alloc_TopK_Indices"],
             global_scores_out_addr=mh["L3_Alloc_TopK_Scores"],
+            expert_token_counts_out_addr=mh["L3_Alloc_Expert_Counts"],
             expert_number_each_layer=params["num_indiv_experts"],
             individual_expert_number_k=params["top_k"],
             mesh_row=params["meshRow"],
@@ -1544,9 +1574,10 @@ def create_dfg(params, mh):
     # =====================================================================
     # Phase 3: 构建调度请求 (moe_request_t)
     #
-    # 从 TopK 路由结果（expert_token_counts）和当前 CAM 状态中构建
-    # moe_request_t，同时调用 moe_schedule() 生成完整 moe_schedule_t 写入 L3。
-    # Phase 4 只读取这个确定的全局顺序表并做 static slot lowering。
+    # 从 TopK 路由结果和当前 CAM 状态中构建 moe_request_t。
+    # HW scheduler direct path 会在本节点内把 compact plan
+    # 直接 lowered 到 C2/C3 的 L3 stage dynamic args；SW/fallback path 仍会
+    # 生成 moe_schedule_t，供 Phase 4 继续 lowering。
     # =====================================================================
     node_prepare = BingoNode(
         assigned_chiplet_id=0,
@@ -1565,6 +1596,12 @@ def create_dfg(params, mh):
             topk_indices_l3=mh["L3_Alloc_TopK_Indices"],
             M_total=params["M_total"],
             top_k=params["top_k"],
+            expert_token_counts_valid=1,
+            runtime_state_addr=mh["L3_Alloc_MoE_Runtime_State"],
+            c2_stage_base=mh["L3_Alloc_C2_Stage"],
+            c3_stage_base=mh["L3_Alloc_C3_Stage"],
+            dynamic_arg_slot_bytes=params["dynamic_arg_slot_bytes"],
+            dynamic_num_slots=params["dynamic_slot_count"],
         ),
     )
     bingo_dfg.bingo_add_node(node_prepare)
@@ -1573,9 +1610,10 @@ def create_dfg(params, mh):
     # =====================================================================
     # Phase 4: CVA6 schedule lowering + optional static slot execution
     #
-    # node_execute 是 MoE scheduler 的完整 lowering 边界：它把 moe_schedule_t
-    # 降低到 C2/C3 的 L3 stage dynamic args，prelower S1/S2/S3/S4 底层 API
-    # 参数，并由 host runtime DMA flush 到 cluster L1 dynamic args。
+    # HW scheduler direct path 下，node_prepare 已经生成 L3 stage dynamic
+    # args；node_execute 只同步 runtime_state 并把有效 slot args flush 到
+    # cluster L1。SW/fallback path 下，node_execute 仍负责把 moe_schedule_t
+    # lowered/prelowered 到 C2/C3 的 L3 stage dynamic args。
     # ENABLE_INDIVIDUAL_SLOTS=False 时在这里截止，只测完整 scheduler+lowering；
     # True 时后续 static slot graph 才真正执行 S1/S2/S3/S4/store。跨 cluster
     # slot wavefront 由 Bingo DFG cross-edge 表达；slot 内 skip 仍由 device
@@ -1614,6 +1652,8 @@ def create_dfg(params, mh):
             c3_l1_down_d=mh["C3_indiv_L1_down_D"],
             c3_l1_d1_scratch=mh["C3_indiv_L1_D1_scratch"],
             output_l3_addr=mh["L3_Alloc_Indiv_Down_Output"],
+            c2_active_state_l1_addr=mh["C2_indiv_Active_State"],
+            c3_active_state_l1_addr=mh["C3_indiv_Active_State"],
             A_token_bytes=params["A_token_bytes"],
             indiv_B_expert_stride=params["indiv_B_expert_stride"],
             indiv_down_B_expert_stride=params["indiv_down_B_expert_stride"],
@@ -1666,6 +1706,7 @@ def create_dfg(params, mh):
             indiv_down_B_l3=mh["L3_Sym_Indiv_Down_B"],
             output_l3_base=mh["L3_Alloc_Indiv_Down_Output"],
             runtime_state_addr=mh["L3_Alloc_MoE_Runtime_State"],
+            active_state_l1_addr=mh[f"{prefix}_Active_State"],
             l1_a_addr=mh[f"{prefix}_L1_A"],
             l1_b_gate_addr=mh[f"{prefix}_L1_B_gate"],
             l1_b_up_addr=mh[f"{prefix}_L1_B_up"],

@@ -630,6 +630,7 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   uint64_t indiv_down_B_l3;
   uint64_t output_l3_base;
   uint64_t runtime_state_addr;
+  uint32_t active_state_l1_addr;
   uint32_t l1_a_addr;
   uint32_t l1_b_gate_addr;
   uint32_t l1_b_up_addr;

@@ -1228,6 +1228,7 @@ int kernel_execution(){
         args_host_chip00_4->hardware_output_buffer_addr = (uint64_t)ptr_l3_router_hw_out;
         args_host_chip00_4->global_indices_out_addr = (uint64_t)ptr_l3_router_topk_idx;
         args_host_chip00_4->global_scores_out_addr = (uint64_t)ptr_l3_router_topk_scores;
+        args_host_chip00_4->expert_token_counts_out_addr = 0;
         args_host_chip00_4->expert_number_each_layer = 2;
         args_host_chip00_4->individual_expert_number_k = 2;
         args_host_chip00_4->mesh_row = 1;

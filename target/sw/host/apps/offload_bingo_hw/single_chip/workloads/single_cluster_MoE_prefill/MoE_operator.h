@@ -118,6 +118,7 @@ void extract_top_k_indices_and_scores(
     int32_t *sram_raw_score_buffer,
     uint16_t *global_top_k_indices_ptr,
     int32_t *global_top_k_scores_ptr,
+    uint32_t *expert_token_counts_out,
     uint32_t valid_tokens_in_block,
     const moe_operator_cfg_t *cfg)
 {
@@ -149,8 +150,12 @@ void extract_top_k_indices_and_scores(
         uint32_t out_base = r * k;
         for (uint32_t i = 0; i < k; i++)
         {
-            global_top_k_indices_ptr[out_base + i] = local_top_k_indices[i];
-            global_top_k_scores_ptr[out_base + i] = local_score[local_top_k_indices[i]];
+            uint16_t expert_id = local_top_k_indices[i];
+            global_top_k_indices_ptr[out_base + i] = expert_id;
+            global_top_k_scores_ptr[out_base + i] = local_score[expert_id];
+            if (expert_token_counts_out != 0) {
+                expert_token_counts_out[expert_id]++;
+            }
         }
     }
 }
@@ -208,11 +213,18 @@ void moe_router_global_schedule(
     int32_t *hardware_output_buffer,
     uint16_t *global_indices_out,
     int32_t *global_scores_out,
+    uint32_t *expert_token_counts_out,
     const moe_operator_cfg_t *cfg) // 【修正】这里输出的是 Scores，不是 Prob
 {
     uint32_t tokens_per_hw_tile = cfg->router_m1 * cfg->mesh_row;
     uint32_t M2_loops = (total_tokens + tokens_per_hw_tile - 1) / tokens_per_hw_tile;
     uint32_t tokens_processed = 0;
+
+    if (expert_token_counts_out != 0) {
+        for (uint32_t e = 0; e < cfg->expert_number_each_layer; e++) {
+            expert_token_counts_out[e] = 0u;
+        }
+    }
 
     for (uint32_t m2 = 0; m2 < M2_loops; m2++)
     {
@@ -230,6 +242,7 @@ void moe_router_global_schedule(
             current_sram_hw_buffer,
             &global_indices_out[write_offset],
             &global_scores_out[write_offset],
+            expert_token_counts_out,
             valid_tokens_in_this_step,
             cfg);
 

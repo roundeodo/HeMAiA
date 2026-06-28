@@ -51,7 +51,7 @@ int kernel_execution() {
 
         moe_router_global_schedule(TEST_TOTAL_TOKENS,
                                    test_sram_scores,
-                                   out_idx, out_scores, &cfg);
+                                   out_idx, out_scores, 0, &cfg);
 
         uint32_t err = 0;
         for (uint32_t i = 0; i < (uint32_t)(TEST_TOTAL_TOKENS * TEST_TOP_K); i++) {
