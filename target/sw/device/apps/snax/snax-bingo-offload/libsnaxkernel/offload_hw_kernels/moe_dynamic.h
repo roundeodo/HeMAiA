@@ -386,35 +386,19 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_gemm_full(void *arg)
     return BINGO_RET_SUCC;
 }
 
-// ============================================================
-// Dual-VersaCore SwiGLU kernel (Mode 0: gate+up -> SiLU -> elemMul -> D0/D1)
-// INT16 A x INT4 packed B_gate, B_up -> INT16 D0, D1
-// Args (uint32_t array, 11 fields):
-//   [0] A_addr  [1] B_gate_addr  [2] B_up_addr  [3] D0_addr  [4] D1_addr
-//   [5] M  [6] K  [7] N
-//   [8] array_shape  [9] rescale_mult  [10] rescale_shift
-// ============================================================
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
+static inline uint32_t __moe_dual_vc_swiglu_full_params(
+    uint32_t A_addr,
+    uint32_t Bg_addr,
+    uint32_t Bu_addr,
+    uint32_t D0_addr,
+    uint32_t D1_addr,
+    uint32_t M,
+    uint32_t K,
+    uint32_t N,
+    uint32_t array_shape,
+    uint32_t rscl_mult,
+    uint32_t rscl_shift)
 {
-    if (snrt_cluster_core_idx() != 0) {
-        printf_safe("[C%d c%d]: dual_vc_swiglu_full must run on core 0!\r\n",
-                    snrt_cluster_idx(), snrt_cluster_core_idx());
-        return BINGO_RET_FAIL;
-    }
-    BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
-    uint32_t A_addr      = ((uint32_t *)arg)[0];
-    uint32_t Bg_addr     = ((uint32_t *)arg)[1];
-    uint32_t Bu_addr     = ((uint32_t *)arg)[2];
-    uint32_t D0_addr     = ((uint32_t *)arg)[3];
-    uint32_t D1_addr     = ((uint32_t *)arg)[4];
-    uint32_t M           = ((uint32_t *)arg)[5];
-    uint32_t K           = ((uint32_t *)arg)[6];
-    uint32_t N           = ((uint32_t *)arg)[7];
-    uint32_t array_shape = ((uint32_t *)arg)[8];
-    uint32_t rscl_mult           = ((uint32_t *)arg)[9];
-    uint32_t rscl_shift          = ((uint32_t *)arg)[10];
-    BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
-
     uint32_t meshRow, tileSize, meshCol;
     switch (array_shape) {
     case 0: meshRow = MOE_DUAL_VC_MESH_ROW_0; tileSize = MOE_DUAL_VC_TILE_SIZE_0; meshCol = MOE_DUAL_VC_MESH_COL_0; break;
@@ -506,6 +490,41 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
     // 4-lane postproc D writer uses 1 channel with sequential bank rotation;
     // Mode-1 A reader directly reads the Mode-0 D0 output without any copy.
     return BINGO_RET_SUCC;
+}
+
+// ============================================================
+// Dual-VersaCore SwiGLU kernel (Mode 0: gate+up -> SiLU -> elemMul -> D0/D1)
+// INT16 A x INT4 packed B_gate, B_up -> INT16 D0, D1
+// Args (uint32_t array, 11 fields):
+//   [0] A_addr  [1] B_gate_addr  [2] B_up_addr  [3] D0_addr  [4] D1_addr
+//   [5] M  [6] K  [7] N
+//   [8] array_shape  [9] rescale_mult  [10] rescale_shift
+// ============================================================
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
+{
+    if (snrt_cluster_core_idx() != 0) {
+        printf_safe("[C%d c%d]: dual_vc_swiglu_full must run on core 0!\r\n",
+                    snrt_cluster_idx(), snrt_cluster_core_idx());
+        return BINGO_RET_FAIL;
+    }
+    BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
+    uint32_t A_addr      = ((uint32_t *)arg)[0];
+    uint32_t Bg_addr     = ((uint32_t *)arg)[1];
+    uint32_t Bu_addr     = ((uint32_t *)arg)[2];
+    uint32_t D0_addr     = ((uint32_t *)arg)[3];
+    uint32_t D1_addr     = ((uint32_t *)arg)[4];
+    uint32_t M           = ((uint32_t *)arg)[5];
+    uint32_t K           = ((uint32_t *)arg)[6];
+    uint32_t N           = ((uint32_t *)arg)[7];
+    uint32_t array_shape = ((uint32_t *)arg)[8];
+    uint32_t rscl_mult   = ((uint32_t *)arg)[9];
+    uint32_t rscl_shift  = ((uint32_t *)arg)[10];
+    BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
+
+    return __moe_dual_vc_swiglu_full_params(A_addr, Bg_addr, Bu_addr,
+                                            D0_addr, D1_addr, M, K, N,
+                                            array_shape, rscl_mult,
+                                            rscl_shift);
 }
 /* ── Schedule verification debug: controlled by BINGO_DEBUG_LEVEL compile flag ──
  * Pass DEBUG_LEVEL=1 to make (→ -DBINGO_DEBUG_LEVEL=1) to enable slot prints. ── */
@@ -1030,22 +1049,6 @@ static inline void __moe_dyn_mark_task_complete(
     asm volatile("fence w, w" ::: "memory");
 }
 
-static inline void __moe_dyn_wait_dma_slot(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
-    uint32_t slot)
-{
-    (void)cfg;
-    (void)slot;
-}
-
-static inline void __moe_dyn_mark_dma_slot(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
-    uint32_t slot)
-{
-    (void)cfg;
-    (void)slot;
-}
-
 static inline uint32_t __moe_dyn_copy_gate_up_weight(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
     uint32_t expert_id,
@@ -1371,23 +1374,21 @@ static inline __snax_bingo_kernel_moe_dynamic_expert_args_t *__moe_dyn_block_cfg
         blk->task_arg_addr;
 }
 
-static inline __snax_bingo_kernel_dual_vc_swiglu_full_args_t
-__moe_dyn_swiglu_args_from_pre(
+static inline uint32_t __moe_dyn_run_swiglu_from_pre(
     const __snax_bingo_moe_dyn_swiglu_call_args_t *pre)
 {
-    return (__snax_bingo_kernel_dual_vc_swiglu_full_args_t){
-        .input_A_addr      = pre->input_A_addr,
-        .input_B_gate_addr = pre->input_B_gate_addr,
-        .input_B_up_addr   = pre->input_B_up_addr,
-        .output_D0_addr    = pre->output_D0_addr,
-        .output_D1_addr    = pre->output_D1_addr,
-        .M                 = pre->M,
-        .K                 = pre->K,
-        .N                 = pre->N,
-        .array_shape       = pre->array_shape,
-        .rescale_mult      = pre->rescale_mult,
-        .rescale_shift     = pre->rescale_shift,
-    };
+    return __moe_dual_vc_swiglu_full_params(
+        pre->input_A_addr,
+        pre->input_B_gate_addr,
+        pre->input_B_up_addr,
+        pre->output_D0_addr,
+        pre->output_D1_addr,
+        pre->M,
+        pre->K,
+        pre->N,
+        pre->array_shape,
+        pre->rescale_mult,
+        pre->rescale_shift);
 }
 
 static inline uint32_t __moe_dyn_run_down_from_pre(
@@ -1468,12 +1469,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
     if (MOE_DYN_CTRL_DMA_S1(cfg->ctrl) == 0u) return BINGO_RET_FAIL;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_START);
-    if (n == 0u) __moe_dyn_wait_dma_slot(cfg, MOE_DYN_DMA_SLOT_S1);
     uint32_t rc = __moe_dyn_copy_gate_up_weight_block(
         cfg, cfg->expert_id, MOE_DYN_CTRL_DMA_S1(cfg->ctrl), n);
-    if (rc == BINGO_RET_SUCC && n + 1u == s1_blocks) {
-        __moe_dyn_mark_dma_slot(cfg, MOE_DYN_DMA_SLOT_S1);
-    }
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_END);
     return rc;
 }
@@ -1506,11 +1503,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
-    __snax_bingo_kernel_dual_vc_swiglu_full_args_t swiglu_args =
-        __moe_dyn_swiglu_args_from_pre(pre);
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_START);
-    uint32_t __gu_block_rc = __snax_bingo_kernel_dual_vc_swiglu_full(&swiglu_args);
+    uint32_t __gu_block_rc = __moe_dyn_run_swiglu_from_pre(pre);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_END);
     return __gu_block_rc;
 }
@@ -1539,12 +1534,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
     if (MOE_DYN_CTRL_DMA_S3(ctrl) == 0u) return BINGO_RET_FAIL;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_DOWN_START);
-    if (n == 0u) __moe_dyn_wait_dma_slot(cfg, MOE_DYN_DMA_SLOT_S3);
     uint32_t rc = __moe_dyn_copy_down_weight_block(
         cfg, cfg->expert_id, MOE_DYN_CTRL_DMA_S3(ctrl), n);
-    if (rc == BINGO_RET_SUCC && n + 1u == s3_blocks) {
-        __moe_dyn_mark_dma_slot(cfg, MOE_DYN_DMA_SLOT_S3);
-    }
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_DOWN_END);
     return rc;
 }
@@ -1596,10 +1587,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
     if (cfg->dma_slot_expert_id[slot] < 0) return BINGO_RET_FAIL;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S2_START);
-    __moe_dyn_wait_dma_slot(cfg, slot);
     uint32_t rc = __moe_dyn_copy_down_weight(
         cfg, (uint32_t)cfg->dma_slot_expert_id[slot], MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot));
-    if (rc == BINGO_RET_SUCC) __moe_dyn_mark_dma_slot(cfg, slot);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S2_END);
     return rc;
 }
@@ -1621,10 +1610,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
     if (cfg->dma_slot_expert_id[slot] < 0) return BINGO_RET_FAIL;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_START);
-    __moe_dyn_wait_dma_slot(cfg, slot);
     uint32_t rc = __moe_dyn_copy_gate_up_weight(
         cfg, (uint32_t)cfg->dma_slot_expert_id[slot], MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot));
-    if (rc == BINGO_RET_SUCC) __moe_dyn_mark_dma_slot(cfg, slot);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_END);
     return rc;
 }
@@ -1655,11 +1642,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
-    __snax_bingo_kernel_dual_vc_swiglu_full_args_t swiglu_args =
-        __moe_dyn_swiglu_args_from_pre(pre);
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_START);
-    uint32_t __gu_full_rc = __snax_bingo_kernel_dual_vc_swiglu_full(&swiglu_args);
+    uint32_t __gu_full_rc = __moe_dyn_run_swiglu_from_pre(pre);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_END);
     return __gu_full_rc;
 }
@@ -1754,7 +1739,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store(void *arg)
     uint32_t s3_blocks = __moe_dyn_s3_block_count(cfg);
     uint64_t expert_out_base = cfg->output_l3_base +
         (uint64_t)cfg->expert_id * (uint64_t)cfg->output_expert_stride_bytes;
-    uint32_t store_dma = (MOE_DYN_CTRL_DMA_S3(cfg->ctrl) != 0u) ? MOE_DYN_CTRL_DMA_S3(cfg->ctrl) : 1u;
+    uint32_t store_dma =
+        (MOE_DYN_CTRL_DMA_S3(cfg->ctrl) != 0u) ? MOE_DYN_CTRL_DMA_S3(cfg->ctrl) : 1u;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_STORE_START);
     if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) == 0u ||

@@ -42,31 +42,24 @@ static inline uint32_t scheduler_mmio_smoke_round(void)
     };
 
     uint64_t cfg_word = moe_sched_pack_config(cache_none, cache_none, 1u, best_conc0);
-    uint64_t head0_word = moe_sched_pack_head(head0);
-
     printf_safe("[SCHED_SMOKE] base=0x%lx local=0x%lx\r\n",
                 (uint64_t)moe_sched_base(), (uint64_t)MOE_SCHED_LOCAL_BASE);
 
     moe_sched_write64(MOE_SCHED_CONFIG, cfg_word);
-    moe_sched_clear_heads();
-    moe_sched_write64(MOE_SCHED_HEAD0, head0_word);
+    moe_sched_write64(MOE_SCHED_HEAD_PAIR1, 0u);
+    moe_sched_write64(MOE_SCHED_HEAD_PAIR0,
+                      moe_sched_pack_head_pair(head0, (moe_sched_head_t){0}));
 
     errors += scheduler_mmio_expect_u64("CONFIG",
                                         moe_sched_read64(MOE_SCHED_CONFIG),
                                         cfg_word);
-    errors += scheduler_mmio_expect_u64("HEAD0",
-                                        moe_sched_read64(MOE_SCHED_HEAD0),
-                                        head0_word);
-    errors += scheduler_mmio_expect_u64("HEAD1",
-                                        moe_sched_read64(MOE_SCHED_HEAD1),
-                                        0u);
 
     if (errors != 0u) {
         return errors;
     }
 
-    moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_INIT);
-    moe_sched_write64(MOE_SCHED_CTRL, MOE_SCHED_CTRL_START);
+    moe_sched_write64(MOE_SCHED_CTRL,
+                      MOE_SCHED_CTRL_INIT | MOE_SCHED_CTRL_START);
 
     if (moe_sched_wait_done(&status) != 0) {
         printf_safe("[SCHED_SMOKE] timeout waiting done, status=0x%lx\r\n",
@@ -84,28 +77,46 @@ static inline uint32_t scheduler_mmio_smoke_round(void)
         errors++;
     }
 
-    uint64_t remove = moe_sched_read64(MOE_SCHED_REMOVE);
-    uint64_t meta = moe_sched_read64(MOE_SCHED_PLAN_META);
-    uint64_t plan0 = moe_sched_read64(MOE_SCHED_PLAN0);
-    uint64_t makespan = moe_sched_read64(MOE_SCHED_MAKESPAN);
-    moe_sched_task_t task0 = moe_sched_unpack_task(plan0);
+    uint64_t fifo_status = moe_sched_read64(MOE_SCHED_PLAN_FIFO_STATUS);
+    uint64_t plan0 = moe_sched_read64(MOE_SCHED_PLAN_FIFO_DATA0);
+    uint32_t task0_has_s2pf =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_HAS_S2PF_LSB) & 0x1u);
+    uint32_t task0_skip_s3 =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_SKIP_S3_LSB) & 0x1u);
+    uint32_t task0_skip_s1 =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_SKIP_S1_LSB) & 0x1u);
+    uint32_t task0_s3 =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_SHAPE_S3_LSB) &
+                   MOE_SCHED_PLAN_SHAPE_MASK);
+    uint32_t task0_s1 =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_SHAPE_S1_LSB) &
+                   MOE_SCHED_PLAN_SHAPE_MASK);
+    uint32_t task0_tok_start =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_TOKEN_START_LSB) &
+                   MOE_SCHED_PLAN_NTOK_MASK);
+    uint32_t task0_ntok =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_NTOK_LSB) &
+                   MOE_SCHED_PLAN_NTOK_MASK);
+    uint32_t task0_eid =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_EID_LSB) &
+                   MOE_SCHED_PLAN_EID_MASK);
+    uint32_t task0_cluster =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_CLUSTER_LSB) & 0x1u);
+    uint32_t task0_allow_s4pf =
+        (uint32_t)((plan0 >> MOE_SCHED_PLAN_ALLOW_S4PF_LSB) & 0x1u);
 
-    uint32_t remove_count = (uint32_t)(remove & 0x3u);
-    uint32_t remove_slot_mask = (uint32_t)((remove >> 4) & 0xfu);
-    uint32_t plan_count = (uint32_t)(meta & 0x3u);
-    uint32_t slot_valid = (uint32_t)((meta >> 8) & 0x3u);
+    uint32_t remove_count = (uint32_t)((fifo_status >> 12) & 0x3u);
+    uint32_t plan_count = (uint32_t)((fifo_status >> 8) & 0x3u);
+    uint32_t slot_valid = (uint32_t)((fifo_status >> 16) & 0x3u);
 
-    printf_safe("[SCHED_SMOKE] remove=0x%lx count=%u slot_mask=0x%x\r\n",
-                remove, remove_count, remove_slot_mask);
-    printf_safe("[SCHED_SMOKE] meta=0x%lx plan_count=%u slot_valid=0x%x\r\n",
-                meta, plan_count, slot_valid);
+    printf_safe("[SCHED_SMOKE] fifo_status=0x%lx remove_count=%u plan_count=%u slot_valid=0x%x\r\n",
+                fifo_status, remove_count, plan_count, slot_valid);
     printf_safe("[SCHED_SMOKE] plan0=0x%lx cluster=%u eid=%u ntok=%u tok_start=%u s1=%u s3=%u skip_s1=%u skip_s3=%u has_s2pf=%u allow_s4pf=%u\r\n",
-                plan0, task0.cluster, task0.eid, task0.ntok, task0.tok_start,
-                task0.s1, task0.s3, task0.skip_s1, task0.skip_s3,
-                task0.has_s2pf, task0.allow_s4pf);
-    printf_safe("[SCHED_SMOKE] makespan=%lu\r\n", makespan);
+                plan0, task0_cluster, task0_eid, task0_ntok, task0_tok_start,
+                task0_s1, task0_s3, task0_skip_s1, task0_skip_s3,
+                task0_has_s2pf, task0_allow_s4pf);
 
-    if (remove_count != 1u || remove_slot_mask != 0x1u) {
+    if (remove_count != 1u) {
         printf_safe("[SCHED_SMOKE] unexpected remove result\r\n");
         errors++;
     }
@@ -113,13 +124,13 @@ static inline uint32_t scheduler_mmio_smoke_round(void)
         printf_safe("[SCHED_SMOKE] unexpected plan metadata\r\n");
         errors++;
     }
-    if (task0.eid != eid0 || task0.ntok != ntok0) {
+    if (task0_eid != eid0 || task0_ntok != ntok0) {
         printf_safe("[SCHED_SMOKE] unexpected plan0 task fields\r\n");
         errors++;
     }
 
-    moe_sched_write64(MOE_SCHED_CTRL,
-                      MOE_SCHED_CTRL_REMOVE_READY | MOE_SCHED_CTRL_PLAN_POP);
+    moe_sched_write64(MOE_SCHED_ROUND_COMMIT,
+                      moe_sched_pack_round_commit(1u, 1u, 0u, 0u));
 
     return errors;
 }
