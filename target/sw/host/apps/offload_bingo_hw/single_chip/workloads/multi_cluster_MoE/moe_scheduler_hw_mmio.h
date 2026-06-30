@@ -19,6 +19,12 @@
 #define MOE_SCHED_LOCAL_BASE 0x05010000ull
 #endif
 
+#if defined(MOE_ENABLE_HW_SCHEDULER) && !defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
+#define MOE_SCHED_FAST_NO_CHECK 1
+#else
+#define MOE_SCHED_FAST_NO_CHECK 0
+#endif
+
 #define MOE_SCHED_CTRL      0x00u
 #define MOE_SCHED_STATUS    0x08u
 #define MOE_SCHED_CONFIG    0x10u
@@ -172,6 +178,7 @@ static inline uint16_t moe_sched_best_conc(uint16_t ntok)
     return (uint16_t)(((ntok + 3u) >> 2) * 6u);
 }
 
+#ifdef MOE_ENABLE_HW_SCHEDULER_CHECK
 static inline int moe_sched_note_unique_eid(uint8_t eid,
                                             uint8_t removed_eids[2],
                                             uint32_t *removed_count)
@@ -191,7 +198,9 @@ static inline int moe_sched_note_unique_eid(uint8_t eid,
     (*removed_count)++;
     return 0;
 }
+#endif
 
+#if !MOE_SCHED_FAST_NO_CHECK
 static inline int moe_sched_wait_done(uint64_t *status_out)
 {
     for (uint32_t i = 0; i < MOE_SCHED_TIMEOUT_POLLS; i++) {
@@ -210,12 +219,25 @@ static inline int moe_sched_wait_done(uint64_t *status_out)
     }
     return -1;
 }
+#endif
+
+static inline uint64_t moe_sched_wait_done_fast(void)
+{
+    while (1) {
+        uint64_t status = moe_sched_read64_relaxed(MOE_SCHED_STATUS);
+        if ((status & MOE_SCHED_STATUS_DONE) != 0u) {
+            moe_sched_fence();
+            return status;
+        }
+    }
+}
 
 static inline uint8_t moe_sched_cache_to_rtl(int16_t cache_eid)
 {
     return (cache_eid < 0) ? 0x80u : (uint8_t)cache_eid;
 }
 
+#if !MOE_SCHED_FAST_NO_CHECK
 static inline int moe_sched_make_sorted_rem(const moe_request_t *req,
                                             moe_sched_rem_item_t *rem,
                                             uint8_t eid_to_pos[MOE_SCHED_E_MAX],
@@ -227,21 +249,29 @@ static inline int moe_sched_make_sorted_rem(const moe_request_t *req,
     uint8_t order[MOE_MAX_EXPERTS];
     uint16_t total_conc = 0;
 
-    if (req == NULL || rem == NULL || eid_to_pos == NULL ||
-        total_conc_out == NULL) {
+#if !MOE_SCHED_FAST_NO_CHECK
+    if (req == NULL || rem == NULL || total_conc_out == NULL) {
         return -1;
     }
+#endif
 
-    for (uint16_t i = 0; i < MOE_SCHED_E_MAX; i++) {
-        eid_to_pos[i] = MOE_SCHED_EID_POS_INVALID;
+    if (eid_to_pos != NULL) {
+        for (uint16_t i = 0; i < MOE_SCHED_E_MAX; i++) {
+            eid_to_pos[i] = MOE_SCHED_EID_POS_INVALID;
+        }
     }
 
     for (uint16_t i = 0; i < req->n_experts; i++) {
         uint16_t cur_eid = req->experts[i].expert_id;
         uint16_t cur_ntokens = req->experts[i].ntokens;
+#if !MOE_SCHED_FAST_NO_CHECK
         if (cur_ntokens == 0u ||
             cur_eid >= MOE_SCHED_E_MAX ||
-            cur_ntokens >= (1u << MOE_SCHED_NTOK_W) ||
+            cur_ntokens >= (1u << MOE_SCHED_NTOK_W)) {
+            return -2;
+        }
+#endif
+        if (eid_to_pos != NULL &&
             eid_to_pos[cur_eid] != MOE_SCHED_EID_POS_INVALID) {
             return -2;
         }
@@ -250,7 +280,9 @@ static inline int moe_sched_make_sorted_rem(const moe_request_t *req,
         best_conc[i] = moe_sched_best_conc(cur_ntokens);
         order[i] = (uint8_t)i;
         total_conc = (uint16_t)(total_conc + best_conc[i]);
-        eid_to_pos[cur_eid] = 0u;
+        if (eid_to_pos != NULL) {
+            eid_to_pos[cur_eid] = 0u;
+        }
     }
 
     for (uint16_t i = 1; i < req->n_experts; i++) {
@@ -270,12 +302,80 @@ static inline int moe_sched_make_sorted_rem(const moe_request_t *req,
         rem[i].ntokens = ntokens[src];
         rem[i].best_conc = best_conc[src];
         rem[i].active = 1u;
-        eid_to_pos[rem[i].eid] = (uint8_t)i;
+        if (eid_to_pos != NULL) {
+            eid_to_pos[rem[i].eid] = (uint8_t)i;
+        }
     }
     *total_conc_out = total_conc;
     return 0;
 }
+#endif
 
+static inline int moe_sched_make_sorted_rem_counts(
+    const uint32_t *expert_token_counts,
+    uint32_t n_experts,
+    moe_sched_rem_item_t *rem,
+    uint16_t *active_count_out,
+    uint16_t *total_conc_out)
+{
+    uint16_t eid[MOE_MAX_EXPERTS];
+    uint16_t ntokens[MOE_MAX_EXPERTS];
+    uint16_t best_conc[MOE_MAX_EXPERTS];
+    uint8_t order[MOE_MAX_EXPERTS];
+    uint16_t active_count = 0u;
+    uint16_t total_conc = 0u;
+
+#if !MOE_SCHED_FAST_NO_CHECK
+    if (expert_token_counts == NULL || rem == NULL ||
+        active_count_out == NULL || total_conc_out == NULL ||
+        n_experts > MOE_MAX_EXPERTS || n_experts > MOE_SCHED_E_MAX) {
+        return -1;
+    }
+#endif
+
+    for (uint32_t e = 0; e < n_experts; e++) {
+        uint32_t cur_ntokens = expert_token_counts[e];
+        if (cur_ntokens == 0u) {
+            continue;
+        }
+#if !MOE_SCHED_FAST_NO_CHECK
+        if (cur_ntokens >= (1u << MOE_SCHED_NTOK_W)) {
+            return -2;
+        }
+#endif
+        eid[active_count] = (uint16_t)e;
+        ntokens[active_count] = (uint16_t)cur_ntokens;
+        best_conc[active_count] = moe_sched_best_conc((uint16_t)cur_ntokens);
+        order[active_count] = (uint8_t)active_count;
+        total_conc = (uint16_t)(total_conc + best_conc[active_count]);
+        active_count++;
+    }
+
+    for (uint16_t i = 1; i < active_count; i++) {
+        uint8_t key = order[i];
+        uint16_t key_ntokens = ntokens[key];
+        int j = (int)i - 1;
+        while (j >= 0 && ntokens[order[j]] < key_ntokens) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+
+    for (uint16_t i = 0; i < active_count; i++) {
+        uint8_t src = order[i];
+        rem[i].eid = eid[src];
+        rem[i].ntokens = ntokens[src];
+        rem[i].best_conc = best_conc[src];
+        rem[i].active = 1u;
+    }
+
+    *active_count_out = active_count;
+    *total_conc_out = total_conc;
+    return 0;
+}
+
+#ifdef MOE_ENABLE_HW_SCHEDULER_CHECK
 static inline int moe_sched_remove_active_eid(moe_sched_rem_item_t *rem,
                                               const uint8_t eid_to_pos[MOE_SCHED_E_MAX],
                                               uint8_t eid,
@@ -302,6 +402,7 @@ static inline int moe_sched_remove_active_eid(moe_sched_rem_item_t *rem,
     *total_conc = (uint16_t)(*total_conc - rem[pos].best_conc);
     return 0;
 }
+#endif
 
 static inline void moe_sched_write_head_pair_relaxed(uint8_t pair,
                                                      moe_sched_head_t low,
@@ -332,6 +433,7 @@ static inline moe_sched_head_t moe_sched_head_from_rem(const moe_sched_rem_item_
     return head;
 }
 
+#ifdef MOE_ENABLE_HW_SCHEDULER_CHECK
 static inline uint64_t moe_sched_plan_signature(const moe_hw_plan_entry_t *entry)
 {
     return ((uint64_t)entry->valid << 0) |
@@ -402,3 +504,4 @@ static inline uint32_t moe_sched_compare_plan(const moe_hw_plan_entry_t *got,
     }
     return errors;
 }
+#endif

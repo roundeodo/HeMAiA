@@ -428,270 +428,70 @@ class SnaxBingoKernelDualVcSwigluFullArgs(BingoKernelArgs):
         return assignments
 
 
-class SnaxBingoKernelMoeDynamicExpertArgs(BingoKernelArgs):
+class SnaxBingoKernelDualVcL15MoeFullArgs(BingoKernelArgs):
+    """Args for __snax_bingo_kernel_dual_vc_l15_moe_full (and split variants).
+
+    arg[0] shape_cfg_addr: uint32_t L3 address of l15_dev_sX_cfg[]
+    arg[1] tcdm_base:      uint32_t TCDM base of the L15 layout region
+    arg[2] rescale_mult, arg[3] rescale_shift
+    """
+
     def __init__(
         self,
-        arg_storage_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        slot_id: int,
-        token_ids_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        input_A_l3_base: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        indiv_gate_B_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        indiv_up_B_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        indiv_down_B_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        output_l3_base: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        runtime_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        active_state_l1_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_a_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_b_gate_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_b_up_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_b_down_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_d_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_down_d_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        l1_d1_scratch_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        A_token_bytes: int,
-        indiv_B_expert_stride: int,
-        indiv_down_B_expert_stride: int,
-        indiv_B_tile_bytes: int,
-        indiv_D_tile_bytes: int,
-        indiv_down_B_tile_bytes: int,
-        indiv_down_D_tile_bytes: int,
-        indiv_N2: int,
-        indiv_down_N2: int,
-        s1_block_count: int,
-        s3_block_count: int,
-        indiv_K1: int,
-        indiv_N_per_block: int,
-        indiv_down_K1: int,
-        indiv_down_N_per_block: int,
+        shape_cfg_addr: Union[BingoMemAlloc, "BingoMemSymbol", int, str],
+        tcdm_base: Union[BingoMemAlloc, int],
         rescale_mult: int,
         rescale_shift: int,
-        output_expert_stride_bytes: int,
-        max_tokens_per_expert: int,
-        init_storage_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str, None] = None,
     ):
-        self.arg_storage_addr = arg_storage_addr
-        self.init_storage_addr = init_storage_addr
-        self.slot_id = slot_id
-        self.token_ids_addr = token_ids_addr
-        self.input_A_l3_base = input_A_l3_base
-        self.indiv_gate_B_l3 = indiv_gate_B_l3
-        self.indiv_up_B_l3 = indiv_up_B_l3
-        self.indiv_down_B_l3 = indiv_down_B_l3
-        self.output_l3_base = output_l3_base
-        self.runtime_state_addr = runtime_state_addr
-        self.active_state_l1_addr = active_state_l1_addr
-        self.l1_a_addr = l1_a_addr
-        self.l1_b_gate_addr = l1_b_gate_addr
-        self.l1_b_up_addr = l1_b_up_addr
-        self.l1_b_down_addr = l1_b_down_addr
-        self.l1_d_addr = l1_d_addr
-        self.l1_down_d_addr = l1_down_d_addr
-        self.l1_d1_scratch_addr = l1_d1_scratch_addr
-        self.A_token_bytes = A_token_bytes
-        self.indiv_B_expert_stride = indiv_B_expert_stride
-        self.indiv_down_B_expert_stride = indiv_down_B_expert_stride
-        self.indiv_B_tile_bytes = indiv_B_tile_bytes
-        self.indiv_D_tile_bytes = indiv_D_tile_bytes
-        self.indiv_down_B_tile_bytes = indiv_down_B_tile_bytes
-        self.indiv_down_D_tile_bytes = indiv_down_D_tile_bytes
-        self.indiv_N2 = indiv_N2
-        self.indiv_down_N2 = indiv_down_N2
-        self.s1_block_count = s1_block_count
-        self.s3_block_count = s3_block_count
-        self.indiv_K1 = indiv_K1
-        self.indiv_N_per_block = indiv_N_per_block
-        self.indiv_down_K1 = indiv_down_K1
-        self.indiv_down_N_per_block = indiv_down_N_per_block
+        self.shape_cfg_addr = shape_cfg_addr
+        self.tcdm_base = tcdm_base
         self.rescale_mult = rescale_mult
         self.rescale_shift = rescale_shift
-        self.output_expert_stride_bytes = output_expert_stride_bytes
-        self.max_tokens_per_expert = max_tokens_per_expert
 
     def get_struct_name(self) -> str:
-        return "__snax_bingo_kernel_moe_dynamic_expert_args_t"
-
-    def get_arg_storage_expr(self, handle_name_map: Dict[BingoMemAlloc, str]) -> str:
-        if isinstance(self.arg_storage_addr, BingoMemAlloc):
-            return handle_name_map[self.arg_storage_addr]
-        if isinstance(self.arg_storage_addr, BingoMemSymbol):
-            offset_op = f" + {self.arg_storage_addr.offset}" if self.arg_storage_addr.offset != 0 else ""
-            return f"(uint64_t)(uintptr_t){self.arg_storage_addr.symbol_name}{offset_op}"
-        return str(self.arg_storage_addr)
-
-    def get_arg_init_storage_expr(self, handle_name_map: Dict[BingoMemAlloc, str]) -> str:
-        init_storage_addr = self.init_storage_addr
-        if init_storage_addr is None:
-            return self.get_arg_storage_expr(handle_name_map)
-        if isinstance(init_storage_addr, BingoMemAlloc):
-            return handle_name_map[init_storage_addr]
-        if isinstance(init_storage_addr, BingoMemSymbol):
-            offset_op = (
-                f" + {init_storage_addr.offset}"
-                if init_storage_addr.offset != 0
-                else ""
-            )
-            return f"(uint64_t)(uintptr_t){init_storage_addr.symbol_name}{offset_op}"
-        return str(init_storage_addr)
-
-    def _process_addr64(
-        self,
-        val: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        base_name: str,
-        assignments: Dict[str, str],
-        handle_name_map: Dict[BingoMemAlloc, str],
-    ):
-        self._process_addr(val, base_name, assignments, handle_name_map, split_64bit=False, as_64bit=True)
-
-    def _process_addr32(
-        self,
-        val: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        base_name: str,
-        assignments: Dict[str, str],
-        handle_name_map: Dict[BingoMemAlloc, str],
-    ):
-        self._process_addr(val, base_name, assignments, handle_name_map, split_64bit=False, as_64bit=False)
+        return "__snax_bingo_kernel_dual_vc_l15_moe_full_args_t"
 
     def get_c_field_assignments(
         self, handle_name_map: Dict[BingoMemAlloc, str]
     ) -> Dict[str, str]:
-        assignments = {
-            "active": "0",
-            "slot_id": str(self.slot_id),
-            "expert_id": "0",
-            "token_start_rank": "0",
-            "ntokens": "0",
-            "shape_s1": "0",
-            "shape_s3": "0",
-            "skip_s1": "0",
-            "skip_s3": "0",
-            "skip_s2": "0",
-            "skip_s4": "0",
-            "m_s2_exec": "0",
-            "m_s4_exec": "0",
-            "dma_s1": "0",
-            "dma_s3": "0",
-            "bw_s1": "0",
-            "bw_s3": "0",
-            "runtime_cluster_idx": "0",
-            "wait_for_peer_slots": "0",
-            "s1_block_count": str(self.s1_block_count),
-            "s3_block_count": str(self.s3_block_count),
-        }
-        for slot in range(4):
-            assignments[f"dma_slot_valid[{slot}]"] = "0"
-            assignments[f"dma_slot_kind[{slot}]"] = "0"
-            assignments[f"dma_slot_expert_id[{slot}]"] = "-1"
-            assignments[f"dma_slot_shape[{slot}]"] = "0"
-            assignments[f"dma_slot_dma[{slot}]"] = "0"
-            assignments[f"dma_slot_idma_seq[{slot}]"] = "0"
-            assignments[f"dma_slot_xdma_seq[{slot}]"] = "0"
-        swiglu_fields = (
-            "valid",
-            "input_A_addr",
-            "input_B_gate_addr",
-            "input_B_up_addr",
-            "output_D0_addr",
-            "output_D1_addr",
-            "M",
-            "K",
-            "N",
-            "array_shape",
-            "rescale_mult",
-            "rescale_shift",
-        )
-        down_fields = (
-            "valid",
-            "input_A_addr",
-            "input_B0_addr",
-            "input_B1_addr",
-            "output_D0_addr",
-            "output_D1_addr",
-            "M",
-            "K",
-            "N",
-            "array_shape",
-            "d_row_stride_override",
-            "rescale_mult",
-            "rescale_shift",
-        )
-        for block in range(2):
-            for field in swiglu_fields:
-                assignments[f"s1_call[{block}].{field}"] = "0"
-            for field in down_fields:
-                assignments[f"s3_call[{block}].{field}"] = "0"
-        for field in swiglu_fields:
-            assignments[f"s2_call.{field}"] = "0"
-        for field in down_fields:
-            assignments[f"s4_call.{field}"] = "0"
-        self._process_addr64(
-            self.token_ids_addr, "token_ids_addr", assignments, handle_name_map
-        )
-        self._process_addr64(
-            self.input_A_l3_base, "input_A_l3_base", assignments, handle_name_map
-        )
-        self._process_addr64(
-            self.indiv_gate_B_l3, "indiv_gate_B_l3", assignments, handle_name_map
-        )
-        self._process_addr64(
-            self.indiv_up_B_l3, "indiv_up_B_l3", assignments, handle_name_map
-        )
-        self._process_addr64(
-            self.indiv_down_B_l3, "indiv_down_B_l3", assignments, handle_name_map
-        )
-        self._process_addr64(
-            self.output_l3_base, "output_l3_base", assignments, handle_name_map
-        )
-        self._process_addr64(
-            self.runtime_state_addr, "runtime_state_addr", assignments, handle_name_map
-        )
-        self._process_addr32(
-            self.active_state_l1_addr,
-            "active_state_l1_addr",
+        assignments = {}
+        self._process_addr(
+            self.shape_cfg_addr,
+            "shape_cfg_addr",
             assignments,
             handle_name_map,
+            split_64bit=False,
         )
-        self._process_addr32(self.l1_a_addr, "l1_a_addr", assignments, handle_name_map)
-        self._process_addr32(self.l1_b_gate_addr, "l1_b_gate_addr", assignments, handle_name_map)
-        self._process_addr32(self.l1_b_up_addr, "l1_b_up_addr", assignments, handle_name_map)
-        self._process_addr32(self.l1_b_down_addr, "l1_b_down_addr", assignments, handle_name_map)
-        self._process_addr32(self.l1_d_addr, "l1_d_addr", assignments, handle_name_map)
-        self._process_addr32(
-            self.l1_down_d_addr, "l1_down_d_addr", assignments, handle_name_map
+        self._process_addr(
+            self.tcdm_base, "tcdm_base", assignments, handle_name_map, split_64bit=False
         )
-        self._process_addr32(
-            self.l1_d1_scratch_addr, "l1_d1_scratch_addr", assignments, handle_name_map
-        )
-        assignments.update(
-            {
-                "A_token_bytes": str(self.A_token_bytes),
-                "indiv_B_expert_stride": str(self.indiv_B_expert_stride),
-                "indiv_down_B_expert_stride": str(self.indiv_down_B_expert_stride),
-                "indiv_B_tile_bytes": str(self.indiv_B_tile_bytes),
-                "indiv_D_tile_bytes": str(self.indiv_D_tile_bytes),
-                "indiv_down_B_tile_bytes": str(self.indiv_down_B_tile_bytes),
-                "indiv_down_D_tile_bytes": str(self.indiv_down_D_tile_bytes),
-                "indiv_N2": str(self.indiv_N2),
-                "indiv_down_N2": str(self.indiv_down_N2),
-                "indiv_K1": str(self.indiv_K1),
-                "indiv_N_per_block": str(self.indiv_N_per_block),
-                "indiv_down_K1": str(self.indiv_down_K1),
-                "indiv_down_N_per_block": str(self.indiv_down_N_per_block),
-                "rescale_mult": str(self.rescale_mult),
-                "rescale_shift": str(self.rescale_shift),
-                "output_expert_stride_bytes": str(self.output_expert_stride_bytes),
-                "max_tokens_per_expert": str(self.max_tokens_per_expert),
-            }
-        )
+        assignments["rescale_mult"] = str(self.rescale_mult)
+        assignments["rescale_shift"] = str(self.rescale_shift)
         return assignments
 
+
+class SnaxBingoKernelDualVcL15MoeSwigluArgs(SnaxBingoKernelDualVcL15MoeFullArgs):
+    """Args for __snax_bingo_kernel_dual_vc_l15_moe_swiglu (Mode-0 / SwiGLU only)."""
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_dual_vc_l15_moe_swiglu_args_t"
+
+
+class SnaxBingoKernelDualVcL15MoeDownArgs(SnaxBingoKernelDualVcL15MoeFullArgs):
+    """Args for __snax_bingo_kernel_dual_vc_l15_moe_down (Mode-1 / down-proj only)."""
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_dual_vc_l15_moe_down_args_t"
 
 class SnaxBingoKernelMoeDynamicExpertBlockArgs(BingoKernelArgs):
     def __init__(
         self,
         task_arg_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        static_arg_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         block_idx: int,
     ):
         self.task_arg_addr = task_arg_addr
+        self.static_arg_addr = static_arg_addr
         self.block_idx = block_idx
 
     def get_struct_name(self) -> str:
@@ -704,6 +504,14 @@ class SnaxBingoKernelMoeDynamicExpertBlockArgs(BingoKernelArgs):
         self._process_addr(
             self.task_arg_addr,
             "task_arg_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.static_arg_addr,
+            "static_arg_addr",
             assignments,
             handle_name_map,
             split_64bit=False,
@@ -1228,8 +1036,16 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
         return assignments
 
 
-# Current multi_cluster_MoE Phase 3 wrapper: package expert token counts and
-# CAM state into the request buffer consumed by the host firmware super-node.
+# multi_cluster_MoE Phase 3 wrapper. Pure HW fast builds pass expert token
+# counts and CAM state directly to the RTL scheduler and direct-lower compact
+# plan words into L3 stage args. request/schedule addresses are legacy ABI
+# fields used only by SW scheduler / HW-check builds.
+_MOE_LEGACY_SCHED_ABI_IF = (
+    "#if !defined(MOE_ENABLE_HW_SCHEDULER) || defined(MOE_ENABLE_HW_SCHEDULER_CHECK)"
+)
+_MOE_LEGACY_SCHED_ABI_ENDIF = "#endif"
+
+
 class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
     def __init__(
         self,
@@ -1250,6 +1066,20 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         c3_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         dynamic_arg_slot_bytes: int = 0,
         dynamic_num_slots: int = 0,
+        c2_l1_a: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c2_l1_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c2_l1_down_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c3_l1_a: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c3_l1_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        c3_l1_down_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
+        A_token_bytes: int = 0,
+        indiv_D_tile_bytes: int = 0,
+        indiv_down_D_tile_bytes: int = 0,
+        indiv_N_per_block: int = 0,
+        indiv_down_N_per_block: int = 0,
+        s1_block_count: int = 0,
+        s3_block_count: int = 0,
+        max_tokens_per_expert: int = 0,
     ):
         self.expert_token_counts_addr = expert_token_counts_addr
         self.cam_state_addr = cam_state_addr
@@ -1268,6 +1098,20 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         self.c3_stage_base = c3_stage_base
         self.dynamic_arg_slot_bytes = dynamic_arg_slot_bytes
         self.dynamic_num_slots = dynamic_num_slots
+        self.c2_l1_a = c2_l1_a
+        self.c2_l1_d = c2_l1_d
+        self.c2_l1_down_d = c2_l1_down_d
+        self.c3_l1_a = c3_l1_a
+        self.c3_l1_d = c3_l1_d
+        self.c3_l1_down_d = c3_l1_down_d
+        self.A_token_bytes = A_token_bytes
+        self.indiv_D_tile_bytes = indiv_D_tile_bytes
+        self.indiv_down_D_tile_bytes = indiv_down_D_tile_bytes
+        self.indiv_N_per_block = indiv_N_per_block
+        self.indiv_down_N_per_block = indiv_down_N_per_block
+        self.s1_block_count = s1_block_count
+        self.s3_block_count = s3_block_count
+        self.max_tokens_per_expert = max_tokens_per_expert
 
     def get_struct_name(self) -> str:
         return "__host_bingo_kernel_moe_prepare_request_args_t"
@@ -1292,6 +1136,7 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
             split_64bit=False,
             as_64bit=True,
         )
+        assignments[_MOE_LEGACY_SCHED_ABI_IF] = ""
         self._process_addr(
             self.request_out_addr,
             "request_out_addr",
@@ -1308,6 +1153,7 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
             split_64bit=False,
             as_64bit=True,
         )
+        assignments[_MOE_LEGACY_SCHED_ABI_ENDIF] = ""
         self._process_addr(
             self.expert_token_offsets_addr,
             "expert_token_offsets_addr",
@@ -1370,11 +1216,36 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         )
         assignments["dynamic_arg_slot_bytes"] = str(self.dynamic_arg_slot_bytes)
         assignments["dynamic_num_slots"] = str(self.dynamic_num_slots)
+        for attr in (
+            "c2_l1_a",
+            "c2_l1_d",
+            "c2_l1_down_d",
+            "c3_l1_a",
+            "c3_l1_d",
+            "c3_l1_down_d",
+        ):
+            self._process_addr(
+                getattr(self, attr),
+                attr,
+                assignments,
+                handle_name_map,
+                split_64bit=False,
+                as_64bit=True,
+            )
+        assignments["A_token_bytes"] = str(self.A_token_bytes)
+        assignments["indiv_D_tile_bytes"] = str(self.indiv_D_tile_bytes)
+        assignments["indiv_down_D_tile_bytes"] = str(self.indiv_down_D_tile_bytes)
+        assignments["indiv_N_per_block"] = str(self.indiv_N_per_block)
+        assignments["indiv_down_N_per_block"] = str(self.indiv_down_N_per_block)
+        assignments["s1_block_count"] = str(self.s1_block_count)
+        assignments["s3_block_count"] = str(self.s3_block_count)
+        assignments["max_tokens_per_expert"] = str(self.max_tokens_per_expert)
         return assignments
 
 
-# Current multi_cluster_MoE Phase 4 wrapper: describes the host firmware
-# super-node that internally performs dynamic scheduling, DMA, and C2/C3 launch.
+# multi_cluster_MoE Phase 4 wrapper. Pure HW fast builds only synchronize the
+# runtime state and flush the active L3 stage args to C2/C3 L1. SW scheduler
+# builds may still consume request/schedule through the same ABI.
 class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
     def __init__(
         self,
@@ -1521,20 +1392,59 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
         self, handle_name_map: Dict[BingoMemAlloc, str]
     ) -> Dict[str, str]:
         assignments = {}
-        self._process_addr64(self.request_addr, "request_addr", assignments, handle_name_map)
-        self._process_addr64(self.schedule_addr, "schedule_addr", assignments, handle_name_map)
-        self._process_addr64(self.expert_token_offsets_addr, "expert_token_offsets_addr", assignments, handle_name_map)
-        self._process_addr64(self.expert_token_ids_addr, "expert_token_ids_addr", assignments, handle_name_map)
-        self._process_addr64(self.expert_token_kpos_addr, "expert_token_kpos_addr", assignments, handle_name_map)
-        self._process_addr64(self.cam_state_addr, "cam_state_addr", assignments, handle_name_map)
-        self._process_addr64(self.input_A_l3_base, "input_A_l3_base", assignments, handle_name_map)
-        self._process_addr64(self.topk_indices_l3, "topk_indices_l3", assignments, handle_name_map)
-        self._process_addr64(self.indiv_gate_B_l3, "indiv_gate_B_l3", assignments, handle_name_map)
-        self._process_addr64(self.indiv_up_B_l3, "indiv_up_B_l3", assignments, handle_name_map)
-        self._process_addr64(self.indiv_down_B_l3, "indiv_down_B_l3", assignments, handle_name_map)
-        self._process_addr64(self.c2_l1_b_gate, "c2_l1_b_gate", assignments, handle_name_map)
-        self._process_addr64(self.c2_l1_b_up, "c2_l1_b_up", assignments, handle_name_map)
-        self._process_addr64(self.c2_l1_b_down, "c2_l1_b_down", assignments, handle_name_map)
+        assignments[_MOE_LEGACY_SCHED_ABI_IF] = ""
+        self._process_addr64(
+            self.request_addr, "request_addr", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.schedule_addr, "schedule_addr", assignments, handle_name_map
+        )
+        assignments[_MOE_LEGACY_SCHED_ABI_ENDIF] = ""
+        self._process_addr64(
+            self.expert_token_offsets_addr,
+            "expert_token_offsets_addr",
+            assignments,
+            handle_name_map,
+        )
+        self._process_addr64(
+            self.expert_token_ids_addr,
+            "expert_token_ids_addr",
+            assignments,
+            handle_name_map,
+        )
+        self._process_addr64(
+            self.expert_token_kpos_addr,
+            "expert_token_kpos_addr",
+            assignments,
+            handle_name_map,
+        )
+        self._process_addr64(
+            self.cam_state_addr, "cam_state_addr", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.input_A_l3_base, "input_A_l3_base", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.topk_indices_l3, "topk_indices_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.indiv_gate_B_l3, "indiv_gate_B_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.indiv_up_B_l3, "indiv_up_B_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.indiv_down_B_l3, "indiv_down_B_l3", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.c2_l1_b_gate, "c2_l1_b_gate", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.c2_l1_b_up, "c2_l1_b_up", assignments, handle_name_map
+        )
+        self._process_addr64(
+            self.c2_l1_b_down, "c2_l1_b_down", assignments, handle_name_map
+        )
         self._process_addr64(self.c2_l1_a, "c2_l1_a", assignments, handle_name_map)
         self._process_addr64(self.c2_l1_d, "c2_l1_d", assignments, handle_name_map)
         self._process_addr64(

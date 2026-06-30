@@ -19,6 +19,13 @@
  * --------------------------------------------------------------------------
  */
 #include "moe_scheduler.h"
+
+#if defined(MOE_ENABLE_HW_SCHEDULER) && !defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
+/* Pure HW fast build intentionally emits no SW scheduler/fallback functions.
+ * Any accidental moe_schedule()/moe_make_hw_plan() reference in this build
+ * should fail at link time instead of silently taking a software path. */
+#else
+
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -1118,3 +1125,5 @@ moe_status_t moe_schedule(const moe_request_t *req, moe_schedule_t *out)
     (void)moe_plan(req,plan,&n_plan); /* makespan returned but not stored in compact output */
     return lower_plan(plan,n_plan,req,out);
 }
+
+#endif

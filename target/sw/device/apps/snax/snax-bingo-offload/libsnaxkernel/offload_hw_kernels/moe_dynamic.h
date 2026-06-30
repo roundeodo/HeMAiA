@@ -619,15 +619,15 @@ static inline uint32_t __moe_dyn_b_channels(uint32_t shape)
 }
 
 static inline uint32_t __moe_dyn_s1_block_count(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
-    return (cfg->s1_block_count != 0u) ? cfg->s1_block_count : cfg->indiv_N2;
+    return (st->s1_block_count != 0u) ? st->s1_block_count : st->indiv_N2;
 }
 
 static inline uint32_t __moe_dyn_s3_block_count(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
-    return (cfg->s3_block_count != 0u) ? cfg->s3_block_count : cfg->indiv_down_N2;
+    return (st->s3_block_count != 0u) ? st->s3_block_count : st->indiv_down_N2;
 }
 
 static inline uint64_t __moe_dyn_l1_wide(uint32_t local_addr)
@@ -1005,31 +1005,33 @@ static inline uint32_t __moe_dyn_copy_pair_2d(uint32_t binding,
                                               uint32_t rows);
 
 static inline volatile uint32_t *__moe_dyn_runtime_state(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
-    return (volatile uint32_t *)(uintptr_t)cfg->runtime_state_addr;
+    return (volatile uint32_t *)(uintptr_t)st->runtime_state_addr;
 }
 
 static inline uint32_t __moe_dyn_slot_active_this_round(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
     uint32_t ctrl = cfg->ctrl;
     if (MOE_DYN_CTRL_ACTIVE(ctrl) == 0u || cfg->ntokens == 0u) return 0u;
 
     volatile uint32_t *state =
-        (volatile uint32_t *)(uintptr_t)cfg->active_state_l1_addr;
+        (volatile uint32_t *)(uintptr_t)st->active_state_l1_addr;
     uint32_t active_idx = (MOE_DYN_CTRL_CLUSTER(ctrl) == 0u) ?
         MOE_DYN_RT_C2_ACTIVE_SLOTS : MOE_DYN_RT_C3_ACTIVE_SLOTS;
     return (MOE_DYN_CTRL_SLOT_ID(ctrl) < state[active_idx]) ? 1u : 0u;
 }
 
 static inline void __moe_dyn_wait_task_start(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
     uint32_t wait_for_peer_slots = cfg->wait_for_peer_slots;
     if (wait_for_peer_slots == 0u) return;
 
-    volatile uint32_t *state = __moe_dyn_runtime_state(cfg);
+    volatile uint32_t *state = __moe_dyn_runtime_state(st);
     uint32_t peer_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ?
         MOE_DYN_RT_C3_DONE : MOE_DYN_RT_C2_DONE;
     while (state[peer_idx] < wait_for_peer_slots) {
@@ -1039,9 +1041,10 @@ static inline void __moe_dyn_wait_task_start(
 }
 
 static inline void __moe_dyn_mark_task_complete(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg)
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
-    volatile uint32_t *state = __moe_dyn_runtime_state(cfg);
+    volatile uint32_t *state = __moe_dyn_runtime_state(st);
     uint32_t self_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ?
         MOE_DYN_RT_C2_DONE : MOE_DYN_RT_C3_DONE;
     asm volatile("fence rw, w" ::: "memory");
@@ -1050,89 +1053,89 @@ static inline void __moe_dyn_mark_task_complete(
 }
 
 static inline uint32_t __moe_dyn_copy_gate_up_weight(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
     uint32_t expert_id,
     uint32_t binding)
 {
     if (binding == 0u) return BINGO_RET_FAIL;
-    uint64_t gate_src = cfg->indiv_gate_B_l3 +
-        (uint64_t)expert_id * (uint64_t)cfg->indiv_B_expert_stride;
-    uint64_t up_src = cfg->indiv_up_B_l3 +
-        (uint64_t)expert_id * (uint64_t)cfg->indiv_B_expert_stride;
-    uint32_t s1_weight_bytes = __moe_dyn_s1_block_count(cfg) * cfg->indiv_B_tile_bytes;
+    uint64_t gate_src = st->indiv_gate_B_l3 +
+        (uint64_t)expert_id * (uint64_t)st->indiv_B_expert_stride;
+    uint64_t up_src = st->indiv_up_B_l3 +
+        (uint64_t)expert_id * (uint64_t)st->indiv_B_expert_stride;
+    uint32_t s1_weight_bytes = __moe_dyn_s1_block_count(st) * st->indiv_B_tile_bytes;
     return __moe_dyn_copy_pair(
         binding,
-        __moe_dyn_l1_wide(cfg->l1_b_gate_addr), gate_src,
-        __moe_dyn_l1_wide(cfg->l1_b_up_addr), up_src,
+        __moe_dyn_l1_wide(st->l1_b_gate_addr), gate_src,
+        __moe_dyn_l1_wide(st->l1_b_up_addr), up_src,
         s1_weight_bytes);
 }
 
 static inline uint32_t __moe_dyn_copy_down_weight(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
     uint32_t expert_id,
     uint32_t binding)
 {
     if (binding == 0u) return BINGO_RET_FAIL;
-    uint64_t down_src = cfg->indiv_down_B_l3 +
-        (uint64_t)expert_id * (uint64_t)cfg->indiv_down_B_expert_stride;
-    uint32_t down_weight_bytes = __moe_dyn_s3_block_count(cfg) * cfg->indiv_down_B_tile_bytes;
+    uint64_t down_src = st->indiv_down_B_l3 +
+        (uint64_t)expert_id * (uint64_t)st->indiv_down_B_expert_stride;
+    uint32_t down_weight_bytes = __moe_dyn_s3_block_count(st) * st->indiv_down_B_tile_bytes;
     if ((uint64_t)down_weight_bytes * 2u >
-        (uint64_t)cfg->indiv_down_B_expert_stride) return BINGO_RET_FAIL;
+        (uint64_t)st->indiv_down_B_expert_stride) return BINGO_RET_FAIL;
     return __moe_dyn_copy_pair(
         binding,
-        __moe_dyn_l1_wide(cfg->l1_b_down_addr), down_src,
-        __moe_dyn_l1_wide(cfg->l1_b_down_addr + down_weight_bytes),
+        __moe_dyn_l1_wide(st->l1_b_down_addr), down_src,
+        __moe_dyn_l1_wide(st->l1_b_down_addr + down_weight_bytes),
         down_src + down_weight_bytes,
         down_weight_bytes);
 }
 
 static inline uint32_t __moe_dyn_copy_gate_up_weight_block(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
     uint32_t expert_id,
     uint32_t binding,
     uint32_t block_idx)
 {
     if (binding == 0u) return BINGO_RET_FAIL;
-    uint32_t s1_blocks = __moe_dyn_s1_block_count(cfg);
+    uint32_t s1_blocks = __moe_dyn_s1_block_count(st);
     if (block_idx >= s1_blocks) return BINGO_RET_SUCC;
-    uint64_t gate_src = cfg->indiv_gate_B_l3 +
-        (uint64_t)expert_id * (uint64_t)cfg->indiv_B_expert_stride +
-        (uint64_t)block_idx * (uint64_t)cfg->indiv_B_tile_bytes;
-    uint64_t up_src = cfg->indiv_up_B_l3 +
-        (uint64_t)expert_id * (uint64_t)cfg->indiv_B_expert_stride +
-        (uint64_t)block_idx * (uint64_t)cfg->indiv_B_tile_bytes;
-    uint32_t dst_off = block_idx * cfg->indiv_B_tile_bytes;
+    uint64_t gate_src = st->indiv_gate_B_l3 +
+        (uint64_t)expert_id * (uint64_t)st->indiv_B_expert_stride +
+        (uint64_t)block_idx * (uint64_t)st->indiv_B_tile_bytes;
+    uint64_t up_src = st->indiv_up_B_l3 +
+        (uint64_t)expert_id * (uint64_t)st->indiv_B_expert_stride +
+        (uint64_t)block_idx * (uint64_t)st->indiv_B_tile_bytes;
+    uint32_t dst_off = block_idx * st->indiv_B_tile_bytes;
     return __moe_dyn_copy_pair(
         binding,
-        __moe_dyn_l1_wide(cfg->l1_b_gate_addr + dst_off), gate_src,
-        __moe_dyn_l1_wide(cfg->l1_b_up_addr + dst_off), up_src,
-        cfg->indiv_B_tile_bytes);
+        __moe_dyn_l1_wide(st->l1_b_gate_addr + dst_off), gate_src,
+        __moe_dyn_l1_wide(st->l1_b_up_addr + dst_off), up_src,
+        st->indiv_B_tile_bytes);
 }
 
 static inline uint32_t __moe_dyn_copy_down_weight_block(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
     uint32_t expert_id,
     uint32_t binding,
     uint32_t block_idx)
 {
     if (binding == 0u) return BINGO_RET_FAIL;
-    uint32_t s3_blocks = __moe_dyn_s3_block_count(cfg);
+    uint32_t s3_blocks = __moe_dyn_s3_block_count(st);
     if (block_idx >= s3_blocks) return BINGO_RET_SUCC;
-    uint64_t down_src = cfg->indiv_down_B_l3 +
-        (uint64_t)expert_id * (uint64_t)cfg->indiv_down_B_expert_stride;
+    uint64_t down_src = st->indiv_down_B_l3 +
+        (uint64_t)expert_id * (uint64_t)st->indiv_down_B_expert_stride;
     uint64_t left_src = down_src +
-        (uint64_t)block_idx * (uint64_t)cfg->indiv_down_B_tile_bytes;
+        (uint64_t)block_idx * (uint64_t)st->indiv_down_B_tile_bytes;
     uint64_t right_src = down_src +
         (uint64_t)(s3_blocks + block_idx) *
-            (uint64_t)cfg->indiv_down_B_tile_bytes;
-    uint32_t left_off = block_idx * cfg->indiv_down_B_tile_bytes;
+            (uint64_t)st->indiv_down_B_tile_bytes;
+    uint32_t left_off = block_idx * st->indiv_down_B_tile_bytes;
     uint32_t right_off = (s3_blocks + block_idx) *
-        cfg->indiv_down_B_tile_bytes;
+        st->indiv_down_B_tile_bytes;
     return __moe_dyn_copy_pair(
         binding,
-        __moe_dyn_l1_wide(cfg->l1_b_down_addr + left_off), left_src,
-        __moe_dyn_l1_wide(cfg->l1_b_down_addr + right_off), right_src,
-        cfg->indiv_down_B_tile_bytes);
+        __moe_dyn_l1_wide(st->l1_b_down_addr + left_off), left_src,
+        __moe_dyn_l1_wide(st->l1_b_down_addr + right_off), right_src,
+        st->indiv_down_B_tile_bytes);
 }
 
 static inline uint32_t __moe_dyn_copy_pair(uint32_t binding,
@@ -1235,18 +1238,19 @@ static inline uint32_t __moe_dyn_m_exec(uint32_t ntokens, uint32_t shape)
 
 static inline uint32_t __moe_dyn_gather_s1_tokens(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
     uint32_t m_s1_exec)
 {
-    if (m_s1_exec > cfg->max_tokens_per_expert) {
+    if (m_s1_exec > st->max_tokens_per_expert) {
         printf_safe("[MoEDyn C%d] slot=%u ntokens=%u exceeds max=%u\r\n",
                     snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->ntokens,
-                    cfg->max_tokens_per_expert);
+                    st->max_tokens_per_expert);
         return BINGO_RET_FAIL;
     }
 
-    if (cfg->A_token_bytes == 0u) {
+    if (st->A_token_bytes == 0u) {
         printf_safe("[MoEDyn C%d] invalid A layout: A_token_bytes=%u\r\n",
-                    snrt_cluster_idx(), cfg->A_token_bytes);
+                    snrt_cluster_idx(), st->A_token_bytes);
         return BINGO_RET_FAIL;
     }
 
@@ -1258,16 +1262,19 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
      *   C2 (cluster_idx==2) 使用 xDMA：流水线配置——在第 t 笔传输运行期间提前写入
      *     第 t+1 笔的 CSR（36 cc），完全 overlap 传输时间（~41 cc），最后统一 wait。
      * iDMA 和 xDMA 走不同的物理 AXI 通道，两 cluster 同时 gather 时不争用同一条总线。 */
-    uint32_t l3_a_row_stride = cfg->A_token_bytes + 32u;  /* L3 stride: includes 32-byte padding */
-    uint32_t l1_a_row_stride = cfg->A_token_bytes;          /* L1 stride: packed, no padding */
-    uint16_t *token_ids = (uint16_t *)(uintptr_t)cfg->token_ids_addr;
+    uint32_t l3_a_row_stride = st->A_token_bytes + 32u;  /* L3 stride: includes 32-byte padding */
+    uint32_t l1_a_row_stride = st->A_token_bytes;        /* L1 stride: packed, no padding */
+    uint32_t *token_offsets = (uint32_t *)(uintptr_t)st->token_offsets_addr;
+    uint16_t *token_ids = (uint16_t *)(uintptr_t)st->token_ids_addr;
+    uint32_t expert_token_offset = token_offsets[cfg->expert_id];
 
     /* 先做边界检查，再 DMA 提交，避免提交到一半出错留下悬挂传输 */
     for (uint32_t local_t = 0; local_t < cfg->ntokens; local_t++) {
-        uint32_t token_id = token_ids[cfg->token_start_rank + local_t];
-        if (token_id >= cfg->max_tokens_per_expert) {
+        uint32_t token_id =
+            token_ids[expert_token_offset + cfg->token_start_rank + local_t];
+        if (token_id >= st->max_tokens_per_expert) {
             printf_safe("[MoEDyn C%d] token_id=%u exceeds max=%u\r\n",
-                        snrt_cluster_idx(), token_id, cfg->max_tokens_per_expert);
+                        snrt_cluster_idx(), token_id, st->max_tokens_per_expert);
             return BINGO_RET_FAIL;
         }
     }
@@ -1282,22 +1289,23 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
          * （xDMA engine → cluster crossbar → L3 wide port）相互独立，
          * 因此在上一笔传输运行时预写 CSR 是安全的。 */
         if (cfg->ntokens > 0u) {
-            uint32_t tid0 = token_ids[cfg->token_start_rank];
-            uint64_t src0 = cfg->input_A_l3_base + (uint64_t)tid0 * (uint64_t)l3_a_row_stride;
-            uint64_t dst0 = __moe_dyn_l1_wide(cfg->l1_a_addr);
+            uint32_t tid0 = token_ids[expert_token_offset + cfg->token_start_rank];
+            uint64_t src0 = st->input_A_l3_base + (uint64_t)tid0 * (uint64_t)l3_a_row_stride;
+            uint64_t dst0 = __moe_dyn_l1_wide(st->l1_a_addr);
             BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
-            xdma_memcpy_1d_fast_full_addr(src0, dst0, cfg->A_token_bytes);
+            xdma_memcpy_1d_fast_full_addr(src0, dst0, st->A_token_bytes);
             BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
             int32_t prev_task = xdma_start();
             uint64_t prev_src = src0, prev_dst = dst0;
 
             for (uint32_t local_t = 1; local_t < cfg->ntokens; local_t++) {
-                uint32_t token_id = token_ids[cfg->token_start_rank + local_t];
-                uint64_t src = cfg->input_A_l3_base +
+                uint32_t token_id =
+                    token_ids[expert_token_offset + cfg->token_start_rank + local_t];
+                uint64_t src = st->input_A_l3_base +
                     (uint64_t)token_id * (uint64_t)l3_a_row_stride;
-                uint64_t dst = __moe_dyn_l1_wide(cfg->l1_a_addr + local_t * l1_a_row_stride);
+                uint64_t dst = __moe_dyn_l1_wide(st->l1_a_addr + local_t * l1_a_row_stride);
                 /* 预写下一笔 CSR（~36 cc），此时上一笔传输仍在运行（~41 cc） */
-                xdma_memcpy_1d_fast_full_addr(src, dst, cfg->A_token_bytes);
+                xdma_memcpy_1d_fast_full_addr(src, dst, st->A_token_bytes);
                 /* 等待上一笔完成（CSR 写完后通常只剩 ~5 cc） */
                 BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
                 xdma_wait_task(prev_src, prev_dst, (uint32_t)prev_task);
@@ -1318,11 +1326,12 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
          * 批量提交所有 token 的非阻塞 iDMA 请求，单次 wait_all。
          * iDMA 与 C2 的 xDMA 走不同的 AXI 通道，互不竞争。 */
         for (uint32_t local_t = 0; local_t < cfg->ntokens; local_t++) {
-            uint32_t token_id = token_ids[cfg->token_start_rank + local_t];
-            uint64_t src = cfg->input_A_l3_base +
+            uint32_t token_id =
+                token_ids[expert_token_offset + cfg->token_start_rank + local_t];
+            uint64_t src = st->input_A_l3_base +
                 (uint64_t)token_id * (uint64_t)l3_a_row_stride;
-            uint64_t dst = __moe_dyn_l1_wide(cfg->l1_a_addr + local_t * l1_a_row_stride);
-            snrt_dma_start_1d_wideptr(dst, src, cfg->A_token_bytes);
+            uint64_t dst = __moe_dyn_l1_wide(st->l1_a_addr + local_t * l1_a_row_stride);
+            snrt_dma_start_1d_wideptr(dst, src, st->A_token_bytes);
         }
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_START);
         snrt_dma_wait_all();
@@ -1331,7 +1340,7 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
 
     if (m_s1_exec > cfg->ntokens) {
         /* Zero padding token rows in one contiguous range (L1 row = l1_a_row_stride bytes). */
-        __moe_dyn_zero_bytes((uint64_t)cfg->l1_a_addr +
+        __moe_dyn_zero_bytes((uint64_t)st->l1_a_addr +
             (uint64_t)cfg->ntokens * (uint64_t)l1_a_row_stride,
             (uint64_t)(m_s1_exec - cfg->ntokens) * (uint64_t)l1_a_row_stride);
     }
@@ -1346,81 +1355,90 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *
         return BINGO_RET_FAIL;
     }
 
+    __snax_bingo_kernel_moe_dynamic_expert_block_args_t *node =
+        (__snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
+        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
+        node->task_arg_addr;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st =
+        (const __snax_bingo_moe_dynamic_expert_static_args_t *)(uintptr_t)
+        node->static_arg_addr;
 #if MOE_DYN_DEBUG_SCHED_VERIFY
     /* PROBE gather_s1: 在 ACTIVE check 前 — 确认 DM core 进入了此函数 */
     printf_safe("[PROBE gs C%d] ctrl=0x%08x ntok=%u\r\n",
                 snrt_cluster_idx(), cfg->ctrl, cfg->ntokens);
 #endif
-    if (!__moe_dyn_slot_active_this_round(cfg)) return BINGO_RET_SUCC;
-    __moe_dyn_wait_task_start(cfg);
+    if (!__moe_dyn_slot_active_this_round(cfg, st)) return BINGO_RET_SUCC;
+    __moe_dyn_wait_task_start(cfg, st);
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_START);
     uint32_t rc = __moe_dyn_gather_s1_tokens(
-        cfg, __moe_dyn_m_exec(cfg->ntokens, MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl)));
+        cfg, st, __moe_dyn_m_exec(cfg->ntokens, MOE_DYN_CTRL_SHAPE_S1(cfg->ctrl)));
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_END);
     return rc;
 }
 
 static inline __snax_bingo_kernel_moe_dynamic_expert_args_t *__moe_dyn_block_cfg(
     void *arg,
-    uint32_t *block_idx)
+    uint32_t *block_idx,
+    const __snax_bingo_moe_dynamic_expert_static_args_t **st)
 {
     __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (__snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
     *block_idx = blk->block_idx;
+    *st = (const __snax_bingo_moe_dynamic_expert_static_args_t *)(uintptr_t)
+        blk->static_arg_addr;
     return (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
         blk->task_arg_addr;
 }
 
 static inline uint32_t __moe_dyn_run_swiglu_from_pre(
-    const __snax_bingo_moe_dyn_swiglu_call_args_t *pre)
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    const __snax_bingo_moe_dyn_s1_call_args_t *pre,
+    uint32_t block_idx)
 {
     return __moe_dual_vc_swiglu_full_params(
-        pre->input_A_addr,
-        pre->input_B_gate_addr,
-        pre->input_B_up_addr,
+        st->l1_a_addr,
+        st->l1_b_gate_addr + block_idx * st->indiv_B_tile_bytes,
+        st->l1_b_up_addr + block_idx * st->indiv_B_tile_bytes,
         pre->output_D0_addr,
-        pre->output_D1_addr,
-        pre->M,
-        pre->K,
+        st->l1_d1_scratch_addr,
+        1u,
+        st->indiv_K1,
         pre->N,
         pre->array_shape,
-        pre->rescale_mult,
-        pre->rescale_shift);
+        st->rescale_mult,
+        st->rescale_shift);
 }
 
 static inline uint32_t __moe_dyn_run_down_from_pre(
-    const __snax_bingo_moe_dyn_down_call_args_t *pre)
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    const __snax_bingo_moe_dyn_s3_call_args_t *pre,
+    uint32_t block_idx)
 {
-    if (pre->array_shape == 2u && pre->d_row_stride_override == 0u) {
-        return __moe_dyn_dual_vc_down_gemm_shape_c_from_swiglu_params(
-            pre->input_A_addr,
-            pre->input_B0_addr,
-            pre->input_B1_addr,
-            pre->output_D0_addr,
-            pre->output_D1_addr,
-            pre->M,
-            pre->K,
-            pre->N,
-            pre->rescale_mult,
-            pre->rescale_shift);
-    }
+    uint32_t s3_blocks = __moe_dyn_s3_block_count(st);
+    uint32_t row_bytes = st->indiv_down_D_tile_bytes / st->max_tokens_per_expert;
+    uint32_t input_A = st->l1_d_addr;
+    uint32_t input_B0 = st->l1_b_down_addr + block_idx * st->indiv_down_B_tile_bytes;
+    uint32_t input_B1 = st->l1_b_down_addr +
+        (s3_blocks + block_idx) * st->indiv_down_B_tile_bytes;
+    uint32_t output_D0 = st->l1_down_d_addr + block_idx * row_bytes;
+    uint32_t output_D1 = st->l1_down_d_addr +
+        s3_blocks * st->indiv_down_D_tile_bytes + block_idx * row_bytes;
 
     return __moe_dyn_dual_vc_down_gemm_from_swiglu_params(
-        pre->input_A_addr,
-        pre->input_B0_addr,
-        pre->input_B1_addr,
-        pre->output_D0_addr,
-        pre->output_D1_addr,
-        pre->M,
-        pre->K,
+        input_A,
+        input_B0,
+        input_B1,
+        output_D0,
+        output_D1,
+        1u,
+        st->indiv_down_K1,
         pre->N,
         pre->array_shape,
-        pre->d_row_stride_override,
-        pre->rescale_mult,
-        pre->rescale_shift);
+        s3_blocks * row_bytes,
+        st->rescale_mult,
+        st->rescale_shift);
 }
 
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block(void *arg)
@@ -1432,9 +1450,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
     }
 
     uint32_t n;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        __moe_dyn_block_cfg(arg, &n);
-    uint32_t s1_blocks = __moe_dyn_s1_block_count(cfg);
+        __moe_dyn_block_cfg(arg, &n, &st);
+    uint32_t s1_blocks = __moe_dyn_s1_block_count(st);
 #if MOE_DYN_DEBUG_SCHED_VERIFY
     if (n == 0u) {
         /* RAW probe: before ACTIVE check — shows ctrl even if ACTIVE=0 */
@@ -1442,7 +1461,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
                     snrt_cluster_idx(), n, cfg->ctrl, cfg->ntokens, s1_blocks);
     }
 #endif
-    if (!__moe_dyn_slot_active_this_round(cfg) || n >= s1_blocks) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st) || n >= s1_blocks) {
         return BINGO_RET_SUCC;
     }
 #if MOE_DYN_DEBUG_SCHED_VERIFY
@@ -1470,7 +1489,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_START);
     uint32_t rc = __moe_dyn_copy_gate_up_weight_block(
-        cfg, cfg->expert_id, MOE_DYN_CTRL_DMA_S1(cfg->ctrl), n);
+        st, cfg->expert_id, MOE_DYN_CTRL_DMA_S1(cfg->ctrl), n);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_END);
     return rc;
 }
@@ -1485,8 +1504,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
 
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
     uint32_t n;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        __moe_dyn_block_cfg(arg, &n);
+        __moe_dyn_block_cfg(arg, &n, &st);
 #if MOE_DYN_DEBUG_SCHED_VERIFY
     if (n == 0u) {
         /* PROBE compute_gate_up: 在 ACTIVE check 前 — 确认 core 0 进入了 GEMM 函数 */
@@ -1494,18 +1514,18 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
                     snrt_cluster_idx(), n, cfg->ctrl, cfg->ntokens);
     }
 #endif
-    if (!__moe_dyn_slot_active_this_round(cfg) || n >= 2u) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st) || n >= 2u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
-    const __snax_bingo_moe_dyn_swiglu_call_args_t *pre = &cfg->s1_call[n];
+    const __snax_bingo_moe_dyn_s1_call_args_t *pre = &cfg->s1_call[n];
     if (pre->valid == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_START);
-    uint32_t __gu_block_rc = __moe_dyn_run_swiglu_from_pre(pre);
+    uint32_t __gu_block_rc = __moe_dyn_run_swiglu_from_pre(st, pre, n);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_END);
     return __gu_block_rc;
 }
@@ -1519,15 +1539,16 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
     }
 
     uint32_t n;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        __moe_dyn_block_cfg(arg, &n);
+        __moe_dyn_block_cfg(arg, &n, &st);
     uint32_t ctrl = cfg->ctrl;
-    if (!__moe_dyn_slot_active_this_round(cfg)) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st)) {
         return BINGO_RET_SUCC;
     }
     if (MOE_DYN_CTRL_SKIP_S3(ctrl) != 0u) return BINGO_RET_SUCC;
 
-    uint32_t s3_blocks = __moe_dyn_s3_block_count(cfg);
+    uint32_t s3_blocks = __moe_dyn_s3_block_count(st);
     if (n >= s3_blocks) {
         return BINGO_RET_SUCC;
     }
@@ -1535,7 +1556,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_DOWN_START);
     uint32_t rc = __moe_dyn_copy_down_weight_block(
-        cfg, cfg->expert_id, MOE_DYN_CTRL_DMA_S3(ctrl), n);
+        st, cfg->expert_id, MOE_DYN_CTRL_DMA_S3(ctrl), n);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_DOWN_END);
     return rc;
 }
@@ -1550,14 +1571,15 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_blo
 
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
     uint32_t n;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        __moe_dyn_block_cfg(arg, &n);
+        __moe_dyn_block_cfg(arg, &n, &st);
     uint32_t ctrl = cfg->ctrl;
-    if (!__moe_dyn_slot_active_this_round(cfg) || n >= 2u) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st) || n >= 2u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
-    const __snax_bingo_moe_dyn_down_call_args_t *pre = &cfg->s3_call[n];
+    const __snax_bingo_moe_dyn_s3_call_args_t *pre = &cfg->s3_call[n];
     if (pre->valid == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
@@ -1565,7 +1587,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_blo
     (void)ctrl;
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_START);
-    uint32_t __down_block_rc = __moe_dyn_run_down_from_pre(pre);
+    uint32_t __down_block_rc = __moe_dyn_run_down_from_pre(st, pre, n);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_END);
     return __down_block_rc;
 }
@@ -1578,17 +1600,19 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
         return BINGO_RET_FAIL;
     }
 
+    uint32_t unused_block;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
+        __moe_dyn_block_cfg(arg, &unused_block, &st);
     uint32_t slot = MOE_DYN_DMA_SLOT_S2_PREFETCH;
-    if (!__moe_dyn_slot_active_this_round(cfg) || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st) || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
         return BINGO_RET_SUCC;
     }
     if (cfg->dma_slot_expert_id[slot] < 0) return BINGO_RET_FAIL;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S2_START);
     uint32_t rc = __moe_dyn_copy_down_weight(
-        cfg, (uint32_t)cfg->dma_slot_expert_id[slot], MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot));
+        st, (uint32_t)cfg->dma_slot_expert_id[slot], MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot));
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S2_END);
     return rc;
 }
@@ -1601,17 +1625,19 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
         return BINGO_RET_FAIL;
     }
 
+    uint32_t unused_block;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
+        __moe_dyn_block_cfg(arg, &unused_block, &st);
     uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    if (!__moe_dyn_slot_active_this_round(cfg) || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st) || MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
         return BINGO_RET_SUCC;
     }
     if (cfg->dma_slot_expert_id[slot] < 0) return BINGO_RET_FAIL;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_START);
     uint32_t rc = __moe_dyn_copy_gate_up_weight(
-        cfg, (uint32_t)cfg->dma_slot_expert_id[slot], MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot));
+        st, (uint32_t)cfg->dma_slot_expert_id[slot], MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot));
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_END);
     return rc;
 }
@@ -1631,20 +1657,36 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
     }
 
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
+    uint32_t unused_block;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
-    if (!__moe_dyn_slot_active_this_round(cfg)) {
+        __moe_dyn_block_cfg(arg, &unused_block, &st);
+    if (!__moe_dyn_slot_active_this_round(cfg, st)) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
-    const __snax_bingo_moe_dyn_swiglu_call_args_t *pre = &cfg->s2_call;
+    const __snax_bingo_moe_dyn_s2_call_args_t *pre = &cfg->s2_call;
     if (pre->valid == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_START);
-    uint32_t __gu_full_rc = __moe_dyn_run_swiglu_from_pre(pre);
+    uint32_t s1_blocks = __moe_dyn_s1_block_count(st);
+    uint32_t n_shape_c = s1_blocks * st->indiv_N_per_block /
+        __moe_dyn_meshcol(2u);
+    uint32_t __gu_full_rc = __moe_dual_vc_swiglu_full_params(
+        pre->input_A_addr,
+        st->l1_b_gate_addr,
+        st->l1_b_up_addr,
+        pre->output_D0_addr,
+        st->l1_d1_scratch_addr,
+        pre->M,
+        st->indiv_K1,
+        n_shape_c,
+        2u,
+        st->rescale_mult,
+        st->rescale_shift);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_END);
     return __gu_full_rc;
 }
@@ -1670,14 +1712,16 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
     }
 
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
+    uint32_t unused_block;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
+        __moe_dyn_block_cfg(arg, &unused_block, &st);
     uint32_t ctrl = cfg->ctrl;
-    if (!__moe_dyn_slot_active_this_round(cfg)) {
+    if (!__moe_dyn_slot_active_this_round(cfg, st)) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
-    const __snax_bingo_moe_dyn_down_call_args_t *pre = &cfg->s4_call;
+    const __snax_bingo_moe_dyn_s4_call_args_t *pre = &cfg->s4_call;
     if (pre->valid == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
@@ -1685,13 +1729,27 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
     (void)ctrl;
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_START);
-    uint32_t __down_full_rc = __moe_dyn_run_down_from_pre(pre);
+    uint32_t s3_blocks = __moe_dyn_s3_block_count(st);
+    uint32_t n_shape_c = s3_blocks * st->indiv_down_N_per_block /
+        __moe_dyn_meshcol(2u);
+    uint32_t __down_full_rc = __moe_dyn_dual_vc_down_gemm_shape_c_from_swiglu_params(
+        pre->input_A_addr,
+        st->l1_b_down_addr,
+        st->l1_b_down_addr + s3_blocks * st->indiv_down_B_tile_bytes,
+        pre->output_D0_addr,
+        pre->output_D1_addr,
+        pre->M,
+        st->indiv_down_K1,
+        n_shape_c,
+        st->rescale_mult,
+        st->rescale_shift);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_END);
     return __down_full_rc;
 }
 
 static inline uint32_t __moe_dyn_store_down_rowmajor_full(
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
     uint32_t store_dma,
     uint64_t expert_out_base,
     uint32_t row_bytes,
@@ -1699,17 +1757,17 @@ static inline uint32_t __moe_dyn_store_down_rowmajor_full(
 {
     uint32_t full_row_bytes = s3_blocks * row_bytes;
     uint32_t rows = cfg->ntokens;
-    uint32_t d1_l1_base = cfg->l1_down_d_addr +
-        s3_blocks * cfg->indiv_down_D_tile_bytes;
+    uint32_t d1_l1_base = st->l1_down_d_addr +
+        s3_blocks * st->indiv_down_D_tile_bytes;
 
     for (uint32_t n = 0; n < s3_blocks; n++) {
         uint64_t d0_dst = expert_out_base +
-            (uint64_t)n * (uint64_t)cfg->indiv_down_D_tile_bytes +
+            (uint64_t)n * (uint64_t)st->indiv_down_D_tile_bytes +
             (uint64_t)cfg->token_start_rank * (uint64_t)row_bytes;
         uint64_t d1_dst = expert_out_base +
-            (uint64_t)(s3_blocks + n) * (uint64_t)cfg->indiv_down_D_tile_bytes +
+            (uint64_t)(s3_blocks + n) * (uint64_t)st->indiv_down_D_tile_bytes +
             (uint64_t)cfg->token_start_rank * (uint64_t)row_bytes;
-        uint64_t d0_src = __moe_dyn_l1_wide(cfg->l1_down_d_addr + n * row_bytes);
+        uint64_t d0_src = __moe_dyn_l1_wide(st->l1_down_d_addr + n * row_bytes);
         uint64_t d1_src = __moe_dyn_l1_wide(d1_l1_base + n * row_bytes);
         uint32_t rc = __moe_dyn_copy_pair_2d(store_dma,
                                              d0_dst, d0_src,
@@ -1731,21 +1789,23 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store(void *arg)
         return BINGO_RET_FAIL;
     }
 
+    uint32_t unused_block;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st;
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)arg;
-    if (!__moe_dyn_slot_active_this_round(cfg)) return BINGO_RET_SUCC;
+        __moe_dyn_block_cfg(arg, &unused_block, &st);
+    if (!__moe_dyn_slot_active_this_round(cfg, st)) return BINGO_RET_SUCC;
 
-    uint32_t row_bytes = cfg->indiv_down_D_tile_bytes / cfg->max_tokens_per_expert;
-    uint32_t s3_blocks = __moe_dyn_s3_block_count(cfg);
-    uint64_t expert_out_base = cfg->output_l3_base +
-        (uint64_t)cfg->expert_id * (uint64_t)cfg->output_expert_stride_bytes;
+    uint32_t row_bytes = st->indiv_down_D_tile_bytes / st->max_tokens_per_expert;
+    uint32_t s3_blocks = __moe_dyn_s3_block_count(st);
+    uint64_t expert_out_base = st->output_l3_base +
+        (uint64_t)cfg->expert_id * (uint64_t)st->output_expert_stride_bytes;
     uint32_t store_dma =
         (MOE_DYN_CTRL_DMA_S3(cfg->ctrl) != 0u) ? MOE_DYN_CTRL_DMA_S3(cfg->ctrl) : 1u;
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_STORE_START);
     if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) == 0u ||
         MOE_DYN_CTRL_SKIP_S4(cfg->ctrl) == 0u) {
-        uint32_t rc = __moe_dyn_store_down_rowmajor_full(cfg, store_dma,
+        uint32_t rc = __moe_dyn_store_down_rowmajor_full(cfg, st, store_dma,
                                                          expert_out_base,
                                                          row_bytes,
                                                          s3_blocks);
@@ -1757,7 +1817,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store(void *arg)
                     snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
                     cfg->token_start_rank, cfg->ntokens);
 #endif
-        __moe_dyn_mark_task_complete(cfg);
+        __moe_dyn_mark_task_complete(cfg, st);
         return BINGO_RET_SUCC;
     }
 
@@ -1768,7 +1828,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store(void *arg)
                 snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
                 cfg->token_start_rank, cfg->ntokens);
 #endif
-    __moe_dyn_mark_task_complete(cfg);
+    __moe_dyn_mark_task_complete(cfg, st);
     return BINGO_RET_SUCC;
 }
 

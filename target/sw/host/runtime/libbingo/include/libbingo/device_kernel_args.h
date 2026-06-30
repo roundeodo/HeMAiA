@@ -562,34 +562,70 @@ typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
 
 typedef struct __attribute__((packed, aligned(4))) {
   uint32_t valid;
-  uint32_t input_A_addr;
-  uint32_t input_B_gate_addr;
-  uint32_t input_B_up_addr;
   uint32_t output_D0_addr;
-  uint32_t output_D1_addr;
-  uint32_t M;
-  uint32_t K;
   uint32_t N;
   uint32_t array_shape;
-  uint32_t rescale_mult;
-  uint32_t rescale_shift;
-} __snax_bingo_moe_dyn_swiglu_call_args_t;
+} __snax_bingo_moe_dyn_s1_call_args_t;
 
 typedef struct __attribute__((packed, aligned(4))) {
   uint32_t valid;
   uint32_t input_A_addr;
-  uint32_t input_B0_addr;
-  uint32_t input_B1_addr;
+  uint32_t output_D0_addr;
+  uint32_t M;
+} __snax_bingo_moe_dyn_s2_call_args_t;
+
+typedef struct __attribute__((packed, aligned(4))) {
+  uint32_t valid;
+  uint32_t N;
+  uint32_t array_shape;
+  uint32_t reserved;
+} __snax_bingo_moe_dyn_s3_call_args_t;
+
+typedef struct __attribute__((packed, aligned(4))) {
+  uint32_t valid;
+  uint32_t input_A_addr;
   uint32_t output_D0_addr;
   uint32_t output_D1_addr;
   uint32_t M;
-  uint32_t K;
-  uint32_t N;
-  uint32_t array_shape;
-  uint32_t d_row_stride_override;
+} __snax_bingo_moe_dyn_s4_call_args_t;
+
+typedef struct __attribute__((packed, aligned(4))) {
+  uint64_t token_offsets_addr;
+  uint64_t token_ids_addr;
+  uint64_t input_A_l3_base;
+  uint64_t indiv_gate_B_l3;
+  uint64_t indiv_up_B_l3;
+  uint64_t indiv_down_B_l3;
+  uint64_t output_l3_base;
+  uint64_t runtime_state_addr;
+  uint32_t active_state_l1_addr;
+  uint32_t l1_a_addr;
+  uint32_t l1_b_gate_addr;
+  uint32_t l1_b_up_addr;
+  uint32_t l1_b_down_addr;
+  uint32_t l1_d_addr;
+  uint32_t l1_down_d_addr;
+  uint32_t l1_d1_scratch_addr;
+  uint32_t A_token_bytes;
+  uint32_t indiv_B_expert_stride;
+  uint32_t indiv_down_B_expert_stride;
+  uint32_t indiv_B_tile_bytes;
+  uint32_t indiv_D_tile_bytes;
+  uint32_t indiv_down_B_tile_bytes;
+  uint32_t indiv_down_D_tile_bytes;
+  uint32_t indiv_N2;
+  uint32_t indiv_down_N2;
+  uint32_t indiv_K1;
+  uint32_t indiv_N_per_block;
+  uint32_t indiv_down_K1;
+  uint32_t indiv_down_N_per_block;
   uint32_t rescale_mult;
   uint32_t rescale_shift;
-} __snax_bingo_moe_dyn_down_call_args_t;
+  uint32_t output_expert_stride_bytes;
+  uint32_t max_tokens_per_expert;
+  uint32_t s1_block_count;
+  uint32_t s3_block_count;
+} __snax_bingo_moe_dynamic_expert_static_args_t;
 
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
   /* ── ctrl: packed control word (19 bits used, written every round by Phase4) ──────
@@ -620,53 +656,16 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
    * ──────────────────────────────────────────────────────────────────────────── */
   uint32_t dma_slot_vd;
   int32_t  dma_slot_expert_id[4];   /* prefetch target expert, -1 = none */
-  uint32_t dma_slot_idma_seq[4];    /* iDMA sequence number for ordering  */
-  uint32_t dma_slot_xdma_seq[4];    /* xDMA sequence number for ordering  */
-  /* ── static fields: pre-filled at DFG init, never written by Phase4 ─────── */
-  uint64_t token_ids_addr;
-  uint64_t input_A_l3_base;
-  uint64_t indiv_gate_B_l3;
-  uint64_t indiv_up_B_l3;
-  uint64_t indiv_down_B_l3;
-  uint64_t output_l3_base;
-  uint64_t runtime_state_addr;
-  uint32_t active_state_l1_addr;
-  uint32_t l1_a_addr;
-  uint32_t l1_b_gate_addr;
-  uint32_t l1_b_up_addr;
-  uint32_t l1_b_down_addr;
-  uint32_t l1_d_addr;
-  uint32_t l1_down_d_addr;
-  uint32_t l1_d1_scratch_addr;
-  uint32_t A_token_bytes;
-  uint32_t indiv_B_expert_stride;
-  uint32_t indiv_down_B_expert_stride;
-  uint32_t indiv_B_tile_bytes;
-  uint32_t indiv_D_tile_bytes;
-  uint32_t indiv_down_B_tile_bytes;
-  uint32_t indiv_down_D_tile_bytes;
-  uint32_t indiv_N2;
-  uint32_t indiv_down_N2;
-  uint32_t indiv_K1;
-  uint32_t indiv_N_per_block;       // = indiv_N1 x meshCol(shape); shape-invariant constant
-  uint32_t indiv_down_K1;
-  uint32_t indiv_down_N_per_block;  // = indiv_down_N1 x vc_meshCol(shape); shape-invariant constant
-  // array_shape is now pre-lowered by the host into s1/s2/s3/s4 call args.
-  uint32_t rescale_mult;
-  uint32_t rescale_shift;
-  uint32_t output_expert_stride_bytes;
-  uint32_t max_tokens_per_expert;
-  uint32_t s1_block_count;
-  uint32_t s3_block_count;
-  __snax_bingo_moe_dyn_swiglu_call_args_t s1_call[2];
-  __snax_bingo_moe_dyn_swiglu_call_args_t s2_call;
-  __snax_bingo_moe_dyn_down_call_args_t s3_call[2];
-  __snax_bingo_moe_dyn_down_call_args_t s4_call;
+  __snax_bingo_moe_dyn_s1_call_args_t s1_call[2];
+  __snax_bingo_moe_dyn_s2_call_args_t s2_call;
+  __snax_bingo_moe_dyn_s3_call_args_t s3_call[2];
+  __snax_bingo_moe_dyn_s4_call_args_t s4_call;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_args_t;
 
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_block_args {
   uint64_t task_arg_addr;
+  uint64_t static_arg_addr;
   uint32_t block_idx;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_block_args_t;

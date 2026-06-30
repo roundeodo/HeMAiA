@@ -38,11 +38,11 @@
 #     C3: router GEMM                                  [与 C0/C1 并行]
 #
 #   Phase 2 — CVA6 TopK（router 输出写回 L3 后）
-#   Phase 3 — CVA6 analytical scheduler：读 expert_token_counts 和 CAM 状态，输出
-#              moe_schedule_t，其中 tasks[] 给出 C2/C3 的全局 expert 顺序，dma_ops[]
-#              给出 iDMA/xDMA lane 顺序，tasks[].dma_slots[] 给出固定 DMA 槽语义。
-#   Phase 4 — Individual expert 动态 GEMM：CVA6 一次性将 moe_schedule_t 降低到
-#              C2/C3 的 L1 static slot args；跨 cluster slot wavefront 由 Bingo DFG
+#   Phase 3 — MoEPrepare：读 expert_token_counts 和 CAM 状态。pure HW fast build
+#              直接驱动 RTL scheduler，并将 RTL compact plan 直接 lowered 到 C2/C3
+#              的 L3 stage dynamic args；SW/check build 才使用 request/schedule ABI。
+#   Phase 4 — MoEExecute：同步 runtime_state，并只把本轮有效 slot 的 dynamic
+#              args 从 L3 flush 到 C2/C3 L1；跨 cluster slot wavefront 由 Bingo DFG
 #              cross-edge 表达，slot 内 stage skip 由 device kernel 根据本 slot 参数处理。
 
 import os
@@ -108,206 +108,35 @@ from bingo_kernel_args import (
     HostBingoKernelMoERouterScheduleArgs,
     HostBingoKernelMoEPrepareRequestArgs as LibHostBingoKernelMoEPrepareRequestArgs,
     HostBingoKernelMoEExecuteArgs as LibHostBingoKernelMoEExecuteArgs,
-    SnaxBingoKernelMoeDynamicExpertArgs,
     SnaxBingoKernelMoeDynamicExpertBlockArgs,
 )
-from typing import Union, Dict
-
-
 # MOE_DYNAMIC_SLOT_COUNT: max tasks per cluster side.
 # With MOE_MAX_EXPERTS=64 and greedy SPLIT: max tasks/cluster = 64 (1 per expert).
 # Set to 32 conservatively (ceil(64/2) tasks per cluster under balanced assignment).
 MOE_DYNAMIC_SLOT_COUNT = 32
-# The dynamic expert arg record now carries host-prelowered bottom-level
-# compute call args. sizeof(__snax_bingo_kernel_moe_dynamic_expert_args_t)
-# is larger than the original 256B template; keep a 640B slot stride so L3/L1
-# records never overlap and the host runtime sizeof guard passes.
-MOE_DYNAMIC_ARG_SLOT_BYTES = 640
+# Per-slot runtime record only contains dynamic scheduler output plus compact
+# bottom-level offsets. Static node constants live in one L1 static context per
+# individual cluster. 192B is 64B-aligned and covers the compact C struct.
+MOE_DYNAMIC_ARG_SLOT_BYTES = 192
+MOE_DYNAMIC_STATIC_ARG_BYTES = 192
 MOE_SCHEDULE_BYTES = 32768
 MOE_RUNTIME_STATE_BYTES = 64
+MOE_LEGACY_SCHED_ABI_COND = (
+    "!defined(MOE_ENABLE_HW_SCHEDULER) || defined(MOE_ENABLE_HW_SCHEDULER_CHECK)"
+)
 ENABLE_PHASE3_PHASE4 = True
 # 当 ENABLE_PHASE3_PHASE4=True 时，此开关进一步控制是否展开 individual slot 执行链。
-# 设为 False 时：DFG 在 node_execute 之后截止。node_execute 仍然完整执行
-# schedule lowering、bottom-level API args prelower、L3 stage args 写入和
-# L3->C2/C3 L1 dynamic args flush；只是不触发 C2/C3 上的 GEMM/DMA slot 任务。
+# 设为 False 时：DFG 在 node_execute 之后截止。pure HW fast build 中，node_prepare
+# 已完成 RTL schedule + direct lowering + L3 stage args 写入，node_execute 完成
+# runtime_state 同步和 L3->C2/C3 L1 dynamic args flush；只是不触发 C2/C3 上的
+# GEMM/DMA slot 任务。
 # 设为 True 时恢复完整 individual expert 执行链（默认完整 workload）。
 ENABLE_INDIVIDUAL_SLOTS = False
 
 
-# =========================================================================
-# Custom kernel args: HostBingoKernelMoEPrepareRequestArgs
-# Phase 3：构建 moe_request_t（调度算法的输入参数）。
-# =========================================================================
-
-
-class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
-    """
-    Phase 3：从 TopK 路由结果中构建 moe_request_t。
-    读取 expert_token_counts 和当前 CAM 状态（C2/C3 驻留 expert），
-    写入 L3 的 moe_request_t 供 Phase 4 固件执行循环使用。
-
-    调度算法在 Phase 4 内部调用，DFG 层不感知。
-    接口由 moe_scheduler.c 实现，此处仅为数据准备节点。
-    对应 __host_bingo_kernel_moe_prepare_request。
-    """
-
-    def __init__(
-        self,
-        expert_token_counts_addr: Union[BingoMemAlloc, str, int],
-        cam_state_addr: Union[
-            BingoMemAlloc, str, int
-        ],  # L3: int32_t[2] (cam[0]=C2, cam[1]=C3)
-        request_out_addr: Union[BingoMemAlloc, str, int],  # L3: moe_request_t
-        n_experts: int,
-    ):
-        self.expert_token_counts_addr = expert_token_counts_addr
-        self.cam_state_addr = cam_state_addr
-        self.request_out_addr = request_out_addr
-        self.n_experts = n_experts
-
-    def get_struct_name(self) -> str:
-        return "__host_bingo_kernel_moe_prepare_request_args_t"
-
-    def get_c_field_assignments(self, handle_name_map: Dict) -> Dict:
-        a = {}
-        self._process_addr(
-            self.expert_token_counts_addr,
-            "expert_token_counts_addr",
-            a,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        self._process_addr(
-            self.cam_state_addr,
-            "cam_state_addr",
-            a,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        self._process_addr(
-            self.request_out_addr,
-            "request_out_addr",
-            a,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        a["n_experts"] = str(self.n_experts)
-        return a
-
-
-# =========================================================================
-# Custom kernel args: HostBingoKernelMoEExecuteArgs
-# Phase 4：CVA6 将 Phase 3 的 moe_schedule_t 降低到 C2/C3 static slot args。
-# =========================================================================
-
-
-class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
-    """
-        Phase 4：CVA6 读取 Phase 3 写入的 moe_schedule_t，
-        一次性写入 C2/C3 的 L3 stage dynamic slot args，并由 host runtime
-        DMA flush 到 L1。后续 static DFG 节点在 device 侧执行。
-    对应 __host_bingo_kernel_moe_execute。
-    """
-
-    def __init__(
-        self,
-        request_addr: Union[BingoMemAlloc, str, int],
-        cam_state_addr: Union[BingoMemAlloc, str, int],
-        input_A_l3_base: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
-        topk_indices_l3: Union[BingoMemAlloc, str, int],
-        indiv_gate_B_l3: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
-        indiv_up_B_l3: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
-        indiv_down_B_l3: Union[BingoMemAlloc, "BingoMemSymbol", str, int],
-        c2_l1_b_gate: Union[BingoMemAlloc, str, int],
-        c2_l1_b_up: Union[BingoMemAlloc, str, int],
-        c2_l1_b_down: Union[BingoMemAlloc, str, int],
-        c2_l1_a: Union[BingoMemAlloc, str, int],
-        c2_l1_d: Union[BingoMemAlloc, str, int],
-        c2_l1_down_d: Union[BingoMemAlloc, str, int],
-        c3_l1_b_gate: Union[BingoMemAlloc, str, int],
-        c3_l1_b_up: Union[BingoMemAlloc, str, int],
-        c3_l1_b_down: Union[BingoMemAlloc, str, int],
-        c3_l1_a: Union[BingoMemAlloc, str, int],
-        c3_l1_d: Union[BingoMemAlloc, str, int],
-        c3_l1_down_d: Union[BingoMemAlloc, str, int],
-        output_l3_addr: Union[BingoMemAlloc, str, int],
-        A_token_bytes: int,
-        indiv_B_expert_stride: int,
-        indiv_down_B_expert_stride: int,
-        down_D_bytes_per_expert: int,
-        M_total: int,
-        top_k: int,
-    ):
-        self.request_addr = request_addr
-        self.cam_state_addr = cam_state_addr
-        self.input_A_l3_base = input_A_l3_base
-        self.topk_indices_l3 = topk_indices_l3
-        self.indiv_gate_B_l3 = indiv_gate_B_l3
-        self.indiv_up_B_l3 = indiv_up_B_l3
-        self.indiv_down_B_l3 = indiv_down_B_l3
-        self.c2_l1_b_gate = c2_l1_b_gate
-        self.c2_l1_b_up = c2_l1_b_up
-        self.c2_l1_b_down = c2_l1_b_down
-        self.c2_l1_a = c2_l1_a
-        self.c2_l1_d = c2_l1_d
-        self.c2_l1_down_d = c2_l1_down_d
-        self.c3_l1_b_gate = c3_l1_b_gate
-        self.c3_l1_b_up = c3_l1_b_up
-        self.c3_l1_b_down = c3_l1_b_down
-        self.c3_l1_a = c3_l1_a
-        self.c3_l1_d = c3_l1_d
-        self.c3_l1_down_d = c3_l1_down_d
-        self.output_l3_addr = output_l3_addr
-        self.A_token_bytes = A_token_bytes
-        self.indiv_B_expert_stride = indiv_B_expert_stride
-        self.indiv_down_B_expert_stride = indiv_down_B_expert_stride
-        self.down_D_bytes_per_expert = down_D_bytes_per_expert
-        self.M_total = M_total
-        self.top_k = top_k
-
-    def get_struct_name(self) -> str:
-        return "__host_bingo_kernel_moe_execute_args_t"
-
-    def _pa(self, val, name, a, hm):
-        self._process_addr(val, name, a, hm, split_64bit=False, as_64bit=True)
-
-    def get_c_field_assignments(self, handle_name_map: Dict) -> Dict:
-        a = {}
-        self._pa(self.request_addr, "request_addr", a, handle_name_map)
-        self._pa(self.cam_state_addr, "cam_state_addr", a, handle_name_map)
-        self._pa(self.input_A_l3_base, "input_A_l3_base", a, handle_name_map)
-        self._pa(self.topk_indices_l3, "topk_indices_l3", a, handle_name_map)
-        self._pa(self.indiv_gate_B_l3, "indiv_gate_B_l3", a, handle_name_map)
-        self._pa(self.indiv_up_B_l3, "indiv_up_B_l3", a, handle_name_map)
-        self._pa(self.indiv_down_B_l3, "indiv_down_B_l3", a, handle_name_map)
-        self._pa(self.c2_l1_b_gate, "c2_l1_b_gate", a, handle_name_map)
-        self._pa(self.c2_l1_b_up, "c2_l1_b_up", a, handle_name_map)
-        self._pa(self.c2_l1_b_down, "c2_l1_b_down", a, handle_name_map)
-        self._pa(self.c2_l1_a, "c2_l1_a", a, handle_name_map)
-        self._pa(self.c2_l1_d, "c2_l1_d", a, handle_name_map)
-        self._pa(self.c2_l1_down_d, "c2_l1_down_d", a, handle_name_map)
-        self._pa(self.c3_l1_b_gate, "c3_l1_b_gate", a, handle_name_map)
-        self._pa(self.c3_l1_b_up, "c3_l1_b_up", a, handle_name_map)
-        self._pa(self.c3_l1_b_down, "c3_l1_b_down", a, handle_name_map)
-        self._pa(self.c3_l1_a, "c3_l1_a", a, handle_name_map)
-        self._pa(self.c3_l1_d, "c3_l1_d", a, handle_name_map)
-        self._pa(self.c3_l1_down_d, "c3_l1_down_d", a, handle_name_map)
-        self._pa(self.output_l3_addr, "output_l3_addr", a, handle_name_map)
-        a["A_token_bytes"] = str(self.A_token_bytes)
-        a["indiv_B_expert_stride"] = str(self.indiv_B_expert_stride)
-        a["indiv_down_B_expert_stride"] = str(self.indiv_down_B_expert_stride)
-        a["down_D_bytes_per_expert"] = str(self.down_D_bytes_per_expert)
-        a["M_total"] = str(self.M_total)
-        a["top_k"] = str(self.top_k)
-        return a
-
-
-# Use the canonical ABI mirror from libbingo. The local legacy classes above
-# are kept only for older generated headers; the current workload needs the
-# extended schedule/token-map/dynamic-slot fields.
+# Use the canonical ABI mirror from libbingo. Pure HW fast mode ignores the
+# legacy request/schedule fields at runtime; they remain in the struct only for
+# SW scheduler and HW-check builds.
 HostBingoKernelMoEPrepareRequestArgs = LibHostBingoKernelMoEPrepareRequestArgs
 HostBingoKernelMoEExecuteArgs = LibHostBingoKernelMoEExecuteArgs
 
@@ -856,17 +685,19 @@ def define_memory_handles(params):
         size=2 * 4,  # int32_t[num_indiv_slots=2]
         mem_level="L3",
     )
-    # moe_request_t：Phase 3 构建，Phase 4 读取（调度器的输入参数结构体）
-    # 按 moe_scheduler.h 估算 ≤ 128 bytes，保守分配 256 字节
+    # Legacy request buffer: only used by SW scheduler / HW-check builds.
+    # Pure HW fast build passes counts/CAM directly to the RTL scheduler.
     mh["L3_Alloc_MoE_Request"] = BingoMemAlloc(
         "l3_moe_request",
         size=256,
         mem_level="L3",
+        condition=MOE_LEGACY_SCHED_ABI_COND,
     )
     mh["L3_Alloc_MoE_Schedule"] = BingoMemAlloc(
         "l3_moe_schedule",
         size=MOE_SCHEDULE_BYTES,
         mem_level="L3",
+        condition=MOE_LEGACY_SCHED_ABI_COND,
     )
     mh["L3_Alloc_MoE_Runtime_State"] = BingoMemAlloc(
         "l3_moe_runtime_state",
@@ -964,6 +795,13 @@ def define_memory_handles(params):
         mh[f"{prefix}_Dyn_Args"] = BingoMemAlloc(
             f"{prefix.lower()}_dyn_args",
             size=params["dynamic_slot_count"] * params["dynamic_arg_slot_bytes"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cid,
+        )
+        mh[f"{prefix}_Static_Args"] = BingoMemAlloc(
+            f"{prefix.lower()}_static_args",
+            size=MOE_DYNAMIC_STATIC_ARG_BYTES,
             mem_level="L1",
             chip_id=chip,
             cluster_id=cid,
@@ -1572,12 +1410,12 @@ def create_dfg(params, mh):
         return bingo_dfg
 
     # =====================================================================
-    # Phase 3: 构建调度请求 (moe_request_t)
+    # Phase 3: MoEPrepare
     #
-    # 从 TopK 路由结果和当前 CAM 状态中构建 moe_request_t。
-    # HW scheduler direct path 会在本节点内把 compact plan
-    # 直接 lowered 到 C2/C3 的 L3 stage dynamic args；SW/fallback path 仍会
-    # 生成 moe_schedule_t，供 Phase 4 继续 lowering。
+    # Pure HW fast path: consume expert_token_counts + CAM state, drive RTL
+    # scheduler, then direct-lower compact plan entries into C2/C3 L3 stage
+    # dynamic args. request/schedule buffers are legacy fields for SW/check
+    # builds and are not touched by the fast runtime path.
     # =====================================================================
     node_prepare = BingoNode(
         assigned_chiplet_id=0,
@@ -1602,18 +1440,31 @@ def create_dfg(params, mh):
             c3_stage_base=mh["L3_Alloc_C3_Stage"],
             dynamic_arg_slot_bytes=params["dynamic_arg_slot_bytes"],
             dynamic_num_slots=params["dynamic_slot_count"],
+            c2_l1_a=mh["C2_indiv_L1_A"],
+            c2_l1_d=mh["C2_indiv_L1_D"],
+            c2_l1_down_d=mh["C2_indiv_L1_down_D"],
+            c3_l1_a=mh["C3_indiv_L1_A"],
+            c3_l1_d=mh["C3_indiv_L1_D"],
+            c3_l1_down_d=mh["C3_indiv_L1_down_D"],
+            A_token_bytes=params["A_token_bytes"],
+            indiv_D_tile_bytes=params["indiv_D_tilesize"],
+            indiv_down_D_tile_bytes=params["indiv_down_D_tilesize"],
+            indiv_N_per_block=params["indiv_N1"] * params["meshCol"],
+            indiv_down_N_per_block=params["indiv_down_N1"] * params["meshCol"],
+            s1_block_count=N2,
+            s3_block_count=N2d,
+            max_tokens_per_expert=params["max_tokens_per_expert"],
         ),
     )
     bingo_dfg.bingo_add_node(node_prepare)
     bingo_dfg.bingo_add_edge(node_topk, node_prepare)
 
     # =====================================================================
-    # Phase 4: CVA6 schedule lowering + optional static slot execution
+    # Phase 4: MoEExecute + optional static slot execution
     #
     # HW scheduler direct path 下，node_prepare 已经生成 L3 stage dynamic
     # args；node_execute 只同步 runtime_state 并把有效 slot args flush 到
-    # cluster L1。SW/fallback path 下，node_execute 仍负责把 moe_schedule_t
-    # lowered/prelowered 到 C2/C3 的 L3 stage dynamic args。
+    # cluster L1。非 HW build 才在这里根据 schedule 生成 stage args。
     # ENABLE_INDIVIDUAL_SLOTS=False 时在这里截止，只测完整 scheduler+lowering；
     # True 时后续 static slot graph 才真正执行 S1/S2/S3/S4/store。跨 cluster
     # slot wavefront 由 Bingo DFG cross-edge 表达；slot 内 skip 仍由 device
@@ -1676,6 +1527,8 @@ def create_dfg(params, mh):
             rescale_shift=0,
             output_expert_stride_bytes=2 * N2d * params["indiv_down_D_tilesize"],
             max_tokens_per_expert=params["max_tokens_per_expert"],
+            c2_static_args_base=mh["C2_indiv_Static_Args"],
+            c3_static_args_base=mh["C3_indiv_Static_Args"],
             c2_dynamic_args_base=mh["C2_indiv_Dyn_Args"],
             c3_dynamic_args_base=mh["C3_indiv_Dyn_Args"],
             dynamic_arg_slot_bytes=params["dynamic_arg_slot_bytes"],
@@ -1687,61 +1540,13 @@ def create_dfg(params, mh):
     bingo_dfg.bingo_add_node(node_execute)
     bingo_dfg.bingo_add_edge(node_prepare, node_execute)
 
-    def make_dyn_args(prefix: str, slot: int):
-        stage_prefix = (
-            "L3_Alloc_C2_Stage" if prefix == "C2_indiv" else "L3_Alloc_C3_Stage"
-        )
-        return SnaxBingoKernelMoeDynamicExpertArgs(
-            arg_storage_addr=addr_offset(
-                mh[f"{prefix}_Dyn_Args"], slot * params["dynamic_arg_slot_bytes"]
-            ),
-            init_storage_addr=addr_offset(
-                mh[stage_prefix], slot * params["dynamic_arg_slot_bytes"]
-            ),
-            slot_id=slot,
-            token_ids_addr=mh["L3_Alloc_Expert_Token_Ids"],
-            input_A_l3_base=mh["L3_Sym_Input_A"],
-            indiv_gate_B_l3=mh["L3_Sym_Indiv_Gate_B"],
-            indiv_up_B_l3=mh["L3_Sym_Indiv_Up_B"],
-            indiv_down_B_l3=mh["L3_Sym_Indiv_Down_B"],
-            output_l3_base=mh["L3_Alloc_Indiv_Down_Output"],
-            runtime_state_addr=mh["L3_Alloc_MoE_Runtime_State"],
-            active_state_l1_addr=mh[f"{prefix}_Active_State"],
-            l1_a_addr=mh[f"{prefix}_L1_A"],
-            l1_b_gate_addr=mh[f"{prefix}_L1_B_gate"],
-            l1_b_up_addr=mh[f"{prefix}_L1_B_up"],
-            l1_b_down_addr=mh[f"{prefix}_L1_B_down"],
-            l1_d_addr=mh[f"{prefix}_L1_D"],
-            l1_down_d_addr=mh[f"{prefix}_L1_down_D"],
-            l1_d1_scratch_addr=mh[f"{prefix}_L1_D1_scratch"],
-            A_token_bytes=params["A_token_bytes"],
-            indiv_B_expert_stride=params["indiv_B_expert_stride"],
-            indiv_down_B_expert_stride=params["indiv_down_B_expert_stride"],
-            indiv_B_tile_bytes=params["indiv_B_tilesize"],
-            indiv_D_tile_bytes=params["indiv_D_tilesize"],
-            indiv_down_B_tile_bytes=params["indiv_down_B_tilesize"],
-            indiv_down_D_tile_bytes=params["indiv_down_D_tilesize"],
-            indiv_N2=N2,
-            indiv_down_N2=N2d,
-            s1_block_count=N2,
-            s3_block_count=N2d,
-            indiv_K1=params["indiv_K1"],
-            indiv_N_per_block=params["indiv_N1"]
-            * params["meshCol"],  # shape-invariant = N1_s0 × meshCol_s0
-            indiv_down_K1=params["indiv_down_K1"],
-            indiv_down_N_per_block=params["indiv_down_N1"]
-            * params["meshCol"],  # shape-invariant = down_N1_s0 × meshCol_s0
-            # array_shape removed: kernel derives it from ctrl.shape_s1 / ctrl.shape_s3 at runtime
-            rescale_mult=1,
-            rescale_shift=0,
-            output_expert_stride_bytes=2 * N2d * params["indiv_down_D_tilesize"],
-            max_tokens_per_expert=params["max_tokens_per_expert"],
-        )
-
     def add_dynamic_slot_chain(prefix: str, cluster_id: int, slot: int, deps):
-        args = make_dyn_args(prefix, slot)
         dyn_arg_addr = addr_offset(
             mh[f"{prefix}_Dyn_Args"], slot * params["dynamic_arg_slot_bytes"]
+        )
+        static_arg_addr = mh[f"{prefix}_Static_Args"]
+        slot_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+            dyn_arg_addr, static_arg_addr, 0
         )
 
         def add_node(core_id, kernel_name, kernel_args):
@@ -1758,7 +1563,7 @@ def create_dfg(params, mh):
         gather_s1 = add_node(
             DMA_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
-            args,
+            slot_args,
         )
         for dep in deps:
             bingo_dfg.bingo_add_edge(dep, gather_s1)
@@ -1768,7 +1573,9 @@ def create_dfg(params, mh):
         s1_loads = []
         s2_computes = []
         for block in range(N2):
-            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(dyn_arg_addr, block)
+            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+                dyn_arg_addr, static_arg_addr, block
+            )
             load = add_node(
                 DMA_CORE_ID,
                 "__snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block",
@@ -1790,7 +1597,7 @@ def create_dfg(params, mh):
         prefetch_s2_down = add_node(
             DMA_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down",
-            args,
+            slot_args,
         )
         bingo_dfg.bingo_add_edge(s1_loads[-1], prefetch_s2_down)
 
@@ -1799,7 +1606,7 @@ def create_dfg(params, mh):
         compute_gate_up_full = add_node(
             GEMM_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full",
-            args,
+            slot_args,
         )
         bingo_dfg.bingo_add_edge(s2_computes[-1], compute_gate_up_full)
 
@@ -1808,7 +1615,9 @@ def create_dfg(params, mh):
         s3_loads = []
         s4_computes = []
         for block in range(N2d):
-            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(dyn_arg_addr, block)
+            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+                dyn_arg_addr, static_arg_addr, block
+            )
             load = add_node(
                 DMA_CORE_ID,
                 "__snax_bingo_kernel_moe_dynamic_expert_load_down_block",
@@ -1831,7 +1640,7 @@ def create_dfg(params, mh):
         prefetch_s4_next_s1 = add_node(
             DMA_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1",
-            args,
+            slot_args,
         )
         # This prefetch is intentionally overlapped with the current slot's
         # down-full compute. Do not serialize it after compute_down_full just to
@@ -1843,14 +1652,14 @@ def create_dfg(params, mh):
         compute_down_full = add_node(
             GEMM_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_compute_down_full",
-            args,
+            slot_args,
         )
         bingo_dfg.bingo_add_edge(s4_computes[-1], compute_down_full)
 
         store = add_node(
             DMA_CORE_ID,
             "__snax_bingo_kernel_moe_dynamic_expert_store",
-            args,
+            slot_args,
         )
         bingo_dfg.bingo_add_edge(compute_down_full, store)
         bingo_dfg.bingo_add_edge(prefetch_s4_next_s1, store)

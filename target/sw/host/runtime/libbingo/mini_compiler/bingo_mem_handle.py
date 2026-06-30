@@ -26,7 +26,16 @@ class BingoMemAlloc:
     """
     Represents a memory allocation request (handle) that will be resolved to a runtime address in C.
     """
-    def __init__(self, name: str, size: int, mem_level: str = "L3", chip_id: int = 0, cluster_id: int = 0, offset: int = 0):
+    def __init__(
+        self,
+        name: str,
+        size: int,
+        mem_level: str = "L3",
+        chip_id: int = 0,
+        cluster_id: int = 0,
+        offset: int = 0,
+        condition: str = None,
+    ):
         """
         :param name: Logical name for the buffer (used for variable naming in generated C).
         :param size: Size in bytes.
@@ -34,6 +43,7 @@ class BingoMemAlloc:
         :param chip_id: Required for L1/L2.
         :param cluster_id: Required for L1.
         :param offset: Byte offset to add to the allocated address.
+        :param condition: Optional C preprocessor condition guarding this allocation.
         """
         self.name = name
         self.size = size
@@ -41,6 +51,7 @@ class BingoMemAlloc:
         self.chip_id = chip_id
         self.cluster_id = cluster_id
         self.offset = offset
+        self.condition = condition
     
     def get_c_var_name(self):
         return f"ptr_{self.name}"

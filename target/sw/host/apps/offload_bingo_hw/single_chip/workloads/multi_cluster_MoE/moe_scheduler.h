@@ -13,6 +13,12 @@
 
 #include <stdint.h>
 
+#if defined(MOE_ENABLE_HW_SCHEDULER) && !defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
+#define MOE_SCHED_PURE_HW_FAST 1
+#else
+#define MOE_SCHED_PURE_HW_FAST 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -61,6 +67,7 @@ typedef enum {
 } moe_dma_op_kind_t;
 
 /* ── Input: per-expert token count after routing ──────────────────────── */
+#if !MOE_SCHED_PURE_HW_FAST
 typedef struct {
     uint16_t expert_id;       /* 0..N_EXPERTS-1                          */
     uint16_t ntokens;         /* number of tokens routed to this expert  */
@@ -72,6 +79,7 @@ typedef struct {
     int16_t   cache_eid_c2;   /* expert resident in C2 weight SRAM, -1 = none */
     int16_t   cache_eid_c3;   /* expert resident in C3 weight SRAM, -1 = none */
 } moe_request_t;
+#endif
 
 /* ── Output: one scheduled expert run (compact vs old 88-byte record) ───── */
 typedef struct {
@@ -102,6 +110,7 @@ typedef struct {
     /* REMOVED: cluster (from tasks[task_idx]), weight/shape/alloc_bw/start_cc/end_cc */
 } moe_dma_op_t;
 
+#if !MOE_SCHED_PURE_HW_FAST
 typedef struct {
     moe_task_t   tasks[MOE_MAX_TASKS];      /* ordered task list               */
     moe_dma_op_t dma_ops[MOE_MAX_DMA_OPS];  /* DMA operations in issue order   */
@@ -109,6 +118,7 @@ typedef struct {
     uint16_t     n_dma_ops;                 /* valid DMA ops count             */
     /* REMOVED: est_makespan_cc (timing no longer propagated to L3)            */
 } moe_schedule_t;
+#endif
 
 /* ── RTL compact plan format -------------------------------------------------
  * This mirrors the pure-slave scheduler RTL output after commit_unit:
@@ -159,6 +169,7 @@ typedef enum {
  *  candidate branches are enumerated for the current request. No dynamic
  *  memory is used.
  * ───────────────────────────────────────────────────────────────────────── */
+#if !MOE_SCHED_PURE_HW_FAST
 moe_status_t moe_schedule(const moe_request_t *req, moe_schedule_t *out);
 
 /* Generate the same compact plan representation that the RTL scheduler emits.
@@ -175,6 +186,7 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
                                const moe_hw_plan_entry_t *plan,
                                uint16_t n_plan,
                                moe_schedule_t *out);
+#endif
 
 #ifdef __cplusplus
 }

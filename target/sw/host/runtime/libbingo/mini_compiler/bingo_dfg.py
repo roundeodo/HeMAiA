@@ -1818,6 +1818,8 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             f.write("        // 1. Memory Allocations\n")
             for h in local_handles:
                 c_var = handle_name_map[h]
+                if getattr(h, "condition", None):
+                    f.write(f"        #if {h.condition}\n")
                 alloc_call = ""
                 if h.mem_level == "L1":
                     alloc_call = (
@@ -1829,6 +1831,8 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                     alloc_call = f"bingo_l3_alloc(0x{h.chip_id:02x}, {h.size})"
 
                 f.write(f"        uint64_t {c_var} = {alloc_call};\n")
+                if getattr(h, "condition", None):
+                    f.write("        #endif\n")
             f.write("\n")
 
     def _emit_list_allocations(self, f, chiplet_id):
@@ -1952,7 +1956,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                         )
                     )
                     for field, value in field_assignments.items():
-                        f.write(f"        {args_var}->{field} = {value};\n")
+                        if field.startswith("#"):
+                            f.write(f"        {field}\n")
+                        else:
+                            f.write(f"        {args_var}->{field} = {value};\n")
                     # Wire pred_scratchpad_addr for auto-inserted gating nodes
                     if hasattr(node, "_pred_source_node") and node._pred_source_node:
                         pred_sp = node._pred_source_node._scratchpad_c_var
@@ -1999,7 +2006,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                         )
                     )
                     for field, value in field_assignments.items():
-                        f.write(f"        {args_var}->{field} = {value};\n")
+                        if field.startswith("#"):
+                            f.write(f"        {field}\n")
+                        else:
+                            f.write(f"        {args_var}->{field} = {value};\n")
                     # Wire pred_scratchpad_addr for auto-inserted gating nodes
                     if hasattr(node, "_pred_source_node") and node._pred_source_node:
                         pred_sp = node._pred_source_node._scratchpad_c_var
