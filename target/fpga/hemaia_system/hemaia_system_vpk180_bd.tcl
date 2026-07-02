@@ -20,7 +20,7 @@ set script_folder [_tcl::get_script_folder]
 ################################################################
 # Check if script is running in correct Vivado version.
 ################################################################
-set scripts_vivado_version 2023.2
+set scripts_vivado_version 2025.2
 set current_vivado_version [version -short]
 
 if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
@@ -138,7 +138,6 @@ xilinx.com:ip:xlslice:1.0\
 MICAS_KUL:user:occamy_chip:1.0\
 xilinx.com:ip:axis_vio:1.0\
 xilinx.com:ip:versal_cips:3.4\
-xilinx.com:ip:util_ds_buf:2.2\
 "
 
    set list_ips_missing ""
@@ -220,10 +219,6 @@ proc create_root_design { parentCell } {
   set uart_rts_no [ create_bd_port -dir O uart_rts_no ]
   set gpio_d_o [ create_bd_port -dir O -from 3 -to 0 gpio_d_o ]
 
-#   set spis_sd_io [ create_bd_port -dir IO -from 3 -to 0 spis_sd_io ]
-#   set spis_sck_i [ create_bd_port -dir I spis_sck_i ]
-#   set spis_csb_i [ create_bd_port -dir I spis_csb_i ]
-
   # Create instance: c_high, and set properties
   set c_high [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 c_high ]
 
@@ -231,12 +226,12 @@ proc create_root_design { parentCell } {
   set c_low [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 c_low ]
   set_property CONFIG.CONST_VAL {0} $c_low
 
-  # Tie unused SPI master input data low. The 4cluster cfg instantiates SPIM,
-  # but this VPK180 setup does not route SPIM data pins to board IO.
+
+  # Create instance: c_spim_sd_i, and set properties
   set c_spim_sd_i [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 c_spim_sd_i ]
   set_property -dict [list \
-    CONFIG.CONST_WIDTH {4} \
     CONFIG.CONST_VAL {0} \
+    CONFIG.CONST_WIDTH {4} \
   ] $c_spim_sd_i
 
 
@@ -307,18 +302,18 @@ proc create_root_design { parentCell } {
       PMC_CRP_PL1_REF_CTRL_FREQMHZ {3.2768} \
       PMC_CRP_PL2_REF_CTRL_FREQMHZ {16} \
       PMC_CRP_PL5_REF_CTRL_FREQMHZ {400} \
-      PMC_MIO0 {{AUX_IO 0} {DIRECTION out} {DRIVE_STRENGTH 12mA} {OUTPUT_DATA default} {PULL pullup} {SCHMITT 1} {SLEW slow} {USAGE Reserved}} \
-      PMC_MIO1 {{AUX_IO 0} {DIRECTION inout} {DRIVE_STRENGTH 12mA} {OUTPUT_DATA default} {PULL pullup} {SCHMITT 1} {SLEW slow} {USAGE Reserved}} \
+      PMC_MIO0 {{AUX_IO 0} {DIRECTION in} {DRIVE_STRENGTH 8mA} {OUTPUT_DATA default} {PULL pullup} {SCHMITT 0} {SLEW slow} {USAGE Reserved}} \
+      PMC_MIO1 {{AUX_IO 0} {DIRECTION in} {DRIVE_STRENGTH 8mA} {OUTPUT_DATA default} {PULL pullup} {SCHMITT 0} {SLEW slow} {USAGE Reserved}} \
       PMC_PL_ALT_REF_CLK_FREQMHZ {33.333} \
       PMC_QSPI_FBCLK {{ENABLE 1} {IO {PMC_MIO 6}}} \
-      PMC_QSPI_PERIPHERAL_DATA_MODE {x4} \
+      PMC_QSPI_PERIPHERAL_DATA_MODE {x1} \
       PMC_QSPI_PERIPHERAL_ENABLE {0} \
       PMC_QSPI_PERIPHERAL_MODE {Single} \
       PMC_REF_CLK_FREQMHZ {33.3333333} \
-      PMC_SD0 {{CD_ENABLE 0} {CD_IO {PMC_MIO 39}} {POW_ENABLE 0} {POW_IO {PMC_MIO 49}} {RESET_ENABLE 0} {RESET_IO {PMC_MIO 17}} {WP_ENABLE 0} {WP_IO {PMC_MIO 37}}} \
-      PMC_SD0_PERIPHERAL {{CLK_100_SDR_OTAP_DLY 0x3} {CLK_200_SDR_OTAP_DLY 0x2} {CLK_50_DDR_ITAP_DLY 0x36} {CLK_50_DDR_OTAP_DLY 0x3} {CLK_50_SDR_ITAP_DLY 0x2C} {CLK_50_SDR_OTAP_DLY 0x4} {ENABLE 0} {IO\
-{PMC_MIO 37 .. 49}}} \
-      PMC_SD0_SLOT_TYPE {SD 3.0} \
+      PMC_SD0 {{CD_ENABLE 0} {CD_IO {PMC_MIO 24}} {POW_ENABLE 0} {POW_IO {PMC_MIO 17}} {RESET_ENABLE 0} {RESET_IO {PMC_MIO 17}} {WP_ENABLE 0} {WP_IO {PMC_MIO 25}}} \
+      PMC_SD0_PERIPHERAL {{CLK_100_SDR_OTAP_DLY 0x00} {CLK_200_SDR_OTAP_DLY 0x00} {CLK_50_DDR_ITAP_DLY 0x00} {CLK_50_DDR_OTAP_DLY 0x00} {CLK_50_SDR_ITAP_DLY 0x00} {CLK_50_SDR_OTAP_DLY 0x00} {ENABLE 0}\
+{IO {PMC_MIO 13 .. 25}}} \
+      PMC_SD0_SLOT_TYPE {SD 2.0} \
       PMC_SD1 {{CD_ENABLE 1} {CD_IO {PMC_MIO 28}} {POW_ENABLE 1} {POW_IO {PMC_MIO 51}} {RESET_ENABLE 0} {RESET_IO {PMC_MIO 12}} {WP_ENABLE 1} {WP_IO {PMC_MIO 50}}} \
       PMC_SD1_PERIPHERAL {{CLK_100_SDR_OTAP_DLY 0x3} {CLK_200_SDR_OTAP_DLY 0x2} {CLK_50_DDR_ITAP_DLY 0x36} {CLK_50_DDR_OTAP_DLY 0x3} {CLK_50_SDR_ITAP_DLY 0x2C} {CLK_50_SDR_OTAP_DLY 0x4} {ENABLE 1} {IO\
 {PMC_MIO 26 .. 36}}} \
@@ -347,55 +342,69 @@ proc create_root_design { parentCell } {
       SMON_MEAS153 {{ALARM_ENABLE 0} {ALARM_LOWER 0.00} {ALARM_UPPER 2.00} {AVERAGE_EN 0} {ENABLE 1} {MODE {2 V unipolar}} {NAME VP_VN} {SUPPLY_NUM 6}} \
       SMON_TEMP_AVERAGING_SAMPLES {0} \
     } \
+    CONFIG.PS_PMC_CONFIG_APPLIED {1} \
   ] $versal_cips_0
 
 
-  # Create instance: spis_iobuf, and set properties
-#   set spis_iobuf [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_ds_buf:2.2 spis_iobuf ]
-#   set_property -dict [list \
-#     CONFIG.C_BUF_TYPE {IOBUF} \
-#     CONFIG.C_SIZE {4} \
-#   ] $spis_iobuf
-
-
   # Create port connections
-#   connect_bd_net -net Net3 [get_bd_ports spis_sd_io] [get_bd_pins spis_iobuf/IOBUF_IO_IO]
-  connect_bd_net -net axis_vio_0_probe_out2 [get_bd_pins axis_vio_0/probe_out2] [get_bd_pins occamy_chip/test_mode_i]
-  connect_bd_net -net bootmode [get_bd_pins axis_vio_0/probe_out1] [get_bd_pins occamy_chip/boot_mode_i]
-  connect_bd_net -net c_high_dout [get_bd_pins c_high/dout] [get_bd_ports vref_vdd_o] [get_bd_pins occamy_chip/jtag_trst_ni]
-  connect_bd_net -net c_low_dout [get_bd_pins c_low/dout] [get_bd_ports vref_gnd_o] [get_bd_pins occamy_chip/gpio_d_i] [get_bd_pins occamy_chip/chip_id_i]
-  connect_bd_net -net clk_wizard_0_clk_core [get_bd_pins versal_cips_0/pl0_ref_clk] [get_bd_pins axis_vio_0/clk] [get_bd_pins occamy_chip/clk_i]
-  connect_bd_net -net jtag_tck_i_1 [get_bd_ports jtag_tck_i] [get_bd_pins occamy_chip/jtag_tck_i]
+  connect_bd_net -net axis_vio_0_probe_out2  [get_bd_pins axis_vio_0/probe_out2] \
+  [get_bd_pins occamy_chip/test_mode_i]
+  connect_bd_net -net bootmode  [get_bd_pins axis_vio_0/probe_out1] \
+  [get_bd_pins occamy_chip/boot_mode_i]
+  connect_bd_net -net c_high_dout  [get_bd_pins c_high/dout] \
+  [get_bd_ports vref_vdd_o] \
+  [get_bd_pins occamy_chip/jtag_trst_ni]
+  connect_bd_net -net c_low_dout  [get_bd_pins c_low/dout] \
+  [get_bd_ports vref_gnd_o] \
+  [get_bd_pins occamy_chip/gpio_d_i] \
+  [get_bd_pins occamy_chip/chip_id_i]
+  connect_bd_net -net c_spim_sd_i_dout  [get_bd_pins c_spim_sd_i/dout] \
+  [get_bd_pins occamy_chip/spim_sd_i]
+  connect_bd_net -net clk_wizard_0_clk_core  [get_bd_pins versal_cips_0/pl0_ref_clk] \
+  [get_bd_pins occamy_chip/clk_i] \
+  [get_bd_pins axis_vio_0/clk]
+  connect_bd_net -net jtag_tck_i_1  [get_bd_ports jtag_tck_i] \
+  [get_bd_pins occamy_chip/jtag_tck_i]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets jtag_tck_i_1]
-  connect_bd_net -net jtag_tdi_i_1 [get_bd_ports jtag_tdi_i] [get_bd_pins occamy_chip/jtag_tdi_i]
+  connect_bd_net -net jtag_tdi_i_1  [get_bd_ports jtag_tdi_i] \
+  [get_bd_pins occamy_chip/jtag_tdi_i]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets jtag_tdi_i_1]
-  connect_bd_net -net jtag_tms_i_1 [get_bd_ports jtag_tms_i] [get_bd_pins occamy_chip/jtag_tms_i]
+  connect_bd_net -net jtag_tms_i_1  [get_bd_ports jtag_tms_i] \
+  [get_bd_pins occamy_chip/jtag_tms_i]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets jtag_tms_i_1]
-  connect_bd_net -net occamy_chip_0_gpio_d_o [get_bd_pins occamy_chip/gpio_d_o] [get_bd_pins xlslice_1/Din]
-  connect_bd_net -net occamy_chip_0_jtag_tdo_o [get_bd_pins occamy_chip/jtag_tdo_o] [get_bd_ports jtag_tdo_o]
+  connect_bd_net -net occamy_chip_0_gpio_d_o  [get_bd_pins occamy_chip/gpio_d_o] \
+  [get_bd_pins xlslice_1/Din]
+  connect_bd_net -net occamy_chip_0_jtag_tdo_o  [get_bd_pins occamy_chip/jtag_tdo_o] \
+  [get_bd_ports jtag_tdo_o]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets occamy_chip_0_jtag_tdo_o]
-  connect_bd_net -net occamy_chip_0_uart_rts_no [get_bd_pins occamy_chip/uart_rts_no] [get_bd_ports uart_rts_no]
+  connect_bd_net -net occamy_chip_0_uart_rts_no  [get_bd_pins occamy_chip/uart_rts_no] \
+  [get_bd_ports uart_rts_no]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets occamy_chip_0_uart_rts_no]
-  connect_bd_net -net occamy_chip_0_uart_tx_o [get_bd_pins occamy_chip/uart_tx_o] [get_bd_ports uart_tx_o]
+  connect_bd_net -net occamy_chip_0_uart_tx_o  [get_bd_pins occamy_chip/uart_tx_o] \
+  [get_bd_ports uart_tx_o]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets occamy_chip_0_uart_tx_o]
-#   connect_bd_net -net occamy_chip_spis_sd_en_o [get_bd_pins occamy_chip/spis_sd_en_o] [get_bd_pins spis_iobuf/IOBUF_IO_T]
-#   connect_bd_net -net occamy_chip_spis_sd_o [get_bd_pins occamy_chip/spis_sd_o] [get_bd_pins spis_iobuf/IOBUF_IO_I]
-  connect_bd_net -net occamy_rst [get_bd_pins rst_or_core/Res] [get_bd_pins rst_core_inv/Op1]
-  connect_bd_net -net occamy_rstn [get_bd_pins rst_core_inv/Res] [get_bd_pins occamy_chip/rst_ni] [get_bd_pins occamy_chip/rst_periph_ni]
-  connect_bd_net -net reset [get_bd_pins axis_vio_0/probe_out0] [get_bd_pins concat_rst_core/In1]
-  connect_bd_net -net reset_button [get_bd_ports reset] [get_bd_pins concat_rst_core/In0]
-  connect_bd_net -net c_spim_sd_i_dout [get_bd_pins c_spim_sd_i/dout] [get_bd_pins occamy_chip/spim_sd_i]
-#   connect_bd_net -net spis_csb_i_0_1 [get_bd_ports spis_csb_i] [get_bd_pins occamy_chip/spis_csb_i]
-#   connect_bd_net -net spis_iobuf_IOBUF_IO_O [get_bd_pins spis_iobuf/IOBUF_IO_O] [get_bd_pins occamy_chip/spis_sd_i]
-#   connect_bd_net -net spis_sck_i_0_1 [get_bd_ports spis_sck_i] [get_bd_pins occamy_chip/spis_sck_i]
-  connect_bd_net -net uart_cts_ni_0_1 [get_bd_ports uart_cts_ni] [get_bd_pins occamy_chip/uart_cts_ni]
+  connect_bd_net -net occamy_rst  [get_bd_pins rst_or_core/Res] \
+  [get_bd_pins rst_core_inv/Op1]
+  connect_bd_net -net occamy_rstn  [get_bd_pins rst_core_inv/Res] \
+  [get_bd_pins occamy_chip/rst_ni] \
+  [get_bd_pins occamy_chip/rst_periph_ni]
+  connect_bd_net -net reset  [get_bd_pins axis_vio_0/probe_out0] \
+  [get_bd_pins concat_rst_core/In1]
+  connect_bd_net -net reset_button  [get_bd_ports reset] \
+  [get_bd_pins concat_rst_core/In0]
+  connect_bd_net -net uart_cts_ni_0_1  [get_bd_ports uart_cts_ni] \
+  [get_bd_pins occamy_chip/uart_cts_ni]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets uart_cts_ni_0_1]
-  connect_bd_net -net uart_rx_i_0_1 [get_bd_ports uart_rx_i] [get_bd_pins occamy_chip/uart_rx_i]
+  connect_bd_net -net uart_rx_i_0_1  [get_bd_ports uart_rx_i] \
+  [get_bd_pins occamy_chip/uart_rx_i]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets uart_rx_i_0_1]
-  connect_bd_net -net versal_cips_0_pl1_ref_clk [get_bd_pins versal_cips_0/pl1_ref_clk] [get_bd_pins occamy_chip/rtc_i]
-  connect_bd_net -net versal_cips_0_pl2_ref_clk [get_bd_pins versal_cips_0/pl2_ref_clk] [get_bd_pins occamy_chip/clk_periph_i]
-  connect_bd_net -net xlconcat_2_dout [get_bd_pins concat_rst_core/dout] [get_bd_pins rst_or_core/Op1]
-  connect_bd_net -net xlslice_1_Dout [get_bd_pins xlslice_1/Dout] [get_bd_ports gpio_d_o]
+  connect_bd_net -net versal_cips_0_pl1_ref_clk  [get_bd_pins versal_cips_0/pl1_ref_clk]
+  connect_bd_net -net versal_cips_0_pl2_ref_clk  [get_bd_pins versal_cips_0/pl2_ref_clk] \
+  [get_bd_pins occamy_chip/clk_periph_i]
+  connect_bd_net -net xlconcat_2_dout  [get_bd_pins concat_rst_core/dout] \
+  [get_bd_pins rst_or_core/Op1]
+  connect_bd_net -net xlslice_1_Dout  [get_bd_pins xlslice_1/Dout] \
+  [get_bd_ports gpio_d_o]
 
   # Create address segments
 
@@ -416,3 +425,4 @@ create_root_design ""
 
 
 common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
+
