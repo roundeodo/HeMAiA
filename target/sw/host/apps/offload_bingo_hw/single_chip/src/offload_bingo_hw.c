@@ -14,15 +14,15 @@ int main() {
     // Enable vector extension
     enable_vec();
 
-    // Set all clocks to 83.3 MHz (500 MHz / 6) for unified trace analysis
+    // Set all host/cluster clocks to 40 MHz (240 MHz PL0 / 6) for FPGA bring-up.
     // Directly switch division without disable/reset to avoid AXI disruption
     for (int i = 0; i <= N_CLUSTERS_PER_CHIPLET; i++) {
         enable_clk_domain(i, 6);
         asm volatile("fence" ::: "memory");
     }
 
-    OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE("Single-chip Offload HW Bingo Main\r\n");
-    OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+    printf_safe("Single-chip Offload HW Bingo Main\r\n");
+    printf_safe(
         "Chip(%x, %x): [Host] Start Offloading Program\r\n",
         get_current_chip_loc_x(), get_current_chip_loc_y());
 
@@ -30,12 +30,12 @@ int main() {
     // 2. Init the Allocator
     ///////////////////////////////
     if(bingo_hemaia_system_mmap_init() < 0){
-        OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+        printf_safe(
             "Chip(%x, %x): [Host] Error when initializing Allocator\r\n",
             get_current_chip_loc_x(), get_current_chip_loc_y());
         return -1;
     } else {
-        OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+        printf_safe(
             "Chip(%x, %x): [Host] Allocator Init Success\r\n",
             get_current_chip_loc_x(), get_current_chip_loc_y());
     }
@@ -56,7 +56,7 @@ int main() {
     // 3.3 Start Snitches
     wakeup_snitches_cl(current_chip_id);
     asm volatile("fence" ::: "memory");
-    OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+    printf_safe(
         "Chip(%x, %x): [Host] Wake up clusters\r\n",
         get_current_chip_loc_x(), get_current_chip_loc_y());
 
@@ -64,17 +64,17 @@ int main() {
     // 4. Run the bingo runtime
     ///////////////////////////////
 
-    OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+    printf_safe(
         "Chip(%x, %x): [Host] Start Bingo Runtime\r\n",
         get_current_chip_loc_x(), get_current_chip_loc_y());
     int ret = kernel_execution();
     // By default the clusters will pull up the interrupt line once the tasks are done
     // So we clean up the interrupt line here
     clear_host_sw_interrupt(current_chip_id);
-    OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+    printf_safe(
         "Chip(%x, %x): [Host] Offload Finish with ret = %d\r\n",
         get_current_chip_loc_x(), get_current_chip_loc_y(), ret);
-    OFFLOAD_BINGO_HW_DEBUG_PRINT_SAFE(
+    printf_safe(
         "Chip(%x, %x): [Host] End Offloading Program\r\n",
         get_current_chip_loc_x(), get_current_chip_loc_y());   
     return ret;

@@ -318,4 +318,4 @@ clean-clint:
 	@touch $@
 
 src/bender_targets.tmp: $(CFG) # Generate bender_targets.tmp file
-	$(HEMAIA_UTIL) --cfg_path $(CFG) --get_bender_targets > $@
+	echo $(shell $(HEMAIA_UTIL) --cfg_path $(CFG) --get_bender_targets) > src/bender_targets.tmp

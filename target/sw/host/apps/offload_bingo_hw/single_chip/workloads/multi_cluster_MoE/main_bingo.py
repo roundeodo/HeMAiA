@@ -112,8 +112,9 @@ from bingo_kernel_args import (
 )
 # MOE_DYNAMIC_SLOT_COUNT: max tasks per cluster side.
 # With MOE_MAX_EXPERTS=64 and greedy SPLIT: max tasks/cluster = 64 (1 per expert).
-# Set to 32 conservatively (ceil(64/2) tasks per cluster under balanced assignment).
-MOE_DYNAMIC_SLOT_COUNT = 32
+# Keep 64 slots because the scheduler can legally generate more than 32 tasks
+# on one physical cluster side when the selected sequence is unbalanced.
+MOE_DYNAMIC_SLOT_COUNT = 64
 # Per-slot runtime record only contains dynamic scheduler output plus compact
 # bottom-level offsets. Static node constants live in one L1 static context per
 # individual cluster. 192B is 64B-aligned and covers the compact C struct.

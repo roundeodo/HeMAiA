@@ -259,7 +259,6 @@ def generate_snitch(cluster_cfg_dir, snitch_path, xmx="8G", xms="8G", sw_only=Fa
                     "make",
                     "-C",
                     f"{snitch_path}/target/snitch_cluster",
-                    "CFG=cfg/lru.hjson",
                     f"CFG_OVERRIDE={cfg}",
                     f"DISABLE_HEADER_GEN={disable_header_gen}",
                     make_target,

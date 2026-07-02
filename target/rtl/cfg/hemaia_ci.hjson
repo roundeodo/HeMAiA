@@ -212,10 +212,6 @@
       address: 83886080, // 0x0500_0000
       length: 65536, // 64 kiB 0x1_0000
     },
-    moe_scheduler: {
-      address: 83951616, // 0x0501_0000
-      length: 4096, // 4 kiB
-    },
     // backup boot address
     backup_boot_addr: 2147483648 // 0x8000_0000
 }

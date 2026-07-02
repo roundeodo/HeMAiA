@@ -48,8 +48,8 @@ else
 VSIM_SOURCES   =
 endif
 VSIM_BUILDDIR ?= work-vsim
-# VOPT_FLAGS     = +acc
-VOPT_FLAGS    = +notimingchecks
+VOPT_FLAGS     = +acc
+VOPT_FLAGS    += +notimingchecks
 
 # VCS_BUILDDIR should to be the same as the `DEFAULT : ./work-vcs`
 # in target/snitch_cluster/synopsys_sim.setup

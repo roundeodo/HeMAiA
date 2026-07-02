@@ -6,56 +6,57 @@
 # Yunhao Deng <yunhao.deng@kuleuven.be>
 
 # 1 and 0 voltage reference
-# 1: J20.3 - LA20_N - BT21
-set_property PACKAGE_PIN BT41 [get_ports vref_vdd_o]
-set_property IOSTANDARD LVCMOS15 [get_ports vref_vdd_o]
-set_property DRIVE 12 [get_ports vref_vdd_o]
+# 1: J20.3 - LA20_N - BN39
+set_property PACKAGE_PIN BN39 [get_ports vref_vdd_o]
+set_property IOSTANDARD LVCMOS12 [get_ports vref_vdd_o]
+set_property DRIVE 8 [get_ports vref_vdd_o]
 
-# 0: J20.1 - LA20_P - BR42
-set_property PACKAGE_PIN BR42 [get_ports vref_gnd_o]
-set_property IOSTANDARD LVCMOS15 [get_ports vref_gnd_o]
-set_property DRIVE 12 [get_ports vref_gnd_o]
+# 0: J20.1 - LA20_P - BP38
+set_property PACKAGE_PIN BP38 [get_ports vref_gnd_o]
+set_property IOSTANDARD LVCMOS12 [get_ports vref_gnd_o]
+set_property DRIVE 8 [get_ports vref_gnd_o]
 
 
 # Four-wires UART with flow control
-# 2CD0 - J1.10 - LA12_P - BW49
-set_property PACKAGE_PIN BW49 [get_ports uart_rx_i]
-set_property IOSTANDARD LVCMOS15 [get_ports uart_rx_i]
-# 2CD1 - J1.12 - LA12_N - BW50
-set_property PACKAGE_PIN BW50 [get_ports uart_tx_o]
-set_property IOSTANDARD LVCMOS15 [get_ports uart_tx_o]
+
+# 2CD0 - J1.10 - LA12_P - CC49
+set_property PACKAGE_PIN CC49 [get_ports uart_rx_i]
+set_property IOSTANDARD LVCMOS12 [get_ports uart_rx_i]
+# 2CD1 - J1.12 - LA12_N - CA51
+set_property PACKAGE_PIN CA51 [get_ports uart_tx_o]
+set_property IOSTANDARD LVCMOS12 [get_ports uart_tx_o]
 # Flow Control
-# 2CD2 - J1.14 - LA13_P - CC49
-set_property PACKAGE_PIN CC49 [get_ports uart_cts_ni]
-set_property IOSTANDARD LVCMOS15 [get_ports uart_cts_ni]
+# 2CD2 - J1.14 - LA13_P - BV43
+set_property PACKAGE_PIN BV43 [get_ports uart_cts_ni]
+set_property IOSTANDARD LVCMOS12 [get_ports uart_cts_ni]
 set_property PULLUP TRUE [get_ports uart_cts_ni]
-# 2CD3 - J1.16 - LA13_N - CD50
-set_property PACKAGE_PIN CD50 [get_ports uart_rts_no]
-set_property IOSTANDARD LVCMOS15 [get_ports uart_rts_no]
+# 2CD3 - J1.16 - LA13_N - CC52
+set_property PACKAGE_PIN CC52 [get_ports uart_rts_no]
+set_property IOSTANDARD LVCMOS12 [get_ports uart_rts_no]
 
-# Six-wires SPIx4 (Slave)
-# J1.39 - LA09_N - CD46
-set_property PACKAGE_PIN CD46 [get_ports spis_sd_io[0]]
-set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[0]]
-# J1.37 - LA09_P - CC45
-set_property PACKAGE_PIN CC45 [get_ports spis_sd_io[1]]
-set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[1]]
-# J1.35 - LA08_N - BY50
-set_property PACKAGE_PIN BY50 [get_ports spis_sd_io[2]]
-set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[2]]
-# J1.33 - LA08_P - BY49
-set_property PACKAGE_PIN BY49 [get_ports spis_sd_io[3]]
-set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[3]]
-# J1.31 - LA07_N - CC50
-set_property PACKAGE_PIN CC50 [get_ports spis_csb_i]
-set_property IOSTANDARD LVCMOS15 [get_ports spis_csb_i]
-# J1.29 - LA07_P - CB49
-set_property PACKAGE_PIN CB49 [get_ports spis_sck_i]
-set_property IOSTANDARD LVCMOS15 [get_ports spis_sck_i]
+# # Six-wires SPIx4 (Slave)
+# # J1.39 - LA09_N - CD46
+# set_property PACKAGE_PIN CD46 [get_ports spis_sd_io[0]]
+# set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[0]]
+# # J1.37 - LA09_P - CC45
+# set_property PACKAGE_PIN CC45 [get_ports spis_sd_io[1]]
+# set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[1]]
+# # J1.35 - LA08_N - BY50
+# set_property PACKAGE_PIN BY50 [get_ports spis_sd_io[2]]
+# set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[2]]
+# # J1.33 - LA08_P - BY49
+# set_property PACKAGE_PIN BY49 [get_ports spis_sd_io[3]]
+# set_property IOSTANDARD LVCMOS15 [get_ports spis_sd_io[3]]
+# # J1.31 - LA07_N - CC50
+# set_property PACKAGE_PIN CC50 [get_ports spis_csb_i]
+# set_property IOSTANDARD LVCMOS15 [get_ports spis_csb_i]
+# # J1.29 - LA07_P - CB49
+# set_property PACKAGE_PIN CB49 [get_ports spis_sck_i]
+# set_property IOSTANDARD LVCMOS15 [get_ports spis_sck_i]
 
-create_clock -period 50.0 -name spi_s_sck [get_ports spis_sck_i]
-set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets spis_sck_i_IBUF]
-set_property CLOCK_DEDICATED_ROUTE ANY_CMT_REGION [get_nets spis_sck_i_IBUF_BUFGCE]
+# create_clock -period 50.0 -name spi_s_sck [get_ports spis_sck_i]
+# set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets spis_sck_i_IBUF]
+# set_property CLOCK_DEDICATED_ROUTE ANY_CMT_REGION [get_nets spis_sck_i_IBUF_BUFGCE]
 
 # Four-wires GPIO_O connected to LEDs
 set_property PACKAGE_PIN BA49 [get_ports gpio_d_o[0]]
@@ -100,18 +101,39 @@ create_generated_clock \
     [get_pins hemaia_system_i/occamy_chip/inst/i_hemaia_clk_rst_controller/gen_clock_divider[0].i_clk_divider/clk_o]
 
 create_generated_clock \
-    -name clk_acc \
+    -name clk_acc0 \
     -source [get_pins hemaia_system_i/occamy_chip/inst/clk_i] \
     -divide_by 6 \
     [get_pins hemaia_system_i/occamy_chip/inst/i_hemaia_clk_rst_controller/gen_clock_divider[1].i_clk_divider/clk_o]
 
+create_generated_clock \
+    -name clk_acc1 \
+    -source [get_pins hemaia_system_i/occamy_chip/inst/clk_i] \
+    -divide_by 6 \
+    [get_pins hemaia_system_i/occamy_chip/inst/i_hemaia_clk_rst_controller/gen_clock_divider[2].i_clk_divider/clk_o]
+
+create_generated_clock \
+    -name clk_acc2 \
+    -source [get_pins hemaia_system_i/occamy_chip/inst/clk_i] \
+    -divide_by 6 \
+    [get_pins hemaia_system_i/occamy_chip/inst/i_hemaia_clk_rst_controller/gen_clock_divider[3].i_clk_divider/clk_o]
+
+create_generated_clock \
+    -name clk_acc3 \
+    -source [get_pins hemaia_system_i/occamy_chip/inst/clk_i] \
+    -divide_by 6 \
+    [get_pins hemaia_system_i/occamy_chip/inst/i_hemaia_clk_rst_controller/gen_clock_divider[4].i_clk_divider/clk_o]
+
+#    -group {spi_s_sck}
 set_clock_groups -asynchronous \
     -group {clk_pl_0 clk_main} \
     -group {clk_core} \
-    -group {clk_acc} \
+    -group {clk_acc0} \
+    -group {clk_acc1} \
+    -group {clk_acc2} \
+    -group {clk_acc3} \
     -group {clk_pl_1} \
-    -group {clk_pl_2 clk_peri} \
-    -group {spi_s_sck}
+    -group {clk_pl_2 clk_peri}
 
 # CDC 2phase clearable of DM: i_cdc_resp/i_cdc_req
 # CONSTRAINT: Requires max_delay of min_period(src_clk_i, dst_clk_i) through the paths async_req, async_ack, async_data.

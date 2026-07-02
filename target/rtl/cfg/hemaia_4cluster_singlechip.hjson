@@ -114,7 +114,7 @@
       // Cross Cluster Calling Cfg
       max_multicast: 2,
       max_dimension: 5,
-      max_mem_size: 4096,
+      max_mem_size_kiB: 32768,
       // DataMaestro Cfg
       reader_buffer: 4,
       writer_buffer: 4,
@@ -208,7 +208,7 @@
     },
     spm_wide: {
       address: 2147483648, // 0x8000_0000
-      length: 1073741824,    // 1GiB 
+      length: 33554432,    // 32 MiB 0x200_0000
       banks: 16,
     },
     wide_zero_mem: {

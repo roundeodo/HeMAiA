@@ -639,7 +639,7 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
    * bits [10:9]: dma_s1             (0=NONE, 1=IDMA, 2=XDMA, 3=BOTH)
    * bits [12:11]:dma_s3
    * bit  13:     runtime_cluster_idx (0=C2, 1=C3)
-   * bits [18:14]:slot_id            (0-31, local slot index)
+   * bits [19:14]:slot_id            (0-63, local slot index)
    * ──────────────────────────────────────────────────────────────────────────── */
   uint32_t ctrl;
   uint32_t expert_id;

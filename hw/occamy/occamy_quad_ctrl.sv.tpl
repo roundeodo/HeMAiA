@@ -197,8 +197,6 @@ module ${name}_quad_ctrl
   // ADDR Space for the axi lite periph
   localparam addr_t CHIPLET_DONE_QUEUE_BASE    = QuadAXILiteBaseAddr + 0 * 4096;
   localparam addr_t HOST_READY_DONE_QUEUE_BASE = QuadAXILiteBaseAddr + 1 * 4096;
-  localparam addr_t HOST_DYNAMIC_TASK_QUEUE_BASE = HOST_READY_DONE_QUEUE_BASE + 48'h800;
-  localparam addr_t HOST_DYNAMIC_TASK_QUEUE_MASK = 48'hffff_ffff_f800;
 
   csr_req_t [BINGO_HW_MANAGER_NR_CORE_PER_CLUSTER-1:0][NrClustersPerQuad-1:0] bingo_hw_manager_csr_req;
   logic     [BINGO_HW_MANAGER_NR_CORE_PER_CLUSTER-1:0][NrClustersPerQuad-1:0] bingo_hw_manager_csr_req_valid;
@@ -206,9 +204,6 @@ module ${name}_quad_ctrl
   csr_rsp_t [BINGO_HW_MANAGER_NR_CORE_PER_CLUSTER-1:0][NrClustersPerQuad-1:0] bingo_hw_manager_csr_rsp;
   logic     [BINGO_HW_MANAGER_NR_CORE_PER_CLUSTER-1:0][NrClustersPerQuad-1:0] bingo_hw_manager_csr_rsp_valid;
   logic     [BINGO_HW_MANAGER_NR_CORE_PER_CLUSTER-1:0][NrClustersPerQuad-1:0] bingo_hw_manager_csr_rsp_ready;
-  logic [63:0] host_dynamic_task_desc;
-  logic        host_dynamic_task_valid;
-  logic        host_dynamic_task_ready;
   bingo_hw_manager_top #(
     .READY_AND_DONE_QUEUE_INTERFACE_TYPE(1), // 1: CSR 0: AXI LITE
     .TASK_QUEUE_TYPE                    (1), // 1: AXI Lite Master 0: Default AXI Lite Slave 
@@ -236,9 +231,6 @@ module ${name}_quad_ctrl
     // We use the task queue master port 
     .task_list_base_addr_i              (bingo_hw_manager_task_list_base_addr       ),
     .num_task_i                         (bingo_hw_manager_num_task                  ),
-    .dynamic_task_desc_i                 (host_dynamic_task_desc                     ),
-    .dynamic_task_valid_i                (host_dynamic_task_valid                    ),
-    .dynamic_task_ready_o                (host_dynamic_task_ready                    ),
     .bingo_hw_manager_start_i           (bingo_hw_manager_start                     ),
     .bingo_hw_manager_reset_start_o     (bingo_hw_manager_reset_start               ),
     .bingo_hw_manager_reset_start_en_o  (bingo_hw_manager_reset_start_en            ),
@@ -286,12 +278,6 @@ module ${name}_quad_ctrl
   csr_rsp_t host_ready_done_csr_rsp;
   logic host_ready_done_csr_rsp_valid;
   logic host_ready_done_csr_rsp_ready;
-  csr_req_t host_ready_done_manager_csr_req;
-  logic host_ready_done_manager_csr_req_valid;
-  logic host_ready_done_manager_csr_req_ready;
-  csr_rsp_t host_ready_done_manager_csr_rsp;
-  logic host_ready_done_manager_csr_rsp_valid;
-  logic host_ready_done_manager_csr_rsp_ready;
   axi_lite_to_csr #(
     .AXI_LITE_ADDR_WIDTH(${quad_ctrl_axi_lite_xbar.aw}),
     .AXI_LITE_DATA_WIDTH(${quad_ctrl_axi_lite_xbar.dw}),
@@ -311,37 +297,6 @@ module ${name}_quad_ctrl
     .csr_rsp_valid_i(host_ready_done_csr_rsp_valid),
     .csr_rsp_ready_o(host_ready_done_csr_rsp_ready)
   );
-
-  hemaia_bingo_dynamic_task_csr #(
-    .CSR_ADDR_WIDTH(AddrWidth),
-    .TASK_QUEUE_DEPTH(8),
-    .DONE_QUEUE_DEPTH(8),
-    .DYNAMIC_CSR_BASE_ADDR(HOST_DYNAMIC_TASK_QUEUE_BASE),
-    .DYNAMIC_CSR_ADDR_MASK(HOST_DYNAMIC_TASK_QUEUE_MASK),
-    .csr_req_t(csr_req_t),
-    .csr_rsp_t(csr_rsp_t)
-  ) i_hemaia_bingo_dynamic_task_csr (
-    .clk_i(clk_i),
-    .rst_ni(rst_ni),
-    .csr_req_i(host_ready_done_csr_req),
-    .csr_req_valid_i(host_ready_done_csr_req_valid),
-    .csr_req_ready_o(host_ready_done_csr_req_ready),
-    .csr_rsp_o(host_ready_done_csr_rsp),
-    .csr_rsp_valid_o(host_ready_done_csr_rsp_valid),
-    .csr_rsp_ready_i(host_ready_done_csr_rsp_ready),
-    .manager_csr_req_o(host_ready_done_manager_csr_req),
-    .manager_csr_req_valid_o(host_ready_done_manager_csr_req_valid),
-    .manager_csr_req_ready_i(host_ready_done_manager_csr_req_ready),
-    .manager_csr_rsp_i(host_ready_done_manager_csr_rsp),
-    .manager_csr_rsp_valid_i(host_ready_done_manager_csr_rsp_valid),
-    .manager_csr_rsp_ready_o(host_ready_done_manager_csr_rsp_ready),
-    .task_pop_desc_o(host_dynamic_task_desc),
-    .task_pop_valid_o(host_dynamic_task_valid),
-    .task_pop_ready_i(host_dynamic_task_ready),
-    .done_push_i('0),
-    .done_push_valid_i(1'b0),
-    .done_push_ready_o()
-  );
   %for cluster in range(num_clusters):
     %for core in range(num_cores_per_cluster):
     // Connect Normal Core${core} Cluster${cluster}
@@ -358,12 +313,12 @@ module ${name}_quad_ctrl
   %for cluster in range(num_clusters):
       %if cluster == 0:
   // Connect the host to cluster 0 ports
-    assign bingo_hw_manager_csr_req[${num_cores_per_cluster}][${cluster}] = host_ready_done_manager_csr_req;
-    assign bingo_hw_manager_csr_req_valid[${num_cores_per_cluster}][${cluster}] = host_ready_done_manager_csr_req_valid;
-    assign host_ready_done_manager_csr_req_ready = bingo_hw_manager_csr_req_ready[${num_cores_per_cluster}][${cluster}];
-    assign host_ready_done_manager_csr_rsp = bingo_hw_manager_csr_rsp[${num_cores_per_cluster}][${cluster}];
-    assign host_ready_done_manager_csr_rsp_valid = bingo_hw_manager_csr_rsp_valid[${num_cores_per_cluster}][${cluster}];
-    assign bingo_hw_manager_csr_rsp_ready[${num_cores_per_cluster}][${cluster}] = host_ready_done_manager_csr_rsp_ready;
+  assign bingo_hw_manager_csr_req[${num_cores_per_cluster}][${cluster}] = host_ready_done_csr_req;
+  assign bingo_hw_manager_csr_req_valid[${num_cores_per_cluster}][${cluster}] = host_ready_done_csr_req_valid;
+  assign host_ready_done_csr_req_ready = bingo_hw_manager_csr_req_ready[${num_cores_per_cluster}][${cluster}];
+  assign host_ready_done_csr_rsp = bingo_hw_manager_csr_rsp[${num_cores_per_cluster}][${cluster}];
+  assign host_ready_done_csr_rsp_valid = bingo_hw_manager_csr_rsp_valid[${num_cores_per_cluster}][${cluster}];
+  assign bingo_hw_manager_csr_rsp_ready[${num_cores_per_cluster}][${cluster}] = host_ready_done_csr_rsp_ready;
       %else:
   // Tie off Cluster ${cluster} unused ports
   assign bingo_hw_manager_csr_req[${num_cores_per_cluster}][${cluster}] = '0;

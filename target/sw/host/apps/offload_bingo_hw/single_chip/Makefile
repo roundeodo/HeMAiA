@@ -49,12 +49,6 @@ APPS += single_cluster_MoE_silu
 APPS += single_cluster_MoE_prefill
 APPS += multi_cluster_MoE
 APPS += host_api_test
-APPS += attn_test_single_gemm_4cluster
-APPS += attn_test_quantize_4cluster
-APPS += attn_test_dequantize_4cluster
-APPS += attn_test_int32_add_4cluster
-APPS += attn_test_ksplit_gemm_4cluster
-APPS += attn_test_softmax_4cluster
 APPS += attn_reference_4cluster
 SUBDIRS = $(addprefix workloads/,$(APPS))
 

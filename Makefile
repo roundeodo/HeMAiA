@@ -11,7 +11,7 @@ CFG_OVERRIDE ?=
 
 DEFAULT_CFG = $(MKFILE_DIR)target/rtl/cfg/hemaia_ci.hjson
 CFG = $(MKFILE_DIR)target/rtl/cfg/lru.hjson
-DEFAULT_SIM_CFG = $(MKFILE_DIR)target/rtl/cfg/sim_rtl.hjson
+DEFAULT_SIM_CFG = $(MKFILE_DIR)target/sim/cfg/sim_rtl.hjson
 SIM_CFG ?= $(DEFAULT_SIM_CFG)
 # If the configuration file is overriden on the command-line (through
 # CFG_OVERRIDE) and this file differs from the least recently used
@@ -24,7 +24,6 @@ $(CFG): FORCE
 	@if [ ! -e $@ ] ; then \
 		DEFAULT_CFG="$(DEFAULT_CFG)"; \
 		echo "Using default config file: $$DEFAULT_CFG"; \
-		rm -f $@; \
 		cp $$DEFAULT_CFG $@; \
 	fi
 	@# If a config file is provided on the command-line then we override the
@@ -34,7 +33,6 @@ $(CFG): FORCE
 	@# $(CFG)-dependent rebuild (SW headers, host.ld, RTL gen).
 	@if [ $(CFG_OVERRIDE) ] && ! cmp -s $(CFG_OVERRIDE) $@ ; then \
 		echo "Overriding config file with: $(CFG_OVERRIDE)"; \
-		rm -f $@; \
 		cp $(CFG_OVERRIDE) $@; \
 	fi
 FORCE:
@@ -71,12 +69,6 @@ clean: clean-repo clean-bender
 # Execute in SNAX Docker
 DEBUG_LEVEL ?= 0
 PERF_TRACING ?= 1
-NODE_TIMING ?= 0
-TRACE_TASK_FLOW ?= 0
-TRACE_TASK_START ?= 35
-TRACE_TASK_END ?= 37
-TRACE_ARG_WORDS ?= 8
-PROFILING ?= 0
 
 # User flags for SW compilation
 # Useful for enabling debug prints or performance tracing
@@ -84,18 +76,6 @@ PROFILING ?= 0
 USER_FLAGS = -DBINGO_DEBUG_LEVEL=$(DEBUG_LEVEL)
 ifeq ($(PERF_TRACING), 1)
     USER_FLAGS += -DBINGO_PERF_TRACING
-endif
-ifeq ($(NODE_TIMING), 1)
-	USER_FLAGS += -DBINGO_NODE_TIMING
-endif
-ifeq ($(PROFILING), 1)
-	USER_FLAGS += -DBINGO_PROFILING
-endif
-ifeq ($(TRACE_TASK_FLOW), 1)
-	USER_FLAGS += -DBINGO_TRACE_TASK_FLOW=1
-	USER_FLAGS += -DBINGO_TRACE_TASK_START=$(TRACE_TASK_START)
-	USER_FLAGS += -DBINGO_TRACE_TASK_END=$(TRACE_TASK_END)
-	USER_FLAGS += -DBINGO_TRACE_ARG_WORDS=$(TRACE_ARG_WORDS)
 endif
 
 sw: $(CFG)
@@ -115,15 +95,13 @@ HOST_APP_TYPE ?= offload_bingo_sw
 CHIP_TYPE     ?= single_chip
 WORKLOAD      ?= gemm_tiled
 DEV_APP       ?= snax-bingo-offload
-DATAGEN_FLAGS ?=
 single-sw: $(CFG)
 	$(MAKE) -C ./target/sw single-sw \
 		USER_FLAGS="$(USER_FLAGS)" \
 		HOST_APP_TYPE=$(HOST_APP_TYPE) \
 		CHIP_TYPE=$(CHIP_TYPE) \
 		WORKLOAD=$(WORKLOAD) \
-		DEV_APP=$(DEV_APP) \
-		DATAGEN_FLAGS="$(DATAGEN_FLAGS)"
+		DEV_APP=$(DEV_APP)
 
 
 

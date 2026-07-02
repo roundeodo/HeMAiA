@@ -542,7 +542,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
  *   bits [10:9]:  dma_s1            (0=NONE, 1=IDMA, 2=XDMA, 3=BOTH)
  *   bits [12:11]: dma_s3
  *   bit  13:      runtime_cluster_idx  (0=C2, 1=C3)
- *   bits [18:14]: slot_id           (0-31)
+ *   bits [19:14]: slot_id           (0-63)
  * ──────────────────────────────────────────────────────────────────────────── */
 #define MOE_DYN_CTRL_ACTIVE(c)   ((c) & 1u)
 #define MOE_DYN_CTRL_SKIP_S1(c)  (((c) >> 1u) & 1u)
@@ -554,7 +554,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_swiglu_full(void *arg)
 #define MOE_DYN_CTRL_DMA_S1(c)   (((c) >> 9u) & 3u)
 #define MOE_DYN_CTRL_DMA_S3(c)   (((c) >> 11u) & 3u)
 #define MOE_DYN_CTRL_CLUSTER(c)  (((c) >> 13u) & 1u)
-#define MOE_DYN_CTRL_SLOT_ID(c)  (((c) >> 14u) & 31u) /* bits [18:14]: 5-bit slot_id (0..31, supports 64 experts/2) */
+#define MOE_DYN_CTRL_SLOT_ID(c)  (((c) >> 14u) & 63u) /* bits [19:14]: 6-bit slot_id (0..63) */
 /* ── dma_slot_vd field extractors (3 bits per slot: valid | dma[1:0]) ───────
  * For slot i: bit[i*3] = valid, bits[i*3+2:i*3+1] = dma binding
  * ──────────────────────────────────────────────────────────────────────────── */

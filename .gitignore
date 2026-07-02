@@ -4,8 +4,6 @@ deps/
 Bender.lock
 Bender.local
 /working_dir/
-local_mirrors/
-bender_update.log
 
 .vscode/
 __pycache__

@@ -219,9 +219,10 @@ proc create_root_design { parentCell } {
   set uart_cts_ni [ create_bd_port -dir I uart_cts_ni ]
   set uart_rts_no [ create_bd_port -dir O uart_rts_no ]
   set gpio_d_o [ create_bd_port -dir O -from 3 -to 0 gpio_d_o ]
-  set spis_sd_io [ create_bd_port -dir IO -from 3 -to 0 spis_sd_io ]
-  set spis_sck_i [ create_bd_port -dir I spis_sck_i ]
-  set spis_csb_i [ create_bd_port -dir I spis_csb_i ]
+
+#   set spis_sd_io [ create_bd_port -dir IO -from 3 -to 0 spis_sd_io ]
+#   set spis_sck_i [ create_bd_port -dir I spis_sck_i ]
+#   set spis_csb_i [ create_bd_port -dir I spis_csb_i ]
 
   # Create instance: c_high, and set properties
   set c_high [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 c_high ]
@@ -229,6 +230,14 @@ proc create_root_design { parentCell } {
   # Create instance: c_low, and set properties
   set c_low [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 c_low ]
   set_property CONFIG.CONST_VAL {0} $c_low
+
+  # Tie unused SPI master input data low. The 4cluster cfg instantiates SPIM,
+  # but this VPK180 setup does not route SPIM data pins to board IO.
+  set c_spim_sd_i [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 c_spim_sd_i ]
+  set_property -dict [list \
+    CONFIG.CONST_WIDTH {4} \
+    CONFIG.CONST_VAL {0} \
+  ] $c_spim_sd_i
 
 
   # Create instance: concat_rst_core, and set properties
@@ -342,15 +351,15 @@ proc create_root_design { parentCell } {
 
 
   # Create instance: spis_iobuf, and set properties
-  set spis_iobuf [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_ds_buf:2.2 spis_iobuf ]
-  set_property -dict [list \
-    CONFIG.C_BUF_TYPE {IOBUF} \
-    CONFIG.C_SIZE {4} \
-  ] $spis_iobuf
+#   set spis_iobuf [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_ds_buf:2.2 spis_iobuf ]
+#   set_property -dict [list \
+#     CONFIG.C_BUF_TYPE {IOBUF} \
+#     CONFIG.C_SIZE {4} \
+#   ] $spis_iobuf
 
 
   # Create port connections
-  connect_bd_net -net Net3 [get_bd_ports spis_sd_io] [get_bd_pins spis_iobuf/IOBUF_IO_IO]
+#   connect_bd_net -net Net3 [get_bd_ports spis_sd_io] [get_bd_pins spis_iobuf/IOBUF_IO_IO]
   connect_bd_net -net axis_vio_0_probe_out2 [get_bd_pins axis_vio_0/probe_out2] [get_bd_pins occamy_chip/test_mode_i]
   connect_bd_net -net bootmode [get_bd_pins axis_vio_0/probe_out1] [get_bd_pins occamy_chip/boot_mode_i]
   connect_bd_net -net c_high_dout [get_bd_pins c_high/dout] [get_bd_ports vref_vdd_o] [get_bd_pins occamy_chip/jtag_trst_ni]
@@ -369,15 +378,16 @@ proc create_root_design { parentCell } {
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets occamy_chip_0_uart_rts_no]
   connect_bd_net -net occamy_chip_0_uart_tx_o [get_bd_pins occamy_chip/uart_tx_o] [get_bd_ports uart_tx_o]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets occamy_chip_0_uart_tx_o]
-  connect_bd_net -net occamy_chip_spis_sd_en_o [get_bd_pins occamy_chip/spis_sd_en_o] [get_bd_pins spis_iobuf/IOBUF_IO_T]
-  connect_bd_net -net occamy_chip_spis_sd_o [get_bd_pins occamy_chip/spis_sd_o] [get_bd_pins spis_iobuf/IOBUF_IO_I]
+#   connect_bd_net -net occamy_chip_spis_sd_en_o [get_bd_pins occamy_chip/spis_sd_en_o] [get_bd_pins spis_iobuf/IOBUF_IO_T]
+#   connect_bd_net -net occamy_chip_spis_sd_o [get_bd_pins occamy_chip/spis_sd_o] [get_bd_pins spis_iobuf/IOBUF_IO_I]
   connect_bd_net -net occamy_rst [get_bd_pins rst_or_core/Res] [get_bd_pins rst_core_inv/Op1]
   connect_bd_net -net occamy_rstn [get_bd_pins rst_core_inv/Res] [get_bd_pins occamy_chip/rst_ni] [get_bd_pins occamy_chip/rst_periph_ni]
   connect_bd_net -net reset [get_bd_pins axis_vio_0/probe_out0] [get_bd_pins concat_rst_core/In1]
   connect_bd_net -net reset_button [get_bd_ports reset] [get_bd_pins concat_rst_core/In0]
-  connect_bd_net -net spis_csb_i_0_1 [get_bd_ports spis_csb_i] [get_bd_pins occamy_chip/spis_csb_i]
-  connect_bd_net -net spis_iobuf_IOBUF_IO_O [get_bd_pins spis_iobuf/IOBUF_IO_O] [get_bd_pins occamy_chip/spis_sd_i]
-  connect_bd_net -net spis_sck_i_0_1 [get_bd_ports spis_sck_i] [get_bd_pins occamy_chip/spis_sck_i]
+  connect_bd_net -net c_spim_sd_i_dout [get_bd_pins c_spim_sd_i/dout] [get_bd_pins occamy_chip/spim_sd_i]
+#   connect_bd_net -net spis_csb_i_0_1 [get_bd_ports spis_csb_i] [get_bd_pins occamy_chip/spis_csb_i]
+#   connect_bd_net -net spis_iobuf_IOBUF_IO_O [get_bd_pins spis_iobuf/IOBUF_IO_O] [get_bd_pins occamy_chip/spis_sd_i]
+#   connect_bd_net -net spis_sck_i_0_1 [get_bd_ports spis_sck_i] [get_bd_pins occamy_chip/spis_sck_i]
   connect_bd_net -net uart_cts_ni_0_1 [get_bd_ports uart_cts_ni] [get_bd_pins occamy_chip/uart_cts_ni]
   set_property HDL_ATTRIBUTE.DEBUG {true} [get_bd_nets uart_cts_ni_0_1]
   connect_bd_net -net uart_rx_i_0_1 [get_bd_ports uart_rx_i] [get_bd_pins occamy_chip/uart_rx_i]
@@ -406,4 +416,3 @@ create_root_design ""
 
 
 common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
-

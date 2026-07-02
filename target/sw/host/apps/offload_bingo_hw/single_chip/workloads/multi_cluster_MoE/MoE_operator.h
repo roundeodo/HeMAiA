@@ -18,6 +18,19 @@ typedef struct
     float softmax_scale;
 } moe_operator_cfg_t;
 
+static inline uint32_t moe_ctz32_no_libgcc(uint32_t x)
+{
+    if (x == 0u)
+        return 32u;
+
+    uint32_t n = 0;
+    while ((x & 1u) == 0u) {
+        n++;
+        x >>= 1;
+    }
+    return n;
+}
+
 // MoE_common_variable.h is NOT included here — its macros (input_dimension,
 // softmax_scale, etc.) clash with struct field names and local variables.
 // Those macros are only used by datagen.py and main_bingo.py (Python side).
@@ -73,8 +86,8 @@ void extract_top_k_indices_and_scores(
     uint16_t local_top_k_indices[cfg->individual_expert_number_k];
 
     // 预计算 SRAM 索引参数: 用位移/掩码替代除法/取模 (mesh 维度为 2 的幂)
-    uint32_t mr_shift = __builtin_ctz(cfg->mesh_row);
-    uint32_t mc_shift = __builtin_ctz(cfg->mesh_col);
+    uint32_t mr_shift = moe_ctz32_no_libgcc(cfg->mesh_row);
+    uint32_t mc_shift = moe_ctz32_no_libgcc(cfg->mesh_col);
     uint32_t mr_mask = cfg->mesh_row - 1;
     uint32_t mc_mask = cfg->mesh_col - 1;
     uint32_t row_stride = cfg->router_n1 * cfg->mesh_row * cfg->mesh_col;
@@ -153,7 +166,7 @@ static inline void extract_top2_indices_and_scores_fast(
     uint32_t valid_tokens_in_block,
     const moe_operator_cfg_t *cfg)
 {
-    uint32_t mr_shift = __builtin_ctz(cfg->mesh_row);
+    uint32_t mr_shift = moe_ctz32_no_libgcc(cfg->mesh_row);
     uint32_t mr_mask = cfg->mesh_row - 1u;
     uint32_t row_stride = cfg->mesh_row * cfg->mesh_col;
     uint32_t tile_stride = cfg->router_m1 * row_stride;
@@ -303,7 +316,7 @@ void experts_result_accumulate_tiled(
     }
 
     // ---- Phase 2: individual experts → gather-accumulate ----
-    uint32_t k_shift = __builtin_ctz(k);
+    uint32_t k_shift = moe_ctz32_no_libgcc(k);
 
     for (uint32_t e = 0; e < E; e++)
     {

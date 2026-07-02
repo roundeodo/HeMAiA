@@ -44,20 +44,28 @@ import os
 import re
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_PATH = pathlib.Path(__file__).resolve().parent
+
+
+def find_repo_root(start):
+    for parent in (start, *start.parents):
+        if (parent / "Bender.yml").is_file() and (parent / "deps").is_dir():
+            return parent
+    raise RuntimeError(f"Cannot find HeMAiA repo root from {start}")
+
+
+REPO_ROOT = find_repo_root(CURRENT_PATH)
+SNITCH_CLUSTER_DIR = REPO_ROOT / "deps" / "snitch_cluster"
+SNITCH_UTIL_SIM = SNITCH_CLUSTER_DIR / "util" / "sim"
+SNITCH_SILU_PKG = SNITCH_CLUSTER_DIR / "util" / "silu_pkg"
 
 # ── silu_pkg (bit-true SiLU golden) ──────────────────────────────────────────
-_silu_pkg = os.path.realpath(
-    os.path.join(
-        CURRENT_DIR,
-        "../../../../../../../../local_mirrors/snitch_cluster/util/silu_pkg",
-    )
-)
-if os.path.isdir(_silu_pkg):
-    sys.path.insert(0, _silu_pkg)
+if SNITCH_SILU_PKG.is_dir():
+    sys.path.insert(0, str(SNITCH_SILU_PKG))
 from silu_out16_balanced_golden import silu_out16_balanced_eval_q  # noqa: E402
 
 # ── data_utils for legacy scalar/vector emit ─────────────────────────────────
-sys.path.append(os.path.join(CURRENT_DIR, "../../../../../../../../util/sim/"))
+sys.path.insert(0, str(SNITCH_UTIL_SIM))
 from data_utils import (  # noqa: E402
     format_scalar_definition,
     format_vector_definition,
@@ -1371,7 +1379,7 @@ def get_args():
         "--hwcfg",
         type=pathlib.Path,
         default=pathlib.Path(CURRENT_DIR)
-        / "../../../../../../../../local_mirrors/snitch_cluster/target/"
+        / "../../../../../../../../deps/snitch_cluster/target/"
         "snitch_cluster/cfg/"
         "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane.hjson",
     )
