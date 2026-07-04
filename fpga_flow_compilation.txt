@@ -1,0 +1,1196 @@
+make -C ./target/fpga/hemaia_chip hemaia_chip
+make[1]: Entering directory '/esat/studscratch/r1015673/Thesis/HeMAiA/target/fpga/hemaia_chip'
+# make -C ../../ update-source
+# make -C ../../sim rtl
+vivado -mode batch -source hemaia_chip_vpk180.tcl -tclargs 1 1
+
+****** Vivado v2023.2.2 (64-bit)
+  **** SW Build 4126759 on Thu Feb  8 23:52:05 MST 2024
+  **** IP Build 4126054 on Fri Feb  9 11:39:09 MST 2024
+  **** SharedData Build 4115275 on Tue Jan 30 00:40:57 MST 2024
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source hemaia_chip_vpk180.tcl
+# set DEBUG false
+# set EXT_JTAG false
+# if {$argc > 0 && [lindex $argv 0]} { set DEBUG true }
+# if {$argc > 1 && [lindex $argv 1]} { set EXT_JTAG true }
+# set project hemaia_chip
+# create_project $project ./hemaia_chip -force -part xcvp1802-lsvc4072-2MP-e-S
+create_project: Time (s): cpu = 00:00:06 ; elapsed = 00:00:07 . Memory (MB): peak = 1583.418 ; gain = 38.859 ; free physical = 216827 ; free virtual = 246238
+# set_property XPM_LIBRARIES XPM_MEMORY [current_project]
+# source define-sources.tcl
+## set ROOT "/esat/studscratch/r1015673/Thesis/HeMAiA"
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/fpga/pad_functional_xilinx.sv \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/fpga/tc_clk_xilinx.sv \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/fpga/tc_io_cell_xilinx.sv \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/fpga/tc_sram_xilinx.sv \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/rtl/tc_sram_impl.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/deprecated/pulp_clock_gating_async.sv \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/deprecated/cluster_clk_cells.sv \
+##     $ROOT/.bender/git/checkouts/tech_cells_generic-029d47e844e267df/src/deprecated/pulp_clk_cells.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/binary_to_gray.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cb_filter_pkg.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cc_onehot.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_reset_ctrlr_pkg.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cf_math_pkg.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/clk_int_div.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/credit_counter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/delta_counter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/ecc_pkg.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/edge_propagator_tx.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/exp_backoff.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/fifo_v3.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/gray_to_binary.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/isochronous_4phase_handshake.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/isochronous_spill_register.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/lfsr.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/lfsr_16bit.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/lfsr_8bit.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/lossy_valid_to_stream.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/mv_filter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/onehot_to_bin.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/plru_tree.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/passthrough_stream_fifo.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/popcount.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/rr_arb_tree.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/rstgen_bypass.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/serial_deglitch.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/shift_reg.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/shift_reg_gated.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/spill_register_flushable.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_demux.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_filter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_fork.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_intf.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_join_dynamic.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_mux.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_throttle.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/sub_per_hash.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/sync.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/sync_wedge.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/unread.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/read.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/addr_decode_dync.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_2phase.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_4phase.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/clk_int_div_static.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/addr_decode.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/addr_decode_napot.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/multiaddr_decode.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cb_filter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_fifo_2phase.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/clk_mux_glitch_free.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/counter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/ecc_decode.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/ecc_encode.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/edge_detect.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/lzc.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/max_counter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/rstgen.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/spill_register.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_delay.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_fifo.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_fork_dynamic.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_join.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_reset_ctrlr.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_fifo_gray.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/fall_through_register.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/id_queue.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_to_mem.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_arbiter_flushable.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_fifo_optimal_wrap.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_register.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_xbar.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_fifo_gray_clearable.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/cdc_2phase_clearable.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/mem_to_banks_detailed.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/stream_omega_net.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/mem_to_banks.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/clock_divider_counter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/clk_div.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/find_first_one.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/generic_LFSR_8bit.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/generic_fifo.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/prioarbiter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/pulp_sync.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/pulp_sync_wedge.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/rrarbiter.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/clock_divider.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/fifo_v2.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/deprecated/fifo_v1.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/edge_propagator_ack.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/edge_propagator.sv \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/src/edge_propagator_rx.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/src/apb_pkg.sv \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/src/apb_intf.sv \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/src/apb_err_slv.sv \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/src/apb_regs.sv \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/src/apb_cdc.sv \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/src/apb_demux.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_intf.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_atop_filter.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_burst_splitter.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_bus_compare.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_cdc_dst.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_cdc_src.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_cut.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_delayer.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_demux_simple.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_dw_downsizer.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_dw_upsizer.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_fifo.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_id_remap.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_id_prepend.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_isolate.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_join.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_demux.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_dw_converter.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_from_mem.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_join.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_lfsr.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_mailbox.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_mux.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_regs.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_to_apb.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_to_axi.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_modify_address.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_mux.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_rw_join.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_rw_split.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_serializer.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_slave_compare.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_throttle.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_to_detailed_mem.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/mem_to_axi_lite.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_cdc.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_demux.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_err_slv.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_dw_converter.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_from_mem.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_id_serialize.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lfsr.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_multicut.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_to_axi_lite.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_to_mem.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_iw_converter.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_lite_xbar.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_xbar.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_to_mem_banked.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_to_mem_interleaved.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_to_mem_split.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_zero_mem.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi/src/axi_xp.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/defs_div_sqrt_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/iteration_div_sqrt_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/control_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/norm_div_sqrt_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/preprocess_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/nrbd_nrsc_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/div_sqrt_top_mvp.sv \
+##     $ROOT/.bender/git/checkouts/fpu_div_sqrt_mvp-dda3f2b23b1e3cf9/hdl/div_sqrt_mvp_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/src/axi_stream_intf.sv \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/src/axi_stream_cut.sv \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/src/axi_stream_dw_downsizer.sv \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/src/axi_stream_dw_upsizer.sv \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/src/axi_stream_multicut.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_pkg.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_cast_multi.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_classifier.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/clk/rtl/gated_clk_cell.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_ctrl.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_ff1.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_pack_single.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_prepare.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_round_single.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_special.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_srt_single.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fdsu/rtl/pa_fdsu_top.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fpu/rtl/pa_fpu_dp.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fpu/rtl/pa_fpu_frbus.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/opene906/E906_RTL_FACTORY/gen_rtl/fpu/rtl/pa_fpu_src_type.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_ctrl.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_double.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_ff1.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_pack.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_prepare.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_round.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_scalar_dp.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_srt_radix16_bound_table.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_srt_radix16_with_sqrt.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_srt.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/vendor/openc910/C910_RTL_FACTORY/gen_rtl/vfdsu/rtl/ct_vfdsu_top.v \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_divsqrt_th_32.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_divsqrt_th_64_multi.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_divsqrt_multi.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_fma.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_fma_multi.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_sdotp_multi.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_sdotp_multi_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_noncomp.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_opgroup_block.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_opgroup_fmt_slice.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_opgroup_multifmt_slice.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_rounding.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/lfsr_sr.sv \
+##     $ROOT/.bender/git/checkouts/fpnew-12c999969330449e/src/fpnew_top.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_interfaces.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_package.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_regfile_latch.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_partial_mult.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_seq_mult.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_uloop.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_regfile_latch_test_wrap.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_regfile.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl/hwpe_ctrl_slave.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/hwpe_stream_package.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/hwpe_stream_interfaces.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_assign.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_buffer.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_demux_static.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_deserialize.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_fence.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_fence_asymmetric.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_merge.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_mux_static.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_serialize.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/basic/hwpe_stream_split.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_ctrl.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_scm.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_addressgen.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_addressgen_v2.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_addressgen_v3.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_addressgen_v4.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_sink_realign.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_source_realign.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_strbgen.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_streamer_queue.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_assign.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_mux.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_mux_static.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_reorder.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_reorder_static.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_earlystall.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_earlystall_sidech.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_scm_test_wrap.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_sidech.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_fifo_load_sidech.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/fifo/hwpe_stream_fifo_passthrough.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_source.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_fifo.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_fifo_load.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/tcdm/hwpe_stream_tcdm_fifo_store.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl/streamer/hwpe_stream_sink.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_pkg.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_intf.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_rready_converter.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/apb_to_obi.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_atop_resolver.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_cut.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_demux.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_err_sbr.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_mux.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_sram_shim.sv \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/src/obi_xbar.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_intf.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/vendor/lowrisc_opentitan/src/prim_subreg_arb.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/vendor/lowrisc_opentitan/src/prim_subreg_ext.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/apb_to_reg_v2.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/axi_lite_to_reg.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/axi_to_reg_v2.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/periph_to_reg.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_cdc.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_cut.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_demux.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_err_slv.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_filter_empty_writes.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_mux.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_to_apb.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_to_mem.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_to_tlul.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_to_axi.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/reg_uniform.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/vendor/lowrisc_opentitan/src/prim_subreg_shadow.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/vendor/lowrisc_opentitan/src/prim_subreg.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/deprecated/apb_to_reg.sv \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/src/deprecated/axi_to_reg.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1r_1w_all.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1r_1w_be.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1r_1w.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1r_1w_1row.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1r_1w_raw.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1w_multi_port_read.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1w_64b_multi_port_read_32b.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_1w_64b_1r_32b.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_2r_1w_asymm.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_2r_1w_asymm_test_wrap.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_2r_2w.sv \
+##     $ROOT/.bender/git/checkouts/scm-d89f244665221304/fpga_scm/register_file_3r_2w.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_res_tbl.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_amos_alu.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_amos.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_lrsc.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_atomics.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_lrsc_wrap.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_amos_wrap.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_atomics_wrap.sv \
+##     $ROOT/.bender/git/checkouts/axi_riscv_atomics-9860e6c21c013eaa/src/axi_riscv_atomics_structs.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/riscv_instr_branch.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/multi_accept_rr_arb.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_axi_to_cache.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_l0.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_refill.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_lfsr.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_tag.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_data.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_lookup_parallel.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache_handler.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_icache.sv \
+##     $ROOT/.bender/git/checkouts/cluster_icache-f368b913e08c6cec/src/snitch_read_only_cache.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/config_hemaia_pkg.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/cv64a6_imafdc_sv39_config_pkg.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/riscv_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/ariane_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/build_config_pkg.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6_mmu/cva6_tlb.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6_mmu/cva6_shared_tlb.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6_mmu/cva6_mmu.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6_mmu/cva6_ptw.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/wt_cache_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/std_cache_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cvxif_example/include/cvxif_instr_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cvxif_fu.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cvxif_issue_register_commit_if_driver.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cvxif_compressed_if_driver.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cvxif_example/cvxif_example_coprocessor.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cvxif_example/instr_decoder.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6_rvfi_probes.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6_fifo_v3.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cva6.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/alu.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/fpu_wrap.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/branch_unit.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/compressed_decoder.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/controller.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/csr_buffer.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/csr_regfile.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/decoder.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/ex_stage.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/acc_dispatcher.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/instr_realign.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/macro_decoder.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/id_stage.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/issue_read_operands.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/issue_stage.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/load_unit.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/load_store_unit.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/lsu_bypass.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/mult.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/multiplier.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/serdiv.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/perf_counters.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/ariane_regfile_ff.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/ariane_regfile_fpga.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/scoreboard.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/raw_checker.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/store_buffer.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/amo_buffer.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/store_unit.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/commit_stage.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/axi_shim.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/btb.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/bht.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/bht2lvl.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/ras.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/instr_scan.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/instr_queue.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/frontend/frontend.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_dcache_ctrl.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_dcache_mem.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_dcache_missunit.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_dcache_wbuffer.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_dcache.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_cache_subsystem.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/wt_axi_adapter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cva6_icache.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/tag_cmp.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cache_ctrl.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/amo_alu.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/axi_adapter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/miss_handler.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/std_nbdcache.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cva6_icache_axi_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/std_cache_subsystem.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/utils/hpdcache_mem_resp_demux.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/utils/hpdcache_mem_to_axi_read.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/utils/hpdcache_mem_to_axi_write.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/utils/hpdcache_mem_req_read_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/utils/hpdcache_mem_req_write_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_demux.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_lfsr.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_sync_buffer.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_fifo_reg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_fifo_reg_initialized.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_fxarb.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_rrarb.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_mux.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_decoder.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_1hot_to_binary.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_prio_1hot_encoder.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_sram.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_sram_wbyteenable.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_sram_wmask.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_regbank_wbyteenable_1rw.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_regbank_wmask_1rw.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_data_downsize.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_data_upsize.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/common/hpdcache_data_resize.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hwpf_stride/hwpf_stride_pkg.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hwpf_stride/hwpf_stride.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hwpf_stride/hwpf_stride_arb.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hwpf_stride/hwpf_stride_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_amo.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_cmo.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_core_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_ctrl.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_ctrl_pe.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_memctrl.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_miss_handler.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_mshr.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_rtab.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_uncached.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_victim_plru.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_victim_random.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_victim_sel.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_wbuf.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/src/hpdcache_flush.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cva6_hpdcache_if_adapter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cva6_hpdcache_subsystem_axi_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cva6_hpdcache_subsystem.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/cva6_hpdcache_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache_tc_sram.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/pmp/src/pmp.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/pmp/src/pmp_entry.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/pmp/src/pmp_data_if.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/vendor/pulp-platform/fpga-support/fpga-support-stubs.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/common/local/util/tc_sram_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/common/local/util/tc_sram_wrapper_cache_techno.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/common/local/util/sram_pulp.sv \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/common/local/util/sram_cache.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl/mac_package.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl/mac_engine.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl/mac_fsm.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl/mac_streamer.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl/mac_ctrl.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl/mac_top.sv \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/wrap/mac_top_wrap.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/idma_pkg.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_axil_read.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_axil_write.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_axi_read.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_axi_write.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_axis_read.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_axis_write.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_channel_coupler.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_dataflow_element.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_error_handler.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_init_read.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_init_write.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_legalizer_page_splitter.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_legalizer_pow2_splitter.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_obi_read.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_obi_write.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_tilelink_read.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/backend/idma_tilelink_write.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/target/rtl/idma_generated.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/midend/idma_mp_dist_midend.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/midend/idma_mp_split_midend.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/midend/idma_nd_midend.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/midend/idma_rt_midend.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/inst64/idma_inst64_snitch_pkg.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_ar_gen.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_ar_gen_prefetch.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_reader.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_reader_gater.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_reshaper.sv \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/idma_transfer_id_gen.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/inst64/idma_inst64_events.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_reg_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/inst64/idma_inst64_top.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/frontend/desc64/idma_desc64_top.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dm_pkg.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/debug_rom/debug_rom.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/debug_rom/debug_rom_one_scratch.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dm_csrs.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dm_mem.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dmi_cdc.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dmi_jtag_tap.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dm_sba.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dm_top.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dmi_jtag.sv \
+##     $ROOT/.bender/git/checkouts/riscv-dbg-0edb7716f6e62c05/src/dm_obi_top.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/find_first_one_idx.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/dw_up_converter.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/dw_down_converter.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/dw_converter.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_req_manager.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_grant_manager.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_data_path.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_burst_reshaper.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_meta_manager.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_axi_to_write.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_write_demux.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_finish_manager.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_req_backend.sv \
+##     $ROOT/.bender/git/checkouts/xdma_axi_adapter-c2b30a75f7002c7e/src/xdma_axi_adapter_top.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/apb_timer-7f0a4fb67c0644d7/src/timer.sv \
+##     $ROOT/.bender/git/checkouts/apb_timer-7f0a4fb67c0644d7/src/apb_timer.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_clock_div.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_counter.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_edge_detect.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_fifo.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_input_filter.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_input_sync.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/slib_mv_filter.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/uart_baudgen.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/uart_interrupt.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/uart_receiver.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/uart_transmitter.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/apb_uart.sv \
+##     $ROOT/.bender/git/checkouts/apb_uart-3faf55e082d60fde/src/apb_uart_wrap.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/include/rvv_pkg.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/include/ara_pkg.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/segment_sequencer.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/ctrl_registers.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/cva6_accel_first_pass_decoder.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/ara_dispatcher.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/ara_sequencer.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/axi_inval_filter.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/lane_sequencer.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/operand_queue.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/operand_requester.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/simd_alu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/simd_div.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/simd_mul.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/vector_regfile.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/power_gating_generic.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/masku/masku_operands.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/sldu/p2_stride_gen.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/sldu/sldu_op_dp.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/sldu/sldu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/vlsu/addrgen.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/vlsu/vldu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/vlsu/vstu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/operand_queues_stage.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/valu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/vmfpu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/fixed_p_rounding.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/vlsu/vlsu.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/masku/masku.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/vector_fus_stage.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/lane/lane.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/ara.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/ara_system.sv \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/src/ara_soc.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/src/axi_tlb_l1_chan.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/src/axi_tlb_reg_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/src/axi_tlb_reg_top.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/src/axi_tlb_l1.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/src/axi_tlb_noreg.sv \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/src/axi_tlb.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_mailbox_adapter.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_read_mailbox.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_write_mailbox.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_task_queue_master.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_csr_to_fifo_write.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_csr_to_fifo_read.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_csr_to_fifo.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_cond_exec_controller.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_load_monitor.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_dep_matrix.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_chiplet_dep_set.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_dep_check_manager.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_pm.sv \
+##     $ROOT/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_top.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv \
+##     $ROOT/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_top.sv \
+##     $ROOT/.bender/git/checkouts/clint-b5738b1472f66607/src/clint.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_pkg.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_cut.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_fifo.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_cdc.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_route_select.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_route_comp.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_vc_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_wormhole_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_simple_rob.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_rob.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_rob_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_meta_buffer.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_nw_join.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_axi_chimney.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_nw_chimney.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_router.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_axi_router.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_nw_router.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_credit_counter.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_input_fifo.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_input_port.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_look_ahead_routing.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_mux.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_rr_arbiter.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_sa_global.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_sa_local.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_vc_assignment.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_vc_router_switch.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/vc_router_util/floo_vc_selection.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_vc_router.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_nw_vc_chimney.sv \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/floo_nw_vc_router.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/occamy_spi_slave.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_spi_slave.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_axi_plug.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_cmd_parser.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_controller.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_dc_fifo.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_regs.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_rx.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_syncro.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/spi_slave_tx.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_slice_dc/dc_synchronizer.v \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_slice_dc/dc_token_ring_fifo_din.v \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_slice_dc/dc_token_ring_fifo_dout.v \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_slice_dc/dc_token_ring.v \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_slice_dc/dc_full_detector.v \
+##     $ROOT/.bender/git/checkouts/hemaia_axi_spi_slave-a6decc0d5c4c4904/axi_slice_dc/dc_data_buffer.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_top.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/hemaia_clock_divider.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/hemaia_reset_controller.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/hemaia_clk_rst_controller.sv \
+##     $ROOT/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/hemaia_pll_wrapper_rtl.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_pkg.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_bw_ok.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_mk_snap.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_pick_shapes.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_s2pf_pair.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_score_unit.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_eval_lane.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_generator.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_best_reduce.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_commit_unit.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_ghost_inject_unit.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_schedule_core.sv \
+##     $ROOT/.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/moe_scheduler_reg_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/prim_pulp_platform/prim_flop_2sync.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_util_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_sync_reqack.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_sync_reqack_data.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_pulse_sync.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_packer_fifo.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_fifo_sync.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_filter_ctr.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_intr_hw.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/prim/rtl/prim_fifo_async.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_reg_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_top.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_top.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_reg_top.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_fsm.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/rv_plic/rtl/rv_plic_gateway.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_byte_merge.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_byte_select.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_cmd_pkg.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_command_cdc.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_fsm.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_window.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_data_cdc.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_shift_register.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_core.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/rv_plic/rtl/rv_plic_target.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host_core.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c.sv \
+##     $ROOT/hw/vendor/pulp_platform_opentitan_peripherals/src/spi_host/rtl/spi_host.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_intf.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/axi_to_reqrsp.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_cut.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_demux.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_iso.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_mux.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/src/reqrsp_to_axi.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/src/mem_wide_narrow_mux.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/src/mem_interface.sv \
+## ]
+CRITICAL WARNING: [Vivado 12-3645] Please note that adding or importing multiple files, one at a time, can be performance intensive.  Both add_files and import_files commands accept multiple files as input, and passing a collection of multiple files to a single add_files or import_files commands can offer significant performance improvement.
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/src/tcdm_interface.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/src/axi_to_tcdm.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/src/reqrsp_to_tcdm.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/src/tcdm_mux.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/snitch_pma_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/riscv_instr.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/csr_snax_def.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/snitch_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/snitch_regfile_ff.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/snitch_lsu.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/snitch_l0_tlb.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/src/snitch.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_vm/src/snitch_ptw.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ipu/src/snitch_ipu_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ipu/src/snitch_ipu_alu.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ipu/src/snitch_int_ss.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_switch.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_credit_counter.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_indirector.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_intersector.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_addr_gen.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/src/snitch_ssr_streamer.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_data_mem.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_amo_shim.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_cluster_peripheral/snitch_cluster_peripheral_reg_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_cluster_peripheral/snitch_cluster_peripheral_reg_top.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_cluster_peripheral/snitch_cluster_peripheral.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_fpu.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_sequencer.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_tcdm_interconnect.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_barrier.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_fp_ss.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_shared_muldiv.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_cc.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_clkdiv2.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_hive.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_cluster/src/snitch_cluster.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snax_util/src/snax_csr_mux_demux.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snax_util/src/snax_acc_mux_demux.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snax_util/src/snax_intf_translator.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/SparseInterconnect.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/sparse_interconnect_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/VersaCore.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/silu_out16_balanced_pkg.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/partition_detector.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/param_selector.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/horner_stage.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/silu_top.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/silu_multilane.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/rescale_down_32to16.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/elem_mul_16b.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/snax_dual_versacore_swiglu_shell_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/snax_dual_versacore_swiglu_reqrspman_ReqRspManager.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/snax_dual_versacore_swiglu_Streamer.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/snax_dual_versacore_swiglu_csrman_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/snax_dual_versacore_swiglu_streamer_wrapper.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_swiglu/snax_dual_versacore_swiglu_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma.sv \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_wrapper.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/spm_interface/src/spm_interface.sv \
+##     $ROOT/hw/spm_interface/src/spm_rmw_adapter.sv \
+##     $ROOT/hw/spm_interface/src/spm_1p_adv_mem_wrapper.sv \
+##     $ROOT/hw/spm_interface/src/spm_1p_adv.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/hemaia/hemaia_hw_mailbox/hemaia_axi_lite_mailbox_adapter.sv \
+##     $ROOT/hw/hemaia/hemaia_hw_mailbox/hemaia_hw_mailbox.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/hemaia/hemaia_hw_manager/axi_lite_to_csr.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/target/rtl/src/soc_ctrl/occamy_soc_reg_pkg.sv \
+##     $ROOT/target/rtl/src/soc_ctrl/occamy_soc_reg_top.sv \
+##     $ROOT/target/rtl/src/soc_ctrl/occamy_soc_ctrl.sv \
+##     $ROOT/target/rtl/src/quad_periph/occamy_quad_periph_reg_pkg.sv \
+##     $ROOT/target/rtl/src/quad_periph/occamy_quad_periph_reg_top.sv \
+##     $ROOT/target/rtl/src/quad_periph/occamy_quad_periph.sv \
+##     $ROOT/target/rtl/src/rv_plic/rv_plic_reg_pkg.sv \
+##     $ROOT/target/rtl/src/rv_plic/rv_plic_reg_top.sv \
+##     $ROOT/target/rtl/src/rv_plic/rv_plic.sv \
+##     $ROOT/target/rtl/src/clint/clint_reg_pkg.sv \
+##     $ROOT/target/rtl/src/clint/clint_reg_top.sv \
+##     $ROOT/target/rtl/src/clint/clint.sv \
+##     $ROOT/target/rtl/src/occamy_pkg.sv \
+##     $ROOT/target/rtl/src/occamy_quad_ctrl.sv \
+##     $ROOT/target/rtl/src/occamy_quad.sv \
+##     $ROOT/target/rtl/src/occamy_soc.sv \
+##     $ROOT/target/rtl/src/occamy_top.sv \
+##     $ROOT/target/rtl/src/occamy_cva6.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/target/rtl/bootrom/bootrom_chip/bootrom.sv \
+## ]
+## add_files -norecurse -fileset [current_fileset] [list \
+##     $ROOT/hw/hemaia/hemaia_mem_system/hemaia_xdma.sv \
+##     $ROOT/hw/hemaia/hemaia_mem_system/hemaia_xdma_wrapper.sv \
+##     $ROOT/hw/hemaia/hemaia_mem_system/hemaia_mem_system.sv \
+##     $ROOT/target/rtl/src/occamy_chip.sv \
+##     $ROOT/target/rtl/src/hemaia.sv \
+## ]
+## set_property include_dirs [list \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/include \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/include \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/include \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/common/local/util \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/include \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/include \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/include \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/target/rtl/include \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/test \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/include \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/include \
+##     $ROOT/hw/spm_interface/include \
+##     $ROOT/hw/vendor/pulp_platform_axi/include \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/include \
+## ] [current_fileset]
+## set_property include_dirs [list \
+##     $ROOT/.bender/git/checkouts/apb-967c1a20a8f82c97/include \
+##     $ROOT/.bender/git/checkouts/ara-93a039b1f2e47cbf/hardware/include \
+##     $ROOT/.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include \
+##     $ROOT/.bender/git/checkouts/common_cells-06714691b94e29c9/include \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/common/local/util \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/include \
+##     $ROOT/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include \
+##     $ROOT/.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/include \
+##     $ROOT/.bender/git/checkouts/hwpe-ctrl-33741c03c89e9bd2/rtl \
+##     $ROOT/.bender/git/checkouts/hwpe-mac-engine-828f13659ef3c707/rtl \
+##     $ROOT/.bender/git/checkouts/hwpe-stream-c69cd5e9f8a2202f/rtl \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/src/include \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/target/rtl/include \
+##     $ROOT/.bender/git/checkouts/idma-4a77559befb1bbed/test \
+##     $ROOT/.bender/git/checkouts/obi-940bae8c839c275c/include \
+##     $ROOT/.bender/git/checkouts/register_interface-126aa152b770f2ca/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/include \
+##     $ROOT/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/include \
+##     $ROOT/hw/spm_interface/include \
+##     $ROOT/hw/vendor/pulp_platform_axi/include \
+##     $ROOT/hw/vendor/pulp_platform_axi_tlb/include \
+## ] [current_fileset -simset]
+## set_property verilog_define [list \
+##     SNITCH_ENABLE_PERF \
+##     TARGET_CV64A6_IMAFDC_SV39 \
+##     TARGET_EXCLUDE_FIRST_PASS_DECODER \
+##     TARGET_FPGA \
+##     TARGET_HEMAIA \
+##     TARGET_HEMAIA_XDMA \
+##     TARGET_OCCAMY \
+##     TARGET_RTL \
+##     TARGET_SNAX_DUAL_VERSACORE_INT16X4_4LANE_POSTPROC_V2_CLUSTER \
+##     TARGET_SNAX_DUAL_VERSACORE_INT16X4_4LANE_POSTPROC_V2_CLUSTER_XDMA \
+##     TARGET_SNAX_DUAL_VERSACORE_SWIGLU \
+##     TARGET_SNITCH_CLUSTER \
+##     TARGET_SPARSE_INTERCONNECT \
+##     TARGET_SYNTHESIS \
+##     TARGET_VIVADO \
+##     TARGET_VPK180 \
+##     TARGET_XILINX \
+## ] [current_fileset]
+## set_property verilog_define [list \
+##     SNITCH_ENABLE_PERF \
+##     TARGET_CV64A6_IMAFDC_SV39 \
+##     TARGET_EXCLUDE_FIRST_PASS_DECODER \
+##     TARGET_FPGA \
+##     TARGET_HEMAIA \
+##     TARGET_HEMAIA_XDMA \
+##     TARGET_OCCAMY \
+##     TARGET_RTL \
+##     TARGET_SNAX_DUAL_VERSACORE_INT16X4_4LANE_POSTPROC_V2_CLUSTER \
+##     TARGET_SNAX_DUAL_VERSACORE_INT16X4_4LANE_POSTPROC_V2_CLUSTER_XDMA \
+##     TARGET_SNAX_DUAL_VERSACORE_SWIGLU \
+##     TARGET_SNITCH_CLUSTER \
+##     TARGET_SPARSE_INTERCONNECT \
+##     TARGET_SYNTHESIS \
+##     TARGET_VIVADO \
+##     TARGET_VPK180 \
+##     TARGET_XILINX \
+## ] [current_fileset -simset]
+# set constraint_file synth_constraints.xdc
+# if {[file exists ${constraint_file}]} {
+#     add_files -fileset constrs_1 -norecurse ${constraint_file}
+#     set_property USED_IN {synthesis out_of_context} [get_files ${constraint_file}]
+# }
+# set_property IS_ENABLED 0 [get_files -regex .*/axi_intf.sv]
+# set_property IS_ENABLED 0 [get_files -regex .*/reg_intf.sv]
+# set_property top occamy_chip [current_fileset]
+# update_compile_order -fileset sources_1
+update_compile_order: Time (s): cpu = 00:02:10 ; elapsed = 00:02:26 . Memory (MB): peak = 3887.254 ; gain = 2295.898 ; free physical = 212283 ; free virtual = 244233
+# synth_design -rtl -name rtl_1
+Command: synth_design -rtl -name rtl_1
+Starting synth_design
+Using part: xcvp1802-lsvc4072-2MP-e-S
+Top: occamy_chip
+INFO: [Device 21-403] Loading part xcvp1802-lsvc4072-2MP-e-S
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 4 processes.
+INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
+INFO: [Synth 8-7075] Helper process launched with PID 542656
+---------------------------------------------------------------------------------
+Starting RTL Elaboration : Time (s): cpu = 00:00:04 ; elapsed = 00:00:05 . Memory (MB): peak = 6691.980 ; gain = 0.000 ; free physical = 206108 ; free virtual = 240910
+---------------------------------------------------------------------------------
+CRITICAL WARNING: [Synth 8-9873] overwriting previous definition of package 'cva6_config_pkg' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/cv64a6_imafdc_sv39_config_pkg.sv:174]
+INFO: [Synth 8-9937] previous definition of design element 'cva6_config_pkg' is here [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/config_hemaia_pkg.sv:672]
+WARNING: [Synth 8-11067] parameter 'BurstWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:25]
+WARNING: [Synth 8-11067] parameter 'RespWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:27]
+WARNING: [Synth 8-11067] parameter 'CacheWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:29]
+WARNING: [Synth 8-11067] parameter 'ProtWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:31]
+WARNING: [Synth 8-11067] parameter 'QosWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:33]
+WARNING: [Synth 8-11067] parameter 'RegionWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:35]
+WARNING: [Synth 8-11067] parameter 'LenWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:37]
+WARNING: [Synth 8-11067] parameter 'SizeWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:39]
+WARNING: [Synth 8-11067] parameter 'LockWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:41]
+WARNING: [Synth 8-11067] parameter 'AtopWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:43]
+WARNING: [Synth 8-11067] parameter 'NsaidWidth' declared inside package 'axi_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_axi/src/axi_pkg.sv:45]
+INFO: [Synth 8-11241] undeclared symbol 'csr_rsp_valid_o', assumed default net type 'wire' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_csr_to_fifo_write.sv:27]
+INFO: [Synth 8-11241] undeclared symbol 'reset_start_o', assumed default net type 'wire' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_top.sv:517]
+INFO: [Synth 8-11241] undeclared symbol 'reset_start_enable_o', assumed default net type 'wire' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/bingo_hw_manager-603b44b38d4e39e8/src/bingo_hw_manager_top.sv:518]
+WARNING: [Synth 8-11067] parameter 'NumCores' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:10]
+WARNING: [Synth 8-11067] parameter 'BlockAw' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:13]
+WARNING: [Synth 8-11067] parameter 'CLINT_MSIP_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:75]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW0_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:76]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH0_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:77]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW1_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:78]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH1_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:79]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIME_LOW_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:80]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIME_HIGH_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:81]
+WARNING: [Synth 8-11067] parameter 'CLINT_PERMIT' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:95]
+WARNING: [Synth 8-11067] parameter 'NumCores' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:10]
+WARNING: [Synth 8-11067] parameter 'BlockAw' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:13]
+WARNING: [Synth 8-11067] parameter 'CLINT_MSIP_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:145]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW0_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:146]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH0_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:147]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW1_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:148]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH1_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:149]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW2_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:150]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH2_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:151]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW3_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:152]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH3_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:153]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW4_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:154]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH4_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:155]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW5_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:156]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH5_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:157]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW6_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:158]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH6_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:159]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW7_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:160]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH7_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:161]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_LOW8_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:162]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIMECMP_HIGH8_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:163]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIME_LOW_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:164]
+WARNING: [Synth 8-11067] parameter 'CLINT_MTIME_HIGH_OFFSET' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:165]
+WARNING: [Synth 8-11067] parameter 'CLINT_PERMIT' declared inside package 'clint_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:193]
+CRITICAL WARNING: [Synth 8-9873] overwriting previous definition of package 'clint_reg_pkg' [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/clint/clint_reg_pkg.sv:217]
+INFO: [Synth 8-9937] previous definition of design element 'clint_reg_pkg' is here [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/clint-b5738b1472f66607/src/clint_reg_pkg.sv:105]
+WARNING: [Synth 8-11067] parameter 'NumAlerts' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:10]
+WARNING: [Synth 8-11067] parameter 'BlockAw' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:13]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_STATE_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:197]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_ENABLE_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:198]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_TEST_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:199]
+WARNING: [Synth 8-11067] parameter 'GPIO_ALERT_TEST_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:200]
+WARNING: [Synth 8-11067] parameter 'GPIO_DATA_IN_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:201]
+WARNING: [Synth 8-11067] parameter 'GPIO_DIRECT_OUT_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:202]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OUT_LOWER_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:203]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OUT_UPPER_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:204]
+WARNING: [Synth 8-11067] parameter 'GPIO_DIRECT_OE_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:205]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OE_LOWER_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:206]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OE_UPPER_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:207]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_CTRL_EN_RISING_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:208]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_CTRL_EN_FALLING_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:209]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_CTRL_EN_LVLHIGH_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:210]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_CTRL_EN_LVLLOW_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:211]
+WARNING: [Synth 8-11067] parameter 'GPIO_CTRL_EN_INPUT_FILTER_OFFSET' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:212]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_TEST_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:215]
+WARNING: [Synth 8-11067] parameter 'GPIO_INTR_TEST_GPIO_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:216]
+WARNING: [Synth 8-11067] parameter 'GPIO_ALERT_TEST_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:217]
+WARNING: [Synth 8-11067] parameter 'GPIO_ALERT_TEST_FATAL_FAULT_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:218]
+WARNING: [Synth 8-11067] parameter 'GPIO_DIRECT_OUT_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:219]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OUT_LOWER_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:220]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OUT_UPPER_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:221]
+WARNING: [Synth 8-11067] parameter 'GPIO_DIRECT_OE_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:222]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OE_LOWER_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:223]
+WARNING: [Synth 8-11067] parameter 'GPIO_MASKED_OE_UPPER_RESVAL' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:224]
+WARNING: [Synth 8-11067] parameter 'GPIO_PERMIT' declared inside package 'gpio_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/gpio/rtl/gpio_reg_pkg.sv:247]
+WARNING: [Synth 8-11067] parameter 'BlockAw' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:10]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_RESET_REGISTER_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:650]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_VALID_REGISTER_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:651]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C0_C3_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:652]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C4_C7_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:653]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C8_C11_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:654]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C12_C15_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:655]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C16_C19_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:656]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C20_C23_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:657]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C24_C27_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:658]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_CLOCK_DIVISION_REGISTER_C28_C31_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:659]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_PLL_TEST_EN_REGISTER_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:660]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_PLL_TEST_SEL_REGISTER_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:661]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_PLL_TEST_OUT_REGISTER_OFFSET' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:662]
+WARNING: [Synth 8-11067] parameter 'HEMAIA_CLK_RST_CONTROLLER_PERMIT' declared inside package 'hemaia_clk_rst_controller_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/hemaia_clk_rst_controller-667511130447aa6c/regs/hemaia_clk_rst_controller_reg_pkg.sv:682]
+WARNING: [Synth 8-11067] parameter 'FifoDepth' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:10]
+WARNING: [Synth 8-11067] parameter 'NumAlerts' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:11]
+WARNING: [Synth 8-11067] parameter 'BlockAw' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:14]
+WARNING: [Synth 8-11067] parameter 'I2C_INTR_STATE_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:565]
+WARNING: [Synth 8-11067] parameter 'I2C_INTR_ENABLE_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:566]
+WARNING: [Synth 8-11067] parameter 'I2C_INTR_TEST_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:567]
+WARNING: [Synth 8-11067] parameter 'I2C_ALERT_TEST_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:568]
+WARNING: [Synth 8-11067] parameter 'I2C_CTRL_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:569]
+WARNING: [Synth 8-11067] parameter 'I2C_STATUS_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:570]
+WARNING: [Synth 8-11067] parameter 'I2C_RDATA_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:571]
+WARNING: [Synth 8-11067] parameter 'I2C_FDATA_OFFSET' declared inside package 'i2c_reg_pkg' shall be treated as localparam [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/vendor/pulp_platform_opentitan_peripherals/src/i2c/rtl/i2c_reg_pkg.sv:572]
+INFO: [Common 17-14] Message 'Synth 8-11067' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+INFO: [Synth 8-11241] undeclared symbol 'empty', assumed default net type 'wire' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/common_cells-06714691b94e29c9/src/id_queue.sv:182]
+WARNING: [Synth 8-11065] parameter 'NR_BYPASS_PORTS' becomes localparam in 'miss_handler' with formal parameter declaration list [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/miss_handler.sv:74]
+CRITICAL WARNING: [Synth 8-9873] overwriting previous definition of module 'BasicCounter' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma.sv:1070]
+INFO: [Synth 8-9937] previous definition of design element 'BasicCounter' is here [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/hemaia/hemaia_mem_system/hemaia_xdma.sv:754]
+CRITICAL WARNING: [Synth 8-9873] overwriting previous definition of module 'XDMAInterClusterCfgIODeserializer' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma.sv:1226]
+INFO: [Synth 8-9937] previous definition of design element 'XDMAInterClusterCfgIODeserializer' is here [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/hemaia/hemaia_mem_system/hemaia_xdma.sv:910]
+CRITICAL WARNING: [Synth 8-9873] overwriting previous definition of module 'width_down_converter_W_512_D_1' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma.sv:1343]
+INFO: [Synth 8-9937] previous definition of design element 'width_down_converter_W_512_D_1' is here [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/hemaia/hemaia_mem_system/hemaia_xdma.sv:1027]
+CRITICAL WARNING: [Synth 8-9873] overwriting previous definition of module 'XDMAInterClusterCfgIOSerializer' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/target/snitch_cluster/generated/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma/snax_dual_versacore_int16x4_4lane_postproc_v2_cluster_xdma.sv:1401]
+INFO: [Synth 8-9937] previous definition of design element 'XDMAInterClusterCfgIOSerializer' is here [/esat/studscratch/r1015673/Thesis/HeMAiA/hw/hemaia/hemaia_mem_system/hemaia_xdma.sv:1085]
+INFO: [Synth 8-11241] undeclared symbol 'snax_csr_rsp_ready_o', assumed default net type 'wire' [/esat/studscratch/r1015673/Thesis/HeMAiA/.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snax_util/src/snax_intf_translator.sv:155]
+WARNING: [Synth 8-11057] overflow of 32-bit signed integer 2147483648; using -2147483648 instead [/esat/studscratch/r1015673/Thesis/HeMAiA/target/rtl/src/occamy_chip.sv:210]
+make[1]: Leaving directory '/esat/studscratch/r1015673/Thesis/HeMAiA/target/fpga/hemaia_chip'

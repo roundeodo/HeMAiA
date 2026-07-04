@@ -29,26 +29,24 @@
 #define MOE_SCHED_STATUS    0x08u
 #define MOE_SCHED_CONFIG    0x10u
 #define MOE_SCHED_ROUND_COMMIT 0x68u
-#define MOE_SCHED_PLAN_FIFO_DATA0  0x90u
-#define MOE_SCHED_PLAN_FIFO_DATA1  0x98u
-#define MOE_SCHED_PLAN_FIFO_PATCH  0xa0u
-#define MOE_SCHED_HEAD_PAIR0       0xa8u
-#define MOE_SCHED_HEAD_PAIR1       0xb0u
-#define MOE_SCHED_HEAD_PUSH_PAIR   0xb8u
-#define MOE_SCHED_RESERVE_PAIR0    0xc0u
-#define MOE_SCHED_RESERVE_PAIR1    0xc8u
+#define MOE_SCHED_HEAD_QUAD        0xa8u
+#define MOE_SCHED_RESERVE_QUAD     0xb0u
+#define MOE_SCHED_HEAD_PUSH_QUAD   0xb8u
+#define MOE_SCHED_PLAN_ENTRY_BASE  0x100u
+#define MOE_SCHED_PLAN_ENTRY_STRIDE 0x20u
+#define MOE_SCHED_PLAN_ENTRY_DATA0_OFF 0x00u
+#define MOE_SCHED_PLAN_ENTRY_DATA1_OFF 0x08u
 
 #define MOE_SCHED_CTRL_INIT         (1ull << 0)
 #define MOE_SCHED_CTRL_START        (1ull << 1)
 
-#define MOE_SCHED_COMMIT_PLAN_POP     (1ull << 0)
-
 #define MOE_SCHED_STATUS_PLAN_VALID   (1ull << 3)
 #define MOE_SCHED_STATUS_ACTIVE_EMPTY (1ull << 5)
 #define MOE_SCHED_STATUS_REFILL_REQ   (1ull << 6)
+#define MOE_SCHED_STATUS_FIFO_COUNT_LSB 36u
+#define MOE_SCHED_STATUS_PLAN_COUNT_VEC_LSB 40u
 
 #if !MOE_SCHED_FAST_NO_CHECK
-#define MOE_SCHED_PLAN_FIFO_STATUS    0x80u
 #define MOE_SCHED_STATUS_DONE         (1ull << 1)
 #define MOE_SCHED_STATUS_REMOVE_VALID (1ull << 2)
 #define MOE_SCHED_STATUS_PLAN_FULL    (1ull << 4)
@@ -63,23 +61,14 @@
 #define MOE_SCHED_EID_POS_INVALID 0xffu
 #endif
 
-#define MOE_SCHED_PLAN_HAS_S2PF_LSB       0u
-#define MOE_SCHED_PLAN_SKIP_S3_LSB        1u
-#define MOE_SCHED_PLAN_SKIP_S1_LSB        2u
-#define MOE_SCHED_PLAN_SHAPE_S3_LSB       3u
-#define MOE_SCHED_PLAN_SHAPE_S1_LSB       5u
-#define MOE_SCHED_PLAN_TOKEN_START_LSB    7u
-#define MOE_SCHED_PLAN_NTOK_LSB           16u
-#define MOE_SCHED_PLAN_EID_LSB            25u
-#define MOE_SCHED_PLAN_CLUSTER_LSB        31u
-#define MOE_SCHED_PLAN_ALLOW_S4PF_LSB     32u
-#define MOE_SCHED_PLAN_LOCAL_SLOT_LSB     33u
-#define MOE_SCHED_PLAN_SKIP_S2_LSB        39u
-#define MOE_SCHED_PLAN_SKIP_S4_LSB        40u
-#define MOE_SCHED_PLAN_DMA_S1_LSB         41u
-#define MOE_SCHED_PLAN_DMA_S3_LSB         43u
-#define MOE_SCHED_PLAN_M_S2_LSB           45u
-#define MOE_SCHED_PLAN_M_S4_LSB           54u
+#define MOE_SCHED_PLAN_EID_LSB            0u
+#define MOE_SCHED_PLAN_TOKEN_START_LSB    6u
+#define MOE_SCHED_PLAN_NTOK_LSB           15u
+#define MOE_SCHED_PLAN_HAS_S2PF_LSB       24u
+#define MOE_SCHED_PLAN_CTRL_LSB           25u
+#define MOE_SCHED_PLAN_M_S2_LSB           38u
+#define MOE_SCHED_PLAN_M_S4_LSB           47u
+#define MOE_SCHED_PLAN_INLINE_PATCH_LSB   56u
 
 #define MOE_SCHED_PLAN_NTOK_MASK          0x1ffull
 #define MOE_SCHED_PLAN_EID_MASK           0x3full
@@ -87,15 +76,19 @@
 #define MOE_SCHED_PLAN_LOCAL_SLOT_MASK    0x3full
 #define MOE_SCHED_PLAN_DMA_MASK           0x3ull
 #define MOE_SCHED_PLAN_M_EXEC_MASK        0x1ffull
+#define MOE_SCHED_PLAN_CTRL_MASK          0x1fffull
 
-#define MOE_SCHED_S4PF_PATCH_VALID_LSB       0u
-#define MOE_SCHED_S4PF_PATCH_NO_COPY_LSB     1u
-#define MOE_SCHED_S4PF_PATCH_CLUSTER_LSB     2u
-#define MOE_SCHED_S4PF_PATCH_LOCAL_SLOT_LSB  3u
-#define MOE_SCHED_S4PF_PATCH_TARGET_EID_LSB  9u
-#define MOE_SCHED_S4PF_PATCH_STRIDE          32u
-#define MOE_SCHED_S4PF_PATCH_SLOT_MASK       0x3full
-#define MOE_SCHED_S4PF_PATCH_EID_MASK        0x3full
+#define MOE_SCHED_TASK_CTRL_SKIP_S1_LSB    0u
+#define MOE_SCHED_TASK_CTRL_SKIP_S3_LSB    1u
+#define MOE_SCHED_TASK_CTRL_SHAPE_S1_LSB   2u
+#define MOE_SCHED_TASK_CTRL_SHAPE_S3_LSB   4u
+#define MOE_SCHED_TASK_CTRL_CLUSTER_LSB    6u
+#define MOE_SCHED_TASK_CTRL_LOCAL_SLOT_LSB 7u
+
+#define MOE_SCHED_INLINE_PATCH_VALID_LSB       0u
+#define MOE_SCHED_INLINE_PATCH_NO_COPY_LSB     1u
+#define MOE_SCHED_INLINE_PATCH_LOCAL_SLOT_LSB  2u
+#define MOE_SCHED_INLINE_PATCH_SLOT_MASK       0x3full
 
 #if !MOE_SCHED_FAST_NO_CHECK
 #ifndef MOE_SCHED_TIMEOUT_POLLS
@@ -149,6 +142,20 @@ static inline uint64_t moe_sched_read64(uint32_t off)
     return moe_sched_read64_relaxed(off);
 }
 
+static inline uint32_t moe_sched_plan_entry_data0_off(uint32_t entry_idx)
+{
+    return MOE_SCHED_PLAN_ENTRY_BASE +
+           entry_idx * MOE_SCHED_PLAN_ENTRY_STRIDE +
+           MOE_SCHED_PLAN_ENTRY_DATA0_OFF;
+}
+
+static inline uint32_t moe_sched_plan_entry_data1_off(uint32_t entry_idx)
+{
+    return MOE_SCHED_PLAN_ENTRY_BASE +
+           entry_idx * MOE_SCHED_PLAN_ENTRY_STRIDE +
+           MOE_SCHED_PLAN_ENTRY_DATA1_OFF;
+}
+
 static inline uint64_t moe_sched_pack_config(uint8_t cache_eid_c2,
                                              uint8_t cache_eid_c3,
                                              uint8_t active_count,
@@ -171,21 +178,17 @@ static inline uint16_t moe_sched_pack_head16(moe_sched_head_t h)
     return word;
 }
 
-static inline uint64_t moe_sched_pack_head_pair(moe_sched_head_t low,
-                                                moe_sched_head_t high)
+static inline uint64_t moe_sched_pack_head_quad(const moe_sched_head_t head[4])
 {
-    return ((uint64_t)moe_sched_pack_head16(low)) |
-           ((uint64_t)moe_sched_pack_head16(high) << 16);
+    return ((uint64_t)moe_sched_pack_head16(head[0])) |
+           ((uint64_t)moe_sched_pack_head16(head[1]) << 16) |
+           ((uint64_t)moe_sched_pack_head16(head[2]) << 32) |
+           ((uint64_t)moe_sched_pack_head16(head[3]) << 48);
 }
 
-static inline uint64_t moe_sched_pack_round_commit(uint32_t plan_pop)
+static inline uint64_t moe_sched_pack_round_commit(uint32_t pop_count)
 {
-    uint64_t word = 0;
-
-    if (plan_pop != 0u) {
-        word |= MOE_SCHED_COMMIT_PLAN_POP;
-    }
-    return word;
+    return (uint64_t)(pop_count & 0x7u);
 }
 
 static inline uint16_t moe_sched_best_conc(uint16_t ntok)
@@ -408,27 +411,22 @@ static inline int moe_sched_remove_active_eid(moe_sched_rem_item_t *rem,
 }
 #endif
 
-static inline void moe_sched_write_head_pair_relaxed(uint8_t pair,
-                                                     moe_sched_head_t low,
-                                                     moe_sched_head_t high)
+static inline void moe_sched_write_head_quad_relaxed(const moe_sched_head_t head[4])
 {
-    uint32_t off = (pair == 0u) ? MOE_SCHED_HEAD_PAIR0 : MOE_SCHED_HEAD_PAIR1;
-    moe_sched_write64_relaxed(off, moe_sched_pack_head_pair(low, high));
+    moe_sched_write64_relaxed(MOE_SCHED_HEAD_QUAD,
+                              moe_sched_pack_head_quad(head));
 }
 
-static inline void moe_sched_write_head_push_pair_relaxed(moe_sched_head_t low,
-                                                          moe_sched_head_t high)
+static inline void moe_sched_write_head_push_quad_relaxed(const moe_sched_head_t head[4])
 {
-    moe_sched_write64_relaxed(MOE_SCHED_HEAD_PUSH_PAIR,
-                              moe_sched_pack_head_pair(low, high));
+    moe_sched_write64_relaxed(MOE_SCHED_HEAD_PUSH_QUAD,
+                              moe_sched_pack_head_quad(head));
 }
 
-static inline void moe_sched_write_reserve_pair_relaxed(uint8_t pair,
-                                                        moe_sched_head_t low,
-                                                        moe_sched_head_t high)
+static inline void moe_sched_write_reserve_quad_relaxed(const moe_sched_head_t head[4])
 {
-    uint32_t off = (pair == 0u) ? MOE_SCHED_RESERVE_PAIR0 : MOE_SCHED_RESERVE_PAIR1;
-    moe_sched_write64_relaxed(off, moe_sched_pack_head_pair(low, high));
+    moe_sched_write64_relaxed(MOE_SCHED_RESERVE_QUAD,
+                              moe_sched_pack_head_quad(head));
 }
 
 static inline moe_sched_head_t moe_sched_head_from_rem(const moe_sched_rem_item_t *rem,
@@ -454,8 +452,7 @@ static inline uint64_t moe_sched_plan_signature(const moe_hw_plan_entry_t *entry
            ((uint64_t)entry->desc.shape_s3 << 52) |
            ((uint64_t)entry->desc.skip_s1 << 54) |
            ((uint64_t)entry->desc.skip_s3 << 55) |
-           ((uint64_t)entry->desc.has_s2pf << 56) |
-           ((uint64_t)entry->allow_s4pf << 57);
+           ((uint64_t)entry->desc.has_s2pf << 56);
 }
 
 static inline uint32_t moe_sched_hw_plan_matches(const moe_hw_plan_entry_t *got,
@@ -496,18 +493,18 @@ static inline uint32_t moe_sched_compare_plan(const moe_hw_plan_entry_t *got,
         if (got_sig != exp_sig) {
             printf_safe("[SCHED_CMP] case=%u entry=%u mismatch\r\n", case_id, i);
             printf_safe("  sig: got=0x%lx exp=0x%lx\r\n", got_sig, exp_sig);
-            printf_safe("  got: v=%u c=%u eid=%u ts=%u n=%u s1=%u s3=%u sk1=%u sk3=%u s2pf=%u s4pf=%u\r\n",
+            printf_safe("  got: v=%u c=%u eid=%u ts=%u n=%u s1=%u s3=%u sk1=%u sk3=%u s2pf=%u\r\n",
                         got[i].valid, got[i].desc.cluster, got[i].desc.expert_id,
                         got[i].desc.token_start_rank, got[i].desc.ntokens,
                         got[i].desc.shape_s1, got[i].desc.shape_s3,
                         got[i].desc.skip_s1, got[i].desc.skip_s3,
-                        got[i].desc.has_s2pf, got[i].allow_s4pf);
-            printf_safe("  exp: v=%u c=%u eid=%u ts=%u n=%u s1=%u s3=%u sk1=%u sk3=%u s2pf=%u s4pf=%u\r\n",
+                        got[i].desc.has_s2pf);
+            printf_safe("  exp: v=%u c=%u eid=%u ts=%u n=%u s1=%u s3=%u sk1=%u sk3=%u s2pf=%u\r\n",
                         exp[i].valid, exp[i].desc.cluster, exp[i].desc.expert_id,
                         exp[i].desc.token_start_rank, exp[i].desc.ntokens,
                         exp[i].desc.shape_s1, exp[i].desc.shape_s3,
                         exp[i].desc.skip_s1, exp[i].desc.skip_s3,
-                        exp[i].desc.has_s2pf, exp[i].allow_s4pf);
+                        exp[i].desc.has_s2pf);
             errors++;
         }
     }

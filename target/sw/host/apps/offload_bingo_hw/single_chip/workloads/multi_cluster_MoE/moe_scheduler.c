@@ -1,13 +1,14 @@
 /* moe_scheduler.c
  * --------------------------------------------------------------------------
- * C port of lite_scheduler.py (lite_schedule()).
- * Reference: Idea_Model/lite_scheduler.py + Idea_Model/four_stage_scheduler.py
+ * C port of the HW-pruned scheduler policy.
+ * Reference: Idea_Model/eval_hw_mirror_s2pf_lite.py
+ *   --policy balanced --top-policy pruned --n1-policy pruned
  *
  * Algorithm:
  *   Greedy two-cluster four-stage scheduler with lookahead.
  *   Main loop: while experts remain, pick the best candidate from:
- *     n=1 : Method-A (solo) + SPLIT + Method-B (early-start).
- *     both_idle: PAIR(top0,topK K=1..3) + PAIR(topK,topJ) + SPLIT(top0).
+ *     n=1 : HW-pruned Method-A (solo) + SPLIT + Method-B (early-start).
+ *     both_idle: HW-pruned PAIR(top0,top1) + PAIR(1,2)/(2,3) + SPLIT(top0).
  *     not_both_idle: assign top0 to idle cluster at multiple start times.
  *   Candidate cost via continuation_cost():
  *     n=0: max(c2.task_end, c3.task_end)
@@ -229,67 +230,92 @@ static int s4pf_ok_with_peer(const snap_t *s, const snap_t *peer)
 }
 
 /* =========================================================================
- * S2 down-prefetch pair optimisation
+ * Lite S2 down-prefetch policy
+ *
+ * This is intentionally narrower than the old 25-way try_s2pf_pair search.
+ * It is the C golden model for the RTL S2PF policy engine.
  * ========================================================================= */
-static void try_s2pf_pair(snap_t *sa, uint8_t s3a, snap_t *sb, uint8_t s3b)
-{
-    uint32_t ca[5]; int na=0;
-    if (sa->bw_s3>0u && kTd3[s3a]<=sa->s2_end-sa->task_start){
-        uint32_t lo=sa->task_start, hi=sa->s2_end-kTd3[s3a];
-        if (hi>=lo){
-            ca[na++]=lo;
-            if (sa->dma1_end>=lo&&sa->dma1_end<=hi&&sa->dma1_end!=lo) ca[na++]=sa->dma1_end;
-            if (sa->s1_end>=lo&&sa->s1_end<=hi&&sa->s1_end!=sa->dma1_end) ca[na++]=sa->s1_end;
-            if (hi!=lo) ca[na++]=hi;
-        }
-    }
-    uint32_t cb[5]; int nb=0;
-    if (sb->bw_s3>0u && kTd3[s3b]<=sb->s2_end-sb->task_start){
-        uint32_t lo=sb->task_start, hi=sb->s2_end-kTd3[s3b];
-        if (hi>=lo){
-            cb[nb++]=lo;
-            if (sb->dma1_end>=lo&&sb->dma1_end<=hi&&sb->dma1_end!=lo) cb[nb++]=sb->dma1_end;
-            if (sb->s1_end>=lo&&sb->s1_end<=hi&&sb->s1_end!=sb->dma1_end) cb[nb++]=sb->s1_end;
-            if (hi!=lo) cb[nb++]=hi;
-        }
-    }
+typedef enum {
+    S2PF_OFF_POLICY = 0,
+    S2PF_PAIR_LITE_POLICY,
+    S2PF_SPLIT_LITE_POLICY,
+    S2PF_SINGLE_LATEST_POLICY
+} s2pf_policy_t;
 
+static int s2pf_can_start(const snap_t *s, uint8_t s3, uint32_t ps)
+{
+    uint32_t dur = kTd3[s3];
+    return s->bw_s3>0u && ps>=s->task_start && ps+dur<=s->s2_end;
+}
+
+static int s2pf_dma1_start_valid(const snap_t *s, uint8_t s3)
+{
+    uint32_t hi = s->s2_end - kTd3[s3];
+    return s2pf_can_start(s,s3,s->task_start) &&
+           s->dma1_end>=s->task_start &&
+           s->dma1_end<=hi &&
+           s->dma1_end!=s->task_start;
+}
+
+static void try_s2pf_pair(snap_t *sa, uint8_t s3a, snap_t *sb, uint8_t s3b,
+                          s2pf_policy_t policy)
+{
     int best_sc=-1; uint64_t best_ss=0xFFFFFFFFFFFFFFFFull;
     snap_t best_a=*sa, best_b=*sb;
+    int can_a=s2pf_can_start(sa,s3a,sa->task_start);
+    int can_b=s2pf_can_start(sb,s3b,sb->task_start);
+    uint32_t hi_a=can_a?(sa->s2_end-kTd3[s3a]):0u;
+    uint32_t hi_b=can_b?(sb->s2_end-kTd3[s3b]):0u;
 
-    /* No pf */
     if (bw_ok(sa,sb)){ best_sc=0; best_ss=0; best_a=*sa; best_b=*sb; }
 
-    /* Pf on A only */
-    for (int ia=0;ia<na;ia++){
-        snap_t ta=apply_s2pf(*sa,s3a,ca[ia]);
-        if (ta.s2pf_start<0) continue;
-        if (bw_ok(&ta,sb)){
-            uint64_t ss=(uint64_t)ca[ia];
-            if (1>best_sc||(1==best_sc&&ss<best_ss)){best_sc=1;best_ss=ss;best_a=ta;best_b=*sb;}
-        }
+#define TAKE_BOTH(psa_, psb_) \
+do { \
+    snap_t ta_=apply_s2pf(*sa,s3a,(psa_)); \
+    snap_t tb_=apply_s2pf(*sb,s3b,(psb_)); \
+    if (ta_.s2pf_start>=0 && tb_.s2pf_start>=0 && bw_ok(&ta_,&tb_)){ \
+        uint64_t ss_=(uint64_t)(psa_)+(uint64_t)(psb_); \
+        if (2>best_sc||(2==best_sc&&ss_<best_ss)){best_sc=2;best_ss=ss_;best_a=ta_;best_b=tb_;} \
+    } \
+} while(0)
+
+#define TAKE_B_ONLY(psb_) \
+do { \
+    snap_t tb_=apply_s2pf(*sb,s3b,(psb_)); \
+    if (tb_.s2pf_start>=0 && bw_ok(sa,&tb_)){ \
+        uint64_t ss_=(uint64_t)(psb_); \
+        if (1>best_sc||(1==best_sc&&ss_<best_ss)){best_sc=1;best_ss=ss_;best_a=*sa;best_b=tb_;} \
+    } \
+} while(0)
+
+#define TAKE_A_ONLY(psa_) \
+do { \
+    snap_t ta_=apply_s2pf(*sa,s3a,(psa_)); \
+    if (ta_.s2pf_start>=0 && bw_ok(&ta_,sb)){ \
+        uint64_t ss_=(uint64_t)(psa_); \
+        if (1>best_sc||(1==best_sc&&ss_<best_ss)){best_sc=1;best_ss=ss_;best_a=ta_;best_b=*sb;} \
+    } \
+} while(0)
+
+    if (policy==S2PF_PAIR_LITE_POLICY){
+        if (can_a&&can_b) TAKE_BOTH(sa->task_start,sb->task_start);
+        if (s2pf_dma1_start_valid(sa,s3a)&&s2pf_dma1_start_valid(sb,s3b))
+            TAKE_BOTH(sa->dma1_end,sb->dma1_end);
+        if (can_a&&can_b) TAKE_BOTH(hi_a,hi_b);
+    } else if (policy==S2PF_SPLIT_LITE_POLICY){
+        if (can_a&&can_b) TAKE_BOTH(sa->task_start,sb->task_start);
+        if (s2pf_dma1_start_valid(sa,s3a)&&s2pf_dma1_start_valid(sb,s3b))
+            TAKE_BOTH(sa->dma1_end,sb->dma1_end);
+        if (can_b) TAKE_B_ONLY(hi_b);
+    } else if (policy==S2PF_SINGLE_LATEST_POLICY){
+        if (can_a && !can_b) TAKE_A_ONLY(hi_a);
+        else if (can_b && !can_a) TAKE_B_ONLY(hi_b);
     }
-    /* Pf on B only */
-    for (int ib=0;ib<nb;ib++){
-        snap_t tb=apply_s2pf(*sb,s3b,cb[ib]);
-        if (tb.s2pf_start<0) continue;
-        if (bw_ok(sa,&tb)){
-            uint64_t ss=(uint64_t)cb[ib];
-            if (1>best_sc||(1==best_sc&&ss<best_ss)){best_sc=1;best_ss=ss;best_a=*sa;best_b=tb;}
-        }
-    }
-    /* Pf on both */
-    for (int ia=0;ia<na;ia++){
-        snap_t ta=apply_s2pf(*sa,s3a,ca[ia]);
-        if (ta.s2pf_start<0) continue;
-        for (int ib=0;ib<nb;ib++){
-            snap_t tb=apply_s2pf(*sb,s3b,cb[ib]);
-            if (tb.s2pf_start<0) continue;
-            if (!bw_ok(&ta,&tb)) continue;
-            uint64_t ss=(uint64_t)ca[ia]+(uint64_t)cb[ib];
-            if (2>best_sc||(2==best_sc&&ss<best_ss)){best_sc=2;best_ss=ss;best_a=ta;best_b=tb;}
-        }
-    }
+
+#undef TAKE_A_ONLY
+#undef TAKE_B_ONLY
+#undef TAKE_BOTH
+
     *sa=best_a; *sb=best_b;
 }
 
@@ -408,7 +434,7 @@ static uint32_t sim1(const snap_t *c2, const snap_t *c3,
         pick_shapes(ca,cb,sw_a,dn_a,sw_b,dn_b,t,&s1a,&s3a,&s1b,&s3b);
         snap_t sna=mk_snap(t,s1a,s3a,ca,eid,sw_a,dn_a);
         snap_t snb=mk_snap(t,s1b,s3b,cb,eid,sw_b,dn_b);
-        try_s2pf_pair(&sna,s3a,&snb,s3b);
+        try_s2pf_pair(&sna,s3a,&snb,s3b,S2PF_SPLIT_LITE_POLICY);
         if (bw_ok(&sna,&snb)){
             uint32_t e=(sna.task_end>snb.task_end)?sna.task_end:snb.task_end;
             if (e<best) best=e;
@@ -457,9 +483,9 @@ static void rem_remove(rem_t *rem, uint8_t *nr, uint8_t idx)
 /* =========================================================================
  * Candidate comparison
  * ========================================================================= */
-typedef struct { uint32_t cost,snap_max,snap_min; uint8_t rem_len; int valid; } ckey_t;
+typedef struct { uint32_t cost,snap_max; uint8_t rem_len; int valid; } ckey_t;
 
-static int cand_better(const ckey_t *b, uint32_t cost, uint32_t smx, uint32_t smn, uint8_t rl)
+static int cand_better(const ckey_t *b, uint32_t cost, uint32_t smx, uint8_t rl)
 {
     if (!b->valid) return 1;
     if (cost<b->cost) return 1;
@@ -468,7 +494,8 @@ static int cand_better(const ckey_t *b, uint32_t cost, uint32_t smx, uint32_t sm
     if (rl>b->rem_len) return 0;
     if (smx<b->snap_max) return 1;
     if (smx>b->snap_max) return 0;
-    if (smn>b->snap_min) return 1;
+    /* RTL score_key_t intentionally has no snap_min tie-break.  Equal
+     * cost/rem_len/snap_max keeps the first candidate in hardware-lite order. */
     return 0;
 }
 
@@ -518,14 +545,18 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
             uint8_t is_split=0; uint16_t split_cut=0;
             snap_t split_snb;
 
-            /* Method A: solo on each cluster, all 9 (s1,s3) combos */
+            /* Method A: HW-pruned solo shapes: C/C, A/A, A/C, B/B, A/B. */
+            static const uint8_t n1_solo_shapes[5][2] = {
+                {2u,2u}, {0u,0u}, {0u,2u}, {1u,1u}, {0u,1u}
+            };
             for (int ci=0;ci<2;ci++){
                 snap_t *snap_ci=(ci==0)?&c2:&c3;
                 snap_t *peer   =(ci==0)?&c3:&c2;
                 uint32_t tst=snap_ci->task_end;
                 uint8_t cc=(uint8_t)swiglu_hit(t0eid,snap_ci,tst);
                 uint8_t cf=(uint8_t)down_hit(t0eid,snap_ci,tst);
-                for (uint8_t s1=0;s1<3u;s1++) for (uint8_t s3=0;s3<3u;s3++){
+                for (uint8_t si=0u;si<5u;si++){
+                    uint8_t s1=n1_solo_shapes[si][0], s3=n1_solo_shapes[si][1];
                     snap_t sn=mk_snap(tst,s1,s3,t0ntok,t0eid,cc,cf);
                     if (!bw_ok(&sn,peer)) continue;
                     uint32_t ms=(sn.task_end>peer->task_end)?sn.task_end:peer->task_end;
@@ -535,16 +566,13 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
 
             /* SPLIT */
             if (t0ntok>=2u){
-                uint16_t cuts[2]; uint8_t nc=0;
-                uint16_t h1=(uint16_t)((t0ntok+1u)/2u), h2=(uint16_t)(t0ntok/2u);
-                cuts[nc++]=h1; if (h2!=h1&&h2>=1u&&h2<=(uint16_t)(t0ntok-1u)) cuts[nc++]=h2;
-                for (uint8_t ci2=0;ci2<nc;ci2++){
-                    uint16_t cut_a=cuts[ci2], cut_b=t0ntok-cut_a;
+                uint16_t cut_a=(uint16_t)((t0ntok+1u)/2u), cut_b=t0ntok-cut_a;
+                if (cut_a>=1u && cut_b>=1u){
                     uint8_t s1a,s3a,s1b,s3b;
                     pick_shapes(cut_a,cut_b,c2c0,c2f0,c3c0,c3f0,tnow,&s1a,&s3a,&s1b,&s3b);
                     snap_t sna=mk_snap(tnow,s1a,s3a,cut_a,t0eid,c2c0,c2f0);
                     snap_t snb=mk_snap(tnow,s1b,s3b,cut_b,t0eid,c3c0,c3f0);
-                    try_s2pf_pair(&sna,s3a,&snb,s3b);
+                    try_s2pf_pair(&sna,s3a,&snb,s3b,S2PF_SPLIT_LITE_POLICY);
                     if (!bw_ok(&sna,&snb)) continue;
                     uint32_t e=(sna.task_end>snb.task_end)?sna.task_end:snb.task_end;
                     if (e<best_cost){ best_cost=e; is_split=1; split_cut=cut_a; best_sn=sna; split_snb=snb; best_s1=s1a; best_s3=s3a; }
@@ -569,7 +597,7 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
                     }
                   }
                 }
-                for (int ti=0;ti<ntp;ti++){
+                for (int ti=1;ti<ntp;ti++){
                     uint32_t tst=tpts[ti];
                     uint8_t cc=(uint8_t)swiglu_hit(t0eid,idle_s,tst);
                     uint8_t cf=(uint8_t)down_hit(t0eid,idle_s,tst);
@@ -618,13 +646,13 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
                      rem_, nrr_, is_spl_) \
 do { \
     snap_t ta_=(sna_), tb_=(snb_); \
-    try_s2pf_pair(&ta_,s3a_,&tb_,s3b_); \
+    try_s2pf_pair(&ta_,s3a_,&tb_,s3b_, \
+                  (is_spl_) ? S2PF_SPLIT_LITE_POLICY : S2PF_PAIR_LITE_POLICY); \
     if (!bw_ok(&ta_,&tb_)) break; \
     uint32_t cost_=continuation_cost(&ta_,&tb_,(rem_),(nrr_)); \
     uint32_t smx_=(ta_.task_end>tb_.task_end)?ta_.task_end:tb_.task_end; \
-    uint32_t smn_=(ta_.task_end<tb_.task_end)?ta_.task_end:tb_.task_end; \
-    if (cand_better(&bkey,cost_,smx_,smn_,(nrr_))){ \
-        bkey.cost=cost_;bkey.snap_max=smx_;bkey.snap_min=smn_; \
+    if (cand_better(&bkey,cost_,smx_,(nrr_))){ \
+        bkey.cost=cost_;bkey.snap_max=smx_; \
         bkey.rem_len=(nrr_);bkey.valid=1; \
         bsna=ta_;bsnb=tb_; \
         beid_a=(ea_);beid_b=(eb_); \
@@ -637,14 +665,13 @@ do { \
     } \
 } while(0)
 
-            /* PAIR(top0, topK) K=1..min(3,nr-1) */
-            uint8_t maxK=(nr-1u<3u)?(uint8_t)(nr-1u):3u;
-            for (uint8_t K=1u;K<=maxK;K++){
+            /* HW-pruned PAIR(top0, top1), fixed direction top0->C2. */
+            for (uint8_t K=1u;K<=1u&&K<nr;K++){
                 int16_t Keid=rem[K].eid; uint16_t Kntok=rem[K].ntok;
                 rem_t ra[MOE_MAX_EXPERTS]; uint8_t nra=0;
                 for (uint8_t ri=0;ri<nr;ri++) if(rem[ri].eid!=t0eid&&rem[ri].eid!=Keid) ra[nra++]=rem[ri];
 
-                /* Dir 1: top0→C2, topK→C3 */
+                /* top0->C2, top1->C3 */
                 { uint8_t sw_a=c2c0,dn_a=c2f0;
                   uint8_t sw_b=(uint8_t)swiglu_hit(Keid,&c3,tnow),dn_b=(uint8_t)down_hit(Keid,&c3,tnow);
                   uint8_t s1a,s3a,s1b,s3b;
@@ -652,26 +679,20 @@ do { \
                   snap_t sa=mk_snap(tnow,s1a,s3a,t0ntok,t0eid,sw_a,dn_a);
                   snap_t sb=mk_snap(tnow,s1b,s3b,Kntok,Keid,sw_b,dn_b);
                   EVAL_PAIR_BI(sa,s1a,s3a,t0eid,t0ntok,0u,sb,s1b,s3b,Keid,Kntok,0u,ra,nra,0u); }
-                /* Dir 2: topK→C2, top0→C3 */
-                { uint8_t sw_a=(uint8_t)swiglu_hit(Keid,&c2,tnow),dn_a=(uint8_t)down_hit(Keid,&c2,tnow);
-                  uint8_t sw_b=c3c0,dn_b=c3f0;
-                  uint8_t s1a,s3a,s1b,s3b;
-                  pick_shapes(Kntok,t0ntok,sw_a,dn_a,sw_b,dn_b,tnow,&s1a,&s3a,&s1b,&s3b);
-                  snap_t sa=mk_snap(tnow,s1a,s3a,Kntok,Keid,sw_a,dn_a);
-                  snap_t sb=mk_snap(tnow,s1b,s3b,t0ntok,t0eid,sw_b,dn_b);
-                  EVAL_PAIR_BI(sa,s1a,s3a,Keid,Kntok,0u,sb,s1b,s3b,t0eid,t0ntok,0u,ra,nra,0u); }
             }
 
-            /* PAIR(topK, topJ) K>=1, J>K */
+            /* HW-pruned PAIR(topK, topJ): (1,2), (2,3), fixed direction K->C2. */
             if (nr>=3u){
-                uint8_t mKJ=(nr-1u<3u)?(uint8_t)(nr-1u):3u;
-                for (uint8_t K=1u;K<mKJ;K++) for (uint8_t J=K+1u;J<=mKJ&&J<nr;J++){
+                static const uint8_t kj_pairs[2][2]={{1u,2u},{2u,3u}};
+                for (uint8_t pi=0u;pi<2u;pi++){
+                    uint8_t K=kj_pairs[pi][0], J=kj_pairs[pi][1];
+                    if (J>=nr) continue;
                     int16_t eidK=rem[K].eid; uint16_t ntK=rem[K].ntok;
                     int16_t eidJ=rem[J].eid; uint16_t ntJ=rem[J].ntok;
                     rem_t ra[MOE_MAX_EXPERTS]; uint8_t nra=0;
                     for (uint8_t ri=0;ri<nr;ri++) if(rem[ri].eid!=eidK&&rem[ri].eid!=eidJ) ra[nra++]=rem[ri];
                     if (nra==0u) continue;
-                    /* Dir1 */
+                    /* K->C2, J->C3 */
                     { uint8_t sw_a=(uint8_t)swiglu_hit(eidK,&c2,tnow),dn_a=(uint8_t)down_hit(eidK,&c2,tnow);
                       uint8_t sw_b=(uint8_t)swiglu_hit(eidJ,&c3,tnow),dn_b=(uint8_t)down_hit(eidJ,&c3,tnow);
                       uint8_t s1a,s3a,s1b,s3b;
@@ -679,32 +700,15 @@ do { \
                       snap_t sa=mk_snap(tnow,s1a,s3a,ntK,eidK,sw_a,dn_a);
                       snap_t sb=mk_snap(tnow,s1b,s3b,ntJ,eidJ,sw_b,dn_b);
                       EVAL_PAIR_BI(sa,s1a,s3a,eidK,ntK,0u,sb,s1b,s3b,eidJ,ntJ,0u,ra,nra,0u); }
-                    /* Dir2 */
-                    { uint8_t sw_a=(uint8_t)swiglu_hit(eidJ,&c2,tnow),dn_a=(uint8_t)down_hit(eidJ,&c2,tnow);
-                      uint8_t sw_b=(uint8_t)swiglu_hit(eidK,&c3,tnow),dn_b=(uint8_t)down_hit(eidK,&c3,tnow);
-                      uint8_t s1a,s3a,s1b,s3b;
-                      pick_shapes(ntJ,ntK,sw_a,dn_a,sw_b,dn_b,tnow,&s1a,&s3a,&s1b,&s3b);
-                      snap_t sa=mk_snap(tnow,s1a,s3a,ntJ,eidJ,sw_a,dn_a);
-                      snap_t sb=mk_snap(tnow,s1b,s3b,ntK,eidK,sw_b,dn_b);
-                      EVAL_PAIR_BI(sa,s1a,s3a,eidJ,ntJ,0u,sb,s1b,s3b,eidK,ntK,0u,ra,nra,0u); }
                 }
             }
 
-            /* SPLIT(top0) */
+            /* HW-pruned SPLIT(top0): half_ceil + front_m2. */
             if (t0ntok>=2u){
-                uint16_t cuts[8]; uint8_t nc=0;
-                { uint16_t h1=(uint16_t)((t0ntok+1u)/2u), h2=(uint16_t)(t0ntok/2u);
-                  cuts[nc++]=h1;
-                  if (h2!=h1&&h2>=1u) cuts[nc++]=h2; }
-                uint32_t mds[3]={8u,4u,2u};
-                for (int mi=0;mi<3;mi++){
-                    if (mds[mi]<t0ntok){ uint16_t k=(uint16_t)mds[mi];
-                        int dup=0; for(uint8_t ci=0;ci<nc;ci++) if(cuts[ci]==k){dup=1;break;}
-                        if (!dup&&nc<8u) cuts[nc++]=k; }
-                    if (t0ntok>mds[mi]){ uint16_t k2=(uint16_t)(t0ntok-mds[mi]);
-                        if (k2>=1u){ int dup=0; for(uint8_t ci=0;ci<nc;ci++) if(cuts[ci]==k2){dup=1;break;}
-                            if(!dup&&nc<8u) cuts[nc++]=k2; } }
-                }
+                uint16_t cuts[2]; uint8_t nc=0;
+                uint16_t h1=(uint16_t)((t0ntok+1u)/2u);
+                cuts[nc++]=h1;
+                if (2u<t0ntok && 2u!=h1) cuts[nc++]=2u;
                 rem_t ra[MOE_MAX_EXPERTS]; uint8_t nra=0;
                 for (uint8_t ri=0;ri<nr;ri++) if(rem[ri].eid!=t0eid) ra[nra++]=rem[ri];
                 for (uint8_t ci=0;ci<nc;ci++){
