@@ -560,37 +560,76 @@ typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
 typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
         __snax_bingo_kernel_dual_vc_l15_moe_down_args_t;
 
-typedef struct __attribute__((packed, aligned(4))) {
-  uint32_t valid;
-  uint32_t output_D0_addr;
-  uint32_t N;
-  uint32_t array_shape;
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    struct {
+      uint32_t valid;
+      uint32_t output_D0_addr;
+    };
+    uint64_t valid_output_word;
+  } __attribute__((aligned(8)));
+  union {
+    struct {
+      uint32_t N;
+      uint32_t array_shape;
+    };
+    uint64_t n_shape_word;
+  } __attribute__((aligned(8)));
 } __snax_bingo_moe_dyn_s1_call_args_t;
 
-typedef struct __attribute__((packed, aligned(4))) {
-  uint32_t valid;
-  uint32_t input_A_addr;
-  uint32_t output_D0_addr;
-  uint32_t M;
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    struct {
+      uint32_t valid;
+      uint32_t input_A_addr;
+    };
+    uint64_t valid_input_word;
+  } __attribute__((aligned(8)));
+  union {
+    struct {
+      uint32_t output_D0_addr;
+      uint32_t M;
+    };
+    uint64_t output_m_word;
+  } __attribute__((aligned(8)));
 } __snax_bingo_moe_dyn_s2_call_args_t;
 
-typedef struct __attribute__((packed, aligned(4))) {
-  uint32_t valid;
-  uint32_t N;
-  uint32_t array_shape;
-  uint32_t reserved;
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    struct {
+      uint32_t valid;
+      uint32_t N;
+    };
+    uint64_t valid_n_word;
+  } __attribute__((aligned(8)));
+  union {
+    struct {
+      uint32_t array_shape;
+      uint32_t reserved;
+    };
+    uint64_t shape_reserved_word;
+  } __attribute__((aligned(8)));
 } __snax_bingo_moe_dyn_s3_call_args_t;
 
 typedef struct __attribute__((packed, aligned(4))) {
-  uint32_t valid;
-  uint32_t input_A_addr;
-  uint32_t output_D0_addr;
-  uint32_t output_D1_addr;
+  union {
+    struct {
+      uint32_t valid;
+      uint32_t input_A_addr;
+    };
+    uint64_t valid_input_word;
+  } __attribute__((aligned(8)));
+  union {
+    struct {
+      uint32_t output_D0_addr;
+      uint32_t output_D1_addr;
+    };
+    uint64_t output_pair_word;
+  } __attribute__((aligned(8)));
   uint32_t M;
 } __snax_bingo_moe_dyn_s4_call_args_t;
 
 typedef struct __attribute__((packed, aligned(4))) {
-  uint64_t token_offsets_addr;
   uint64_t token_ids_addr;
   uint64_t input_A_l3_base;
   uint64_t indiv_gate_B_l3;
@@ -627,7 +666,8 @@ typedef struct __attribute__((packed, aligned(4))) {
   uint32_t s3_block_count;
 } __snax_bingo_moe_dynamic_expert_static_args_t;
 
-__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
+typedef struct __attribute__((packed, aligned(8)))
+    __snax_bingo_kernel_moe_dynamic_expert_args {
   /* ── ctrl: packed control word (19 bits used, written every round by Phase4) ──────
    * bit  0:      active             (1 = slot valid, Snitch will execute)
    * bit  1:      skip_s1            (1 = S1 load+compute 全跳过, cache hit)
@@ -641,12 +681,27 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_args {
    * bit  13:     runtime_cluster_idx (0=C2, 1=C3)
    * bits [19:14]:slot_id            (0-63, local slot index)
    * ──────────────────────────────────────────────────────────────────────────── */
-  uint32_t ctrl;
-  uint32_t expert_id;
-  uint32_t token_start_rank;
-  uint32_t ntokens;
-  uint32_t m_s2_exec;    /* S2 M-tile 数 = ⌈tail_tokens / 2⌉（shape C 固定 meshRow=2）; 0 when skip_s2=1 */
-  uint32_t m_s4_exec;    /* S4 M-tile 数 = ⌈tail_tokens / 2⌉（shape C 固定 meshRow=2）; 0 when skip_s4=1 */
+  union {
+    struct {
+      uint32_t ctrl;
+      uint32_t expert_id;
+    };
+    uint64_t ctrl_expert_word;
+  } __attribute__((aligned(8)));
+  union {
+    struct {
+      uint32_t token_start_rank;
+      uint32_t ntokens;
+    };
+    uint64_t token_range_word;
+  } __attribute__((aligned(8)));
+  union {
+    struct {
+      uint32_t m_s2_exec; /* S2 M-tile 数 = ⌈tail_tokens / 2⌉; 0 when skip_s2=1 */
+      uint32_t m_s4_exec; /* S4 M-tile 数 = ⌈tail_tokens / 2⌉; 0 when skip_s4=1 */
+    };
+    uint64_t m_exec_word;
+  } __attribute__((aligned(8)));
   uint32_t wait_for_peer_slots;
   /* ── dma_slot_vd: packed valid + DMA binding for all 4 DMA slots ───────────
    * For slot i (i=0..3), bits at offset i*3:

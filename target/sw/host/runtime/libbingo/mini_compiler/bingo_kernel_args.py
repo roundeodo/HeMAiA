@@ -957,6 +957,8 @@ class SnaxBingoKernelXdmaRowMajorToDArgs(BingoKernelArgs):
 # The first class below is still part of the current multi_cluster_MoE Phase 2
 # path. Many of the following classes are retained because the shared runtime
 # still supports older single-cluster or pre-scatter style flows.
+_MOE_SW_SCHED_ABI_IF = "#if !defined(MOE_ENABLE_HW_SCHEDULER)"
+_MOE_SW_SCHED_ABI_ENDIF = "#endif"
 
 
 # HOST BINGO MoE Router Schedule
@@ -974,12 +976,16 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
         router_m1: int,
         router_n1: int,
         expert_token_counts_out_addr: Union[BingoMemAlloc, str, int] = 0,
+        expert_token_ids_addr: Union[BingoMemAlloc, str, int] = 0,
+        max_tokens_per_expert: int = 0,
     ):
         self.total_tokens = total_tokens
         self.hardware_output_buffer_addr = hardware_output_buffer_addr
         self.global_indices_out_addr = global_indices_out_addr
         self.global_scores_out_addr = global_scores_out_addr
         self.expert_token_counts_out_addr = expert_token_counts_out_addr
+        self.expert_token_ids_addr = expert_token_ids_addr
+        self.max_tokens_per_expert = max_tokens_per_expert
         self.expert_number_each_layer = expert_number_each_layer
         self.individual_expert_number_k = individual_expert_number_k
         self.mesh_row = mesh_row
@@ -1027,23 +1033,30 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
             split_64bit=False,
             as_64bit=True,
         )
+        self._process_addr(
+            self.expert_token_ids_addr,
+            "expert_token_ids_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        assignments["max_tokens_per_expert"] = str(self.max_tokens_per_expert)
         assignments["expert_number_each_layer"] = str(self.expert_number_each_layer)
         assignments["individual_expert_number_k"] = str(self.individual_expert_number_k)
+        assignments[_MOE_SW_SCHED_ABI_IF] = ""
         assignments["mesh_row"] = str(self.mesh_row)
         assignments["mesh_col"] = str(self.mesh_col)
         assignments["router_m1"] = str(self.router_m1)
         assignments["router_n1"] = str(self.router_n1)
+        assignments[_MOE_SW_SCHED_ABI_ENDIF] = ""
         return assignments
 
 
 # multi_cluster_MoE Phase 3 wrapper. Pure HW fast builds pass expert token
 # counts and CAM state directly to the RTL scheduler and direct-lower compact
-# plan words into L3 stage args. request/schedule addresses are legacy ABI
-# fields used only by SW scheduler / HW-check builds.
-_MOE_LEGACY_SCHED_ABI_IF = (
-    "#if !defined(MOE_ENABLE_HW_SCHEDULER) || defined(MOE_ENABLE_HW_SCHEDULER_CHECK)"
-)
-_MOE_LEGACY_SCHED_ABI_ENDIF = "#endif"
+# plan words into L3 stage args. request/schedule addresses belong only to the
+# pure-SW scheduler ABI.
 
 
 class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
@@ -1053,9 +1066,7 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         cam_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         request_out_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         schedule_out_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        expert_token_offsets_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         expert_token_ids_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        expert_token_kpos_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         n_experts: int,
         topk_indices_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         M_total: int,
@@ -1085,9 +1096,7 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         self.cam_state_addr = cam_state_addr
         self.request_out_addr = request_out_addr
         self.schedule_out_addr = schedule_out_addr
-        self.expert_token_offsets_addr = expert_token_offsets_addr
         self.expert_token_ids_addr = expert_token_ids_addr
-        self.expert_token_kpos_addr = expert_token_kpos_addr
         self.n_experts = n_experts
         self.topk_indices_l3 = topk_indices_l3
         self.M_total = M_total
@@ -1136,60 +1145,7 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
             split_64bit=False,
             as_64bit=True,
         )
-        assignments[_MOE_LEGACY_SCHED_ABI_IF] = ""
-        self._process_addr(
-            self.request_out_addr,
-            "request_out_addr",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        self._process_addr(
-            self.schedule_out_addr,
-            "schedule_out_addr",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        assignments[_MOE_LEGACY_SCHED_ABI_ENDIF] = ""
-        self._process_addr(
-            self.expert_token_offsets_addr,
-            "expert_token_offsets_addr",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        self._process_addr(
-            self.expert_token_ids_addr,
-            "expert_token_ids_addr",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        self._process_addr(
-            self.expert_token_kpos_addr,
-            "expert_token_kpos_addr",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
         assignments["n_experts"] = str(self.n_experts)
-        self._process_addr(
-            self.topk_indices_l3,
-            "topk_indices_l3",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-            as_64bit=True,
-        )
-        assignments["M_total"] = str(self.M_total)
-        assignments["top_k"] = str(self.top_k)
-        assignments["expert_token_counts_valid"] = str(self.expert_token_counts_valid)
         self._process_addr(
             self.runtime_state_addr,
             "runtime_state_addr",
@@ -1215,7 +1171,6 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
             as_64bit=True,
         )
         assignments["dynamic_arg_slot_bytes"] = str(self.dynamic_arg_slot_bytes)
-        assignments["dynamic_num_slots"] = str(self.dynamic_num_slots)
         for attr in (
             "c2_l1_a",
             "c2_l1_d",
@@ -1232,6 +1187,7 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
                 split_64bit=False,
                 as_64bit=True,
             )
+        assignments[_MOE_SW_SCHED_ABI_IF] = ""
         assignments["A_token_bytes"] = str(self.A_token_bytes)
         assignments["indiv_D_tile_bytes"] = str(self.indiv_D_tile_bytes)
         assignments["indiv_down_D_tile_bytes"] = str(self.indiv_down_D_tile_bytes)
@@ -1240,20 +1196,55 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         assignments["s1_block_count"] = str(self.s1_block_count)
         assignments["s3_block_count"] = str(self.s3_block_count)
         assignments["max_tokens_per_expert"] = str(self.max_tokens_per_expert)
+        self._process_addr(
+            self.request_out_addr,
+            "request_out_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.schedule_out_addr,
+            "schedule_out_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.expert_token_ids_addr,
+            "expert_token_ids_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        self._process_addr(
+            self.topk_indices_l3,
+            "topk_indices_l3",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=True,
+        )
+        assignments["M_total"] = str(self.M_total)
+        assignments["top_k"] = str(self.top_k)
+        assignments["expert_token_counts_valid"] = str(self.expert_token_counts_valid)
+        assignments["dynamic_num_slots"] = str(self.dynamic_num_slots)
+        assignments[_MOE_SW_SCHED_ABI_ENDIF] = ""
         return assignments
 
 
-# multi_cluster_MoE Phase 4 wrapper. Pure HW fast builds only synchronize the
-# runtime state and flush the active L3 stage args to C2/C3 L1. SW scheduler
-# builds may still consume request/schedule through the same ABI.
+# multi_cluster_MoE Phase 4 wrapper. HW scheduler builds only synchronize the
+# runtime state and flush the active L3 stage args to C2/C3 L1. Pure SW builds
+# consume request/schedule through the software ABI.
 class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
     def __init__(
         self,
         request_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         schedule_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        expert_token_offsets_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         expert_token_ids_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        expert_token_kpos_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         cam_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         input_A_l3_base: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         topk_indices_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
@@ -1311,9 +1302,7 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
     ):
         self.request_addr = request_addr
         self.schedule_addr = schedule_addr
-        self.expert_token_offsets_addr = expert_token_offsets_addr
         self.expert_token_ids_addr = expert_token_ids_addr
-        self.expert_token_kpos_addr = expert_token_kpos_addr
         self.cam_state_addr = cam_state_addr
         self.input_A_l3_base = input_A_l3_base
         self.topk_indices_l3 = topk_indices_l3
@@ -1392,29 +1381,17 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
         self, handle_name_map: Dict[BingoMemAlloc, str]
     ) -> Dict[str, str]:
         assignments = {}
-        assignments[_MOE_LEGACY_SCHED_ABI_IF] = ""
+        assignments[_MOE_SW_SCHED_ABI_IF] = ""
         self._process_addr64(
             self.request_addr, "request_addr", assignments, handle_name_map
         )
         self._process_addr64(
             self.schedule_addr, "schedule_addr", assignments, handle_name_map
         )
-        assignments[_MOE_LEGACY_SCHED_ABI_ENDIF] = ""
-        self._process_addr64(
-            self.expert_token_offsets_addr,
-            "expert_token_offsets_addr",
-            assignments,
-            handle_name_map,
-        )
+        assignments[_MOE_SW_SCHED_ABI_ENDIF] = ""
         self._process_addr64(
             self.expert_token_ids_addr,
             "expert_token_ids_addr",
-            assignments,
-            handle_name_map,
-        )
-        self._process_addr64(
-            self.expert_token_kpos_addr,
-            "expert_token_kpos_addr",
             assignments,
             handle_name_map,
         )

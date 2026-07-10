@@ -50,17 +50,16 @@ $(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(DATA_CFG) $(HW_CFG)
 override USER_FLAGS += -DMOE_SCHEDULE_FAST
 
 # Optional production path: use the RTL scheduler MMIO slave for compact-plan
-# generation, then direct-lower FIFO words into the dynamic args memory.  It
-# does not write the legacy L3 moe_schedule buffer unless CHECK is enabled.
-# Keep disabled by default so software-vs-hardware A/B builds can use the same
-# workload.
+# generation, then direct-lower FIFO words into the dynamic args memory.
+# Pure-SW comparison builds use MOE_HW_SCHEDULER=0 and the request/schedule ABI;
+# pure-HW builds use MOE_HW_SCHEDULER=1 and do not allocate request/schedule.
 MOE_HW_SCHEDULER ?= 0
-MOE_HW_SCHEDULER_CHECK ?= 0
+MOE_MCYCLE_DETAIL ?= 0
 ifeq ($(MOE_HW_SCHEDULER), 1)
 override USER_FLAGS += -DMOE_ENABLE_HW_SCHEDULER
 endif
-ifeq ($(MOE_HW_SCHEDULER_CHECK), 1)
-override USER_FLAGS += -DMOE_ENABLE_HW_SCHEDULER_CHECK
+ifeq ($(MOE_MCYCLE_DETAIL), 1)
+override USER_FLAGS += -DMOE_MCYCLE_DETAIL=1
 endif
 
 SRCS += $(MK_DIR)/moe_scheduler.c

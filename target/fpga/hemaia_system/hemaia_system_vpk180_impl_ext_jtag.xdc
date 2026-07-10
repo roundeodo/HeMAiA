@@ -14,6 +14,8 @@ set_input_jitter jtag_tck_i 1.000
 
 # JTAG clock is asynchronous with every other clocks.
 #set_clock_groups -asynchronous -group [get_clocks jtag_tck_i]
+# Cut async JTAG -> PL debug/ILA timing paths.
+set_false_path -from [get_clocks jtag_tck_i] -to [get_clocks clk_pl_0]
 
 # constrain CDC delay manually
 set jtag_peri_period [get_property PERIOD [get_clocks clk_peri]]

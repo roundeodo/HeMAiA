@@ -13,10 +13,10 @@
 
 #include <stdint.h>
 
-#if defined(MOE_ENABLE_HW_SCHEDULER) && !defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
-#define MOE_SCHED_PURE_HW_FAST 1
+#if defined(MOE_ENABLE_HW_SCHEDULER)
+#define MOE_SCHED_PURE_HW_PATH 1
 #else
-#define MOE_SCHED_PURE_HW_FAST 0
+#define MOE_SCHED_PURE_HW_PATH 0
 #endif
 
 #ifdef __cplusplus
@@ -67,7 +67,7 @@ typedef enum {
 } moe_dma_op_kind_t;
 
 /* ── Input: per-expert token count after routing ──────────────────────── */
-#if !MOE_SCHED_PURE_HW_FAST
+#if !MOE_SCHED_PURE_HW_PATH
 typedef struct {
     uint16_t expert_id;       /* 0..N_EXPERTS-1                          */
     uint16_t ntokens;         /* number of tokens routed to this expert  */
@@ -110,7 +110,7 @@ typedef struct {
     /* REMOVED: cluster (from tasks[task_idx]), weight/shape/alloc_bw/start_cc/end_cc */
 } moe_dma_op_t;
 
-#if !MOE_SCHED_PURE_HW_FAST
+#if !MOE_SCHED_PURE_HW_PATH
 typedef struct {
     moe_task_t   tasks[MOE_MAX_TASKS];      /* ordered task list               */
     moe_dma_op_t dma_ops[MOE_MAX_DMA_OPS];  /* DMA operations in issue order   */
@@ -169,7 +169,7 @@ typedef enum {
  *  candidate branches are enumerated for the current request. No dynamic
  *  memory is used.
  * ───────────────────────────────────────────────────────────────────────── */
-#if !MOE_SCHED_PURE_HW_FAST
+#if !MOE_SCHED_PURE_HW_PATH
 moe_status_t moe_schedule(const moe_request_t *req, moe_schedule_t *out);
 
 /* Generate the same compact plan representation that the RTL scheduler emits.

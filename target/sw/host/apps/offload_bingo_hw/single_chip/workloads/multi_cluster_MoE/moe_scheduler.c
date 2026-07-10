@@ -21,8 +21,8 @@
  */
 #include "moe_scheduler.h"
 
-#if defined(MOE_ENABLE_HW_SCHEDULER) && !defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
-/* Pure HW fast build intentionally emits no SW scheduler/fallback functions.
+#if defined(MOE_ENABLE_HW_SCHEDULER)
+/* Pure HW fast build intentionally emits no SW scheduler functions.
  * Any accidental moe_schedule()/moe_make_hw_plan() reference in this build
  * should fail at link time instead of silently taking a software path. */
 #else
@@ -52,7 +52,7 @@ static const uint32_t kFullMdim = 2u; /* S2/S4 GEMM always runs shape C. */
 #define INF_CC          0xFFFFFFFFu
 #define T_DMA3_C        11264u          /* ShapeC t_dma_s3; S3-overlap threshold */
 #define EXACT_TAIL_MAX  4u              /* continuation_cost n=2 exact threshold  */
-/* Sentinel stored in snap_t.pf_eid to mean "S4 window is available for prefetch
+/* Sentinel stored in snap_t.pf_eid to mean "the post-down-DMA window can prefetch
  * of whoever gets assigned next".  Any valid expert_id is >= 0. */
 #define PF_EID_GHOST    ((int16_t)(-2))
 
@@ -133,68 +133,34 @@ static snap_t apply_s2pf(snap_t sn, uint8_t s3, uint32_t ps)
 {
     uint32_t pe=ps+kTd3[s3];
     if (sn.bw_s3==0u) return sn;
-    if (ps<sn.task_start || pe>sn.s2_end) return sn;
+    if (ps<sn.dma1_end || pe>sn.s2_end) return sn;
     sn.s2pf_start=(int32_t)ps; sn.s2pf_end=(int32_t)pe; sn.s2pf_bw=kAlloc[s3];
     sn.dma3_end=sn.s2_end; sn.s3_end=sn.s2_end; sn.s4_start=sn.s2_end; sn.bw_s3=0;
     sn.task_end=sn.s2_end+best_s4(sn.ntok);
     return sn;
 }
 
-/* =========================================================================
- * BW feasibility — merged-segment approach (~7x faster than point-sampling)
- *
- * Within a single snap, only two intervals can overlap in time:
- *   iv1: [task_start, dma1_end)  — S1 DMA   (bw_s1)
- *   iv4: [s2pf_start, s2pf_end) — s2pf DMA  (s2pf_bw)
- * (iv2=[s2_end,dma3_end) and pf_start are always disjoint from iv1/iv4;
- *  after apply_s2pf bw_s3=0 so iv2 is inactive when iv4 is active.)
- *
- * snap_segs() builds the merged piecewise-constant BW profile (≤4 segments).
- * bw_ok() then does a 4×4=16-pair cross-check between two snaps.
- * ========================================================================= */
+/* S1, S2PF, S3 and next-S1 prefetch are ordered within one cluster. */
 typedef struct { uint32_t lo, hi, bw; } seg_t;
 
-static int snap_segs(const snap_t *s, seg_t out[5], int *n)
+static void snap_segs(const snap_t *s, seg_t out[4], int *n)
 {
     *n = 0;
-    /* iv1: S1 DMA */
-    int has1 = (s->cur_eid>=0 && s->bw_s1>0u && s->dma1_end>s->task_start);
-    uint32_t s1lo=s->task_start, s1hi=s->dma1_end, s1bw=s->bw_s1;
-    /* iv4: s2pf DMA (only present after apply_s2pf; bw_s3=0 in that case) */
-    int has4 = (s->s2pf_start>=0 && s->s2pf_bw>0u &&
-                (uint32_t)s->s2pf_end>(uint32_t)s->s2pf_start);
-    uint32_t p4lo=(uint32_t)s->s2pf_start, p4hi=(uint32_t)s->s2pf_end, p4bw=s->s2pf_bw;
-
-    if (has1 && has4 && s1lo<p4hi && p4lo<s1hi) {
-        /* iv1 and iv4 overlap: build merged 3-segment profile */
-        uint32_t ovl_lo=(s1lo>p4lo)?s1lo:p4lo;
-        uint32_t ovl_hi=(s1hi<p4hi)?s1hi:p4hi;
-        uint32_t merged=s1bw+p4bw;
-        if (merged>MAX_BW_CC) return 0;               /* single-snap violation */
-        if (s1lo<p4lo)      out[(*n)++]=(seg_t){s1lo, p4lo, s1bw};
-        else if (p4lo<s1lo) out[(*n)++]=(seg_t){p4lo, s1lo, p4bw};
-        if (ovl_hi>ovl_lo)  out[(*n)++]=(seg_t){ovl_lo, ovl_hi, merged};
-        if (s1hi>p4hi)      out[(*n)++]=(seg_t){p4hi, s1hi, s1bw};
-        else if (p4hi>s1hi) out[(*n)++]=(seg_t){s1hi, p4hi, p4bw};
-    } else {
-        if (has1) out[(*n)++]=(seg_t){s1lo, s1hi, s1bw};
-        if (has4) out[(*n)++]=(seg_t){p4lo, p4hi, p4bw};
-    }
-    /* iv2: S3 DMA — always after iv1/iv4; active only when bw_s3>0 (no s2pf) */
-    if (s->cur_eid>=0 && s->bw_s3>0u && s->dma3_end>s->s2_end)
+    if (s->cur_eid>=0 && s->bw_s1>0u)
+        out[(*n)++]=(seg_t){s->task_start, s->dma1_end, s->bw_s1};
+    if (s->s2pf_start>=0 && s->s2pf_bw>0u)
+        out[(*n)++]=(seg_t){(uint32_t)s->s2pf_start,
+                            (uint32_t)s->s2pf_end, s->s2pf_bw};
+    if (s->cur_eid>=0 && s->bw_s3>0u)
         out[(*n)++]=(seg_t){s->s2_end, s->dma3_end, s->bw_s3};
-    /* iv5: S4 prefetch DMA — ShapeA gate/up during this task's S4 window.
-     * The duration and BW are fixed, so snap_t only stores valid+start. */
     if (s->cur_eid>=0 && s->s4pf_valid)
         out[(*n)++]=(seg_t){s->s4pf_start, s->s4pf_start+kTd1[0], kAlloc[0]};
-    return 1;
 }
 
 static int bw_ok(const snap_t *a, const snap_t *b)
 {
-    seg_t sa[5], sb[5]; int na=0, nb=0;
-    if (!snap_segs(a,sa,&na)) return 0;
-    if (!snap_segs(b,sb,&nb)) return 0;
+    seg_t sa[4], sb[4]; int na=0, nb=0;
+    snap_segs(a,sa,&na); snap_segs(b,sb,&nb);
     for (int i=0;i<na;i++) for (int j=0;j<nb;j++) {
         uint32_t lo=(sa[i].lo>sb[j].lo)?sa[i].lo:sb[j].lo;
         uint32_t hi=(sa[i].hi<sb[j].hi)?sa[i].hi:sb[j].hi;
@@ -206,8 +172,7 @@ static int bw_ok(const snap_t *a, const snap_t *b)
 static int s4pf_local_ok(const snap_t *s)
 {
     return (s->cur_eid>=0 && s->pf_eid==(int16_t)(-1) &&
-            s->dma1_end<=s->s4_start &&
-            s->s4_start+kTd1[0]<=s->task_end);
+            s->dma3_end+kTd1[0]<=s->task_end);
 }
 
 static snap_t apply_s4pf_ghost(snap_t s)
@@ -217,7 +182,7 @@ static snap_t apply_s4pf_ghost(snap_t s)
         s.pf_end=(int32_t)s.task_end;
         s.pf_full=0;
         s.s4pf_valid=1u;
-        s.s4pf_start=s.s4_start;
+        s.s4pf_start=s.dma3_end;
     }
     return s;
 }
@@ -239,43 +204,26 @@ typedef enum {
     S2PF_OFF_POLICY = 0,
     S2PF_PAIR_LITE_POLICY,
     S2PF_SPLIT_LITE_POLICY,
-    S2PF_SINGLE_LATEST_POLICY
+    S2PF_SINGLE_DMA1_POLICY
 } s2pf_policy_t;
 
 static int s2pf_can_start(const snap_t *s, uint8_t s3, uint32_t ps)
 {
     uint32_t dur = kTd3[s3];
-    return s->bw_s3>0u && ps>=s->task_start && ps+dur<=s->s2_end;
-}
-
-static int s2pf_dma1_start_valid(const snap_t *s, uint8_t s3)
-{
-    uint32_t hi = s->s2_end - kTd3[s3];
-    return s2pf_can_start(s,s3,s->task_start) &&
-           s->dma1_end>=s->task_start &&
-           s->dma1_end<=hi &&
-           s->dma1_end!=s->task_start;
+    return s->bw_s3>0u && ps>=s->dma1_end && ps+dur<=s->s2_end;
 }
 
 static void try_s2pf_pair(snap_t *sa, uint8_t s3a, snap_t *sb, uint8_t s3b,
                           s2pf_policy_t policy)
 {
-    int best_sc=-1; uint64_t best_ss=0xFFFFFFFFFFFFFFFFull;
-    snap_t best_a=*sa, best_b=*sb;
-    int can_a=s2pf_can_start(sa,s3a,sa->task_start);
-    int can_b=s2pf_can_start(sb,s3b,sb->task_start);
-    uint32_t hi_a=can_a?(sa->s2_end-kTd3[s3a]):0u;
-    uint32_t hi_b=can_b?(sb->s2_end-kTd3[s3b]):0u;
-
-    if (bw_ok(sa,sb)){ best_sc=0; best_ss=0; best_a=*sa; best_b=*sb; }
-
+    int can_a=s2pf_can_start(sa,s3a,sa->dma1_end);
+    int can_b=s2pf_can_start(sb,s3b,sb->dma1_end);
 #define TAKE_BOTH(psa_, psb_) \
 do { \
     snap_t ta_=apply_s2pf(*sa,s3a,(psa_)); \
     snap_t tb_=apply_s2pf(*sb,s3b,(psb_)); \
     if (ta_.s2pf_start>=0 && tb_.s2pf_start>=0 && bw_ok(&ta_,&tb_)){ \
-        uint64_t ss_=(uint64_t)(psa_)+(uint64_t)(psb_); \
-        if (2>best_sc||(2==best_sc&&ss_<best_ss)){best_sc=2;best_ss=ss_;best_a=ta_;best_b=tb_;} \
+        *sa=ta_; *sb=tb_; return; \
     } \
 } while(0)
 
@@ -283,8 +231,7 @@ do { \
 do { \
     snap_t tb_=apply_s2pf(*sb,s3b,(psb_)); \
     if (tb_.s2pf_start>=0 && bw_ok(sa,&tb_)){ \
-        uint64_t ss_=(uint64_t)(psb_); \
-        if (1>best_sc||(1==best_sc&&ss_<best_ss)){best_sc=1;best_ss=ss_;best_a=*sa;best_b=tb_;} \
+        *sb=tb_; return; \
     } \
 } while(0)
 
@@ -292,31 +239,25 @@ do { \
 do { \
     snap_t ta_=apply_s2pf(*sa,s3a,(psa_)); \
     if (ta_.s2pf_start>=0 && bw_ok(&ta_,sb)){ \
-        uint64_t ss_=(uint64_t)(psa_); \
-        if (1>best_sc||(1==best_sc&&ss_<best_ss)){best_sc=1;best_ss=ss_;best_a=ta_;best_b=*sb;} \
+        *sa=ta_; return; \
     } \
 } while(0)
 
     if (policy==S2PF_PAIR_LITE_POLICY){
-        if (can_a&&can_b) TAKE_BOTH(sa->task_start,sb->task_start);
-        if (s2pf_dma1_start_valid(sa,s3a)&&s2pf_dma1_start_valid(sb,s3b))
-            TAKE_BOTH(sa->dma1_end,sb->dma1_end);
-        if (can_a&&can_b) TAKE_BOTH(hi_a,hi_b);
+        if (can_a&&can_b) TAKE_BOTH(sa->dma1_end,sb->dma1_end);
     } else if (policy==S2PF_SPLIT_LITE_POLICY){
-        if (can_a&&can_b) TAKE_BOTH(sa->task_start,sb->task_start);
-        if (s2pf_dma1_start_valid(sa,s3a)&&s2pf_dma1_start_valid(sb,s3b))
-            TAKE_BOTH(sa->dma1_end,sb->dma1_end);
-        if (can_b) TAKE_B_ONLY(hi_b);
-    } else if (policy==S2PF_SINGLE_LATEST_POLICY){
-        if (can_a && !can_b) TAKE_A_ONLY(hi_a);
-        else if (can_b && !can_a) TAKE_B_ONLY(hi_b);
+        if (can_a&&can_b) TAKE_BOTH(sa->dma1_end,sb->dma1_end);
+        if (can_b) TAKE_B_ONLY(sb->dma1_end);
+    } else if (policy==S2PF_SINGLE_DMA1_POLICY){
+        if (can_a && !can_b) TAKE_A_ONLY(sa->dma1_end);
+        else if (can_b && !can_a) TAKE_B_ONLY(sb->dma1_end);
     }
 
 #undef TAKE_A_ONLY
 #undef TAKE_B_ONLY
 #undef TAKE_BOTH
 
-    *sa=best_a; *sb=best_b;
+    /* Raw pair is the final policy trial; leave both snaps unchanged. */
 }
 
 /* =========================================================================
@@ -325,7 +266,7 @@ do { \
 static int swiglu_hit(int16_t eid, const snap_t *s, uint32_t t)
 {
     if (s->pf_end < 0 || (uint32_t)s->pf_end > t) return 0;
-    /* PF_EID_GHOST means the S4 window can prefetch whoever arrives next:
+    /* PF_EID_GHOST means the post-down-DMA window can prefetch whoever arrives next:
      * any eid benefits from skip_s1. */
     return s->pf_eid == PF_EID_GHOST || s->pf_eid == eid;
 }
@@ -525,7 +466,7 @@ static uint32_t moe_plan(const moe_request_t *req, plan_t *plan, uint8_t *n_plan
         uint32_t tnow=(t2>t3)?t2:t3;
         int both_idle=(t2==t3);
 
-        /* Inject PF_EID_GHOST into each cluster whose S4 window can fit a
+        /* Inject PF_EID_GHOST into each cluster whose post-down-DMA window fits a
          * ShapeA S1 DMA and whose S4PF segment does not violate BW against
          * the peer cluster's current DMA timeline.
          * PF_EID_GHOST means "whoever gets assigned to this cluster next will
@@ -754,7 +695,7 @@ do { \
             /* Analytical: 3 time pts (idle_t + busy DMA hi-endpoints) x 1 shape */
             uint32_t tpts[3]; int ntp=0;
             tpts[ntp++]=idle_t;
-            { seg_t bsegs[5]; int nbsegs=0; snap_segs(busy_sn,bsegs,&nbsegs);
+            { seg_t bsegs[4]; int nbsegs=0; snap_segs(busy_sn,bsegs,&nbsegs);
               for (int bi=0;bi<nbsegs&&ntp<3;bi++){
                 uint32_t ep=bsegs[bi].hi;
                 if (ep>idle_t){
@@ -773,10 +714,10 @@ do { \
                 uint8_t cf=(uint8_t)down_hit(t0eid,idle_sn,tst);
                 uint8_t s1=2u, s3=2u;  /* ShapeC: fastest; BW conflict handled by next tpt */
                 snap_t sn=mk_snap(tst,s1,s3,t0ntok,t0eid,cc,cf);
-                /* S2 pf attempt (latest valid position) */
-                if (sn.bw_s3>0u && kTd3[s3]<=sn.s2_end-sn.task_start){
-                    uint32_t hi=sn.s2_end-kTd3[s3];
-                    snap_t cand=apply_s2pf(sn,s3,hi);
+                /* S2PF is released by the DFG at dma1_end; no start timestamp
+                 * exists in the compact task payload. */
+                if (sn.bw_s3>0u && kTd3[s3]<=sn.s2_end-sn.dma1_end){
+                    snap_t cand=apply_s2pf(sn,s3,sn.dma1_end);
                     if (cand.s2pf_start>=0){
                         int ok2=(idle_ci==0)?bw_ok(&cand,busy_sn):bw_ok(busy_sn,&cand);
                         if (ok2) sn=cand;
@@ -920,9 +861,9 @@ static moe_status_t lower_plan_timing(const plan_t *plan, uint8_t n_plan,
             /* cluster/weight/shape/alloc_bw/start_cc/end_cc removed */
         }
 
-        /* S4 prefetch: next expert's gate/up via iDMA during S4 window.
+        /* Next-S1 prefetch: gate/up via iDMA after the down DMA completes.
          * Applies regardless of skip_s1: when skip_s1=1, iDMA is idle the
-         * entire task, and dma1_end==est_start which is always <= s4_start. */
+         * entire task. */
         {
             int16_t next_eid=-1;
             for (uint8_t pj=pi+1u;pj<n_plan;pj++){

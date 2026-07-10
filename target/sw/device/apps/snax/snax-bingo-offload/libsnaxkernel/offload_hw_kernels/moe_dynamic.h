@@ -1264,9 +1264,8 @@ static inline uint32_t __moe_dyn_gather_s1_tokens(
      * iDMA 和 xDMA 走不同的物理 AXI 通道，两 cluster 同时 gather 时不争用同一条总线。 */
     uint32_t l3_a_row_stride = st->A_token_bytes + 32u;  /* L3 stride: includes 32-byte padding */
     uint32_t l1_a_row_stride = st->A_token_bytes;        /* L1 stride: packed, no padding */
-    uint32_t *token_offsets = (uint32_t *)(uintptr_t)st->token_offsets_addr;
     uint16_t *token_ids = (uint16_t *)(uintptr_t)st->token_ids_addr;
-    uint32_t expert_token_offset = token_offsets[cfg->expert_id];
+    uint32_t expert_token_offset = cfg->expert_id * st->max_tokens_per_expert;
 
     /* 先做边界检查，再 DMA 提交，避免提交到一半出错留下悬挂传输 */
     for (uint32_t local_t = 0; local_t < cfg->ntokens; local_t++) {

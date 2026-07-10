@@ -68,12 +68,16 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_router_schedule_args {
     uint64_t global_indices_out_addr;
     uint64_t global_scores_out_addr;
     uint64_t expert_token_counts_out_addr;
+    uint64_t expert_token_ids_addr;
+    uint64_t max_tokens_per_expert;
     uint64_t expert_number_each_layer;
     uint64_t individual_expert_number_k;
+#if !defined(MOE_ENABLE_HW_SCHEDULER)
     uint64_t mesh_row;
     uint64_t mesh_col;
     uint64_t router_m1;
     uint64_t router_n1;
+#endif
     uint64_t scratchpad_ptr;
 } __host_bingo_kernel_moe_router_schedule_args_t;
 
@@ -153,33 +157,22 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_scatter_and_pad_input_args {
 
 // MoEPrepare ABI:
 //   pure HW fast build: counts/CAM -> RTL scheduler -> direct L3 stage args.
-//   SW/check builds: request_out_addr/schedule_out_addr remain available.
+//   pure SW build: request_out_addr/schedule_out_addr carry the software ABI.
 __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_prepare_request_args {
     uint64_t expert_token_counts_addr;
     uint64_t cam_state_addr;
-#if !defined(MOE_ENABLE_HW_SCHEDULER) || defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
-    uint64_t request_out_addr;
-    uint64_t schedule_out_addr;
-#endif
-    uint64_t expert_token_offsets_addr;
-    uint64_t expert_token_ids_addr;
-    uint64_t expert_token_kpos_addr;
     uint64_t n_experts;
-    uint64_t topk_indices_l3;
-    uint64_t M_total;
-    uint64_t top_k;
-    uint64_t expert_token_counts_valid;
     uint64_t runtime_state_addr;
     uint64_t c2_stage_base;
     uint64_t c3_stage_base;
     uint64_t dynamic_arg_slot_bytes;
-    uint64_t dynamic_num_slots;
     uint64_t c2_l1_a;
     uint64_t c2_l1_d;
     uint64_t c2_l1_down_d;
     uint64_t c3_l1_a;
     uint64_t c3_l1_d;
     uint64_t c3_l1_down_d;
+#if !defined(MOE_ENABLE_HW_SCHEDULER)
     uint64_t A_token_bytes;
     uint64_t indiv_D_tile_bytes;
     uint64_t indiv_down_D_tile_bytes;
@@ -188,20 +181,37 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_prepare_request_args {
     uint64_t s1_block_count;
     uint64_t s3_block_count;
     uint64_t max_tokens_per_expert;
+    uint64_t request_out_addr;
+    uint64_t schedule_out_addr;
+    uint64_t expert_token_ids_addr;
+    uint64_t topk_indices_l3;
+    uint64_t M_total;
+    uint64_t top_k;
+    uint64_t expert_token_counts_valid;
+    uint64_t dynamic_num_slots;
+#endif
     uint64_t scratchpad_ptr;
 } __host_bingo_kernel_moe_prepare_request_args_t;
 
 // MoEExecute ABI:
 //   pure HW fast build: sync runtime_state and flush active stage args to L1.
-//   SW/check builds may still consume request_addr/schedule_addr.
+//   pure SW build consumes request_addr/schedule_addr.
 __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_execute_args {
-#if !defined(MOE_ENABLE_HW_SCHEDULER) || defined(MOE_ENABLE_HW_SCHEDULER_CHECK)
+    // Per-batch hot prefix. Keep the fields touched by the pure-HW Execute
+    // node contiguous so one cache line supplies its state and DMA operands.
+    uint64_t runtime_state_addr;
+    uint64_t c2_active_state_l1_addr; // contiguous runtime block base
+    uint64_t c3_active_state_l1_addr; // contiguous runtime block base
+    uint64_t c2_dynamic_args_base;    // active-state base + 64B
+    uint64_t c3_dynamic_args_base;    // active-state base + 64B
+    uint64_t c2_stage_base;           // L3 contiguous runtime block base
+    uint64_t c3_stage_base;           // L3 contiguous runtime block base
+    uint64_t dynamic_arg_slot_bytes;
+#if !defined(MOE_ENABLE_HW_SCHEDULER)
     uint64_t request_addr;
     uint64_t schedule_addr;
 #endif
-    uint64_t expert_token_offsets_addr;
     uint64_t expert_token_ids_addr;
-    uint64_t expert_token_kpos_addr;
     uint64_t cam_state_addr;
     uint64_t input_A_l3_base;
     uint64_t topk_indices_l3;
@@ -223,9 +233,6 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_execute_args {
     uint64_t c3_l1_down_d;
     uint64_t c3_l1_d1_scratch;
     uint64_t output_l3_addr;
-    uint64_t runtime_state_addr;
-    uint64_t c2_active_state_l1_addr;
-    uint64_t c3_active_state_l1_addr;
     uint64_t A_token_bytes;
     uint64_t indiv_B_expert_stride;
     uint64_t indiv_down_B_expert_stride;
@@ -250,16 +257,11 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_execute_args {
     uint64_t max_tokens_per_expert;
     uint64_t c2_static_args_base;
     uint64_t c3_static_args_base;
-    uint64_t c2_dynamic_args_base;
-    uint64_t c3_dynamic_args_base;
-    uint64_t dynamic_arg_slot_bytes;
     uint64_t dynamic_num_slots;
     uint64_t scratchpad_ptr;
     // L3 staging buffers: CVA6 writes args here (fast L3 stores),
     // then sys_dma_blk_memcpy flushes to cluster L1 in one burst.
     // Must be >= dynamic_num_slots * dynamic_arg_slot_bytes each.
-    uint64_t c2_stage_base;
-    uint64_t c3_stage_base;
 } __host_bingo_kernel_moe_execute_args_t;
 
 // NOTE: the per-kernel typed arg structs for quantize / dequantize / int32-add /

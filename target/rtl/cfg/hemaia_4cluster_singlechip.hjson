@@ -101,10 +101,10 @@
     //                        S2(meshRow=2,tileSize=8,meshCol=16)
     // tileSize fixed=8; meshCol changes with shape -> N_per_block = N1 x meshCol is shape-dependent
     clusters:[
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
       ],
 
     hemaia_xdma_cfg: {
@@ -208,7 +208,7 @@
     },
     spm_wide: {
       address: 2147483648, // 0x8000_0000
-      length: 33554432,    // 32 MiB 0x200_0000
+      length: 67108864,    // 64 MiB 0x400_0000
       banks: 16,
     },
     wide_zero_mem: {
