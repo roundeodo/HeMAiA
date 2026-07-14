@@ -261,6 +261,12 @@ module ${name}_quad_ctrl
     .bingo_hw_manager_normal_power_level_i     (bingo_hw_manager_norm_power_level            ),
     .bingo_hw_manager_pm_base_addr_i           (bingo_hw_manager_pm_base_addr                ),
     .bingo_hw_manager_core_power_domain_i      (bingo_hw_manager_core_power_domain           ),
+    // This HeMAiA integration uses the legacy autonomous DFS mode. The fork also
+    // exposes an optional host-managed DVFS interface, so tie it off explicitly.
+    .bingo_hw_manager_pm_mode_i                ('0                                           ),
+    .bingo_hw_manager_dvfs_clint_msip_addr_i   ('0                                           ),
+    .bingo_hw_manager_dvfs_ack_i               ('0                                           ),
+    .bingo_hw_manager_dvfs_request_o           (/* unused */                                 ),
     .pm_axi_lite_req_o                         (${quad_ctrl_axi_lite_xbar.in_bingo_hw_scheduler_write_pm.req_name()}),
     .pm_axi_lite_resp_i                        (${quad_ctrl_axi_lite_xbar.in_bingo_hw_scheduler_write_pm.rsp_name()}),
     // DARTS CERF

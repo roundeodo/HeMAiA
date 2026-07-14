@@ -69,6 +69,9 @@ clean: clean-repo clean-bender
 # Execute in SNAX Docker
 DEBUG_LEVEL ?= 0
 PERF_TRACING ?= 1
+NODE_TIMING ?= 0
+MOE_INDIV_BRINGUP ?= 0
+MOE_RUNTIME_TIMING ?= 0
 
 # User flags for SW compilation
 # Useful for enabling debug prints or performance tracing
@@ -76,6 +79,15 @@ PERF_TRACING ?= 1
 USER_FLAGS = -DBINGO_DEBUG_LEVEL=$(DEBUG_LEVEL)
 ifeq ($(PERF_TRACING), 1)
     USER_FLAGS += -DBINGO_PERF_TRACING
+endif
+ifeq ($(NODE_TIMING), 1)
+    USER_FLAGS += -DBINGO_NODE_TIMING
+endif
+ifeq ($(MOE_INDIV_BRINGUP), 1)
+    USER_FLAGS += -DMOE_INDIV_BRINGUP=1
+endif
+ifeq ($(MOE_RUNTIME_TIMING), 1)
+    USER_FLAGS += -DMOE_RUNTIME_TIMING=1
 endif
 
 sw: $(CFG)

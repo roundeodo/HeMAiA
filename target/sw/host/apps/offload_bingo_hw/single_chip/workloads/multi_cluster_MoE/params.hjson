@@ -4,69 +4,57 @@
 #
 # Dual-VersaCore multi_cluster_MoE workload parameters
 #
-# 这个文件只描述“这次 workload 的尺寸和 tile 形状”。
-# main_bingo.py 会拿它来建 DFG，multi_cluster_MoE_datagen.py 会拿它来造数据。
+# 这是模型和 workload 尺寸的唯一编辑入口。不要修改生成的
+# multi_cluster_MoE_data.h 或 offload_bingo_hw.h。
 #
-# 下面这组参数当前对应 M_total = router_M2 × router_M1 × A_meshRow = 1 × 4 × 8 = 32 tokens。
-# input K 维保持 1024；N1 全部压到 1，N2=2 表示 N 方向两个 block。
+# moe_l15_layout.py::derive_workload_params() 只派生一次所有维度、字节数、
+# stride 和 L15 offset；datagen 与 main_bingo.py 都调用该函数。因此修改本
+# 文件后，两份生成物会联动更新，不再各自维护尺寸公式。
+#
+# 注意：这里会联动更新数据、DFG、DMA/GEMM 参数和内存布局；RTL scheduler
+# 内部的归一化代价常数不由本文件生成。改变模型维度后功能 ABI 仍同步，但若
+# 需要最优调度周期，还应针对新维度重新标定硬件代价常数。
+#
+# 当前模型：32 tokens，1024 -> 704 -> 1024，8 个 individual experts，Top-2。
 
 {
+    // Router/shared fused L15 固定使用 S0；individual 运行时仍可由 scheduler
+    // 在 S0/S1/S2 中选择。这里不是模型 hidden size，而是静态节点形状。
     array_shape: 0
 
-    // Dynamic expert task slots per individual-expert cluster.
-    // This must cover the largest number of scheduled tasks assigned to either
-    // C2 or C3. Router TopK can emit more than 4 active experts per side, so
-    // keep the runtime slot count aligned with main_bingo.py's conservative
-    // default instead of truncating Phase 4 lowering.
+    // ------------------------------------------------------------------
+    // 模型级参数
+    // 这里只填写逻辑模型维度。Router/shared/individual 的 M/N/K tile 分解
+    // 全部由 moe_l15_layout.py 根据所选硬件 S0 形状自动推导。
+    //
+    // 约束：
+    //   total_tokens      必须是 meshRow(8) 的整数倍
+    //   hidden_size       必须能被 2*down_meshCol(16) 整除
+    //   intermediate_size 必须能被 2*meshCol(8) 整除
+    //   num_indiv_experts 必须能被 2*meshCol(8) 整除
+    // ------------------------------------------------------------------
+    total_tokens: 32
+    hidden_size: 1024
+    intermediate_size: 704
+    num_indiv_experts: 8
+    // 当前 direct Router ABI 支持 Top-1/Top-2；完整 workload 使用 Top-2。
+    top_k: 2
+    // C0/C1 各固定执行一个 shared expert，因此当前 DFG 必须为 2。
+    num_shared_experts: 2
+
+    // 每个 individual cluster 的静态 DFG slot 数。必须至少覆盖 expert 数；
+    // 增大它会线性增加 DFG node/args 数量，但不会改变模型计算结果。
     moe_dynamic_slot_count: 32
 
-    // Router: K_total=1024, N_router=8, M_total=1×4×8=32 tokens
-    router_K1: 128
-    router_N1: 1
-    router_M1: 4
-    router_K2: 1
-    router_N2: 2
-    router_M2: 1
-
-    // Individual expert gate+up SwiGLU (Mode 0): K_total=1024, N_hidden=8
-    indiv_K1: 128
-    indiv_N1: 64
-    indiv_M1: 4
-    indiv_K2: 1
-    indiv_N2: 2
-    indiv_M2: 1
-
-    // Individual expert down projection (Mode 1): K_down=8, N_out=16
-    indiv_down_K1: 64
-    indiv_down_N1: 64
-    indiv_down_M1: 4
-    indiv_down_K2: 1
-    indiv_down_N2: 2
-    indiv_down_M2: 1
-
-    // Shared experts: same shapes as individual experts
-    shared_K1: 128
-    shared_N1: 64
-    shared_M1: 4
-    shared_K2: 1
-    shared_N2: 2
-    shared_M2: 1
-
-    shared_down_K1: 64
-    shared_down_N1: 64
-    shared_down_M1: 4
-    shared_down_K2: 1
-    shared_down_N2: 2
-    shared_down_M2: 1
-
-    // 给不同矩阵单独覆写 tile 形状。
-    // 这里的意思不是“改硬件阵列”，而是“改这个 workload 里数据怎么切 tile”。
-    // input_A 使用硬件 tile 口径：M_total = router_M2 × router_M1 × A_meshRow = 1 × 4 × 8 = 32 tokens。
-    // down projection 的 B 使用更宽的 meshCol。
-    A_meshRow: 8
-    A_tileSize: 8
-    down_meshCol: 8
-
+    // ------------------------------------------------------------------
+    // 固定硬件形状由 --hwcfg 读取。当前 workload 要求
+    // S0=(meshRow=8,tileSize=8,meshCol=4)，down_meshCol 自动取 2*meshCol。
+    //
+    // token payload = hidden_size * sizeof(INT16) = 1024*2 = 2048B
+    // physical row = payload + 32B bank-rotation padding = 2080B
+    // 32B padding 由初始化节点只写一次，不进入每次 expert 计算路径。
+    // ------------------------------------------------------------------
+    // VersaCore accumulation mode。当前 MoE 路径从零开始累加，不读取旧 C。
     addNonZeroC: 0
     addZeroC: 1
     accumPrevC: 0

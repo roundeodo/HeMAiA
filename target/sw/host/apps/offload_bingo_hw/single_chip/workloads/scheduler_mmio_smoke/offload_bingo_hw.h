@@ -10,11 +10,11 @@
 #include "host.h"
 #include "moe_scheduler_mmio.h"
 
-static inline int scheduler_mmio_wait_plan(uint64_t *status_out)
+static inline int scheduler_mmio_wait_task(uint64_t *status_out)
 {
     for (uint32_t cycles = 0; cycles < 1000000u; cycles++) {
         uint64_t status = moe_sched_read64(MOE_SCHED_STATUS);
-        if ((status & (MOE_SCHED_STATUS_PLAN_VALID |
+        if ((status & (MOE_SCHED_STATUS_TASK_VALID |
                        MOE_SCHED_STATUS_ACTIVE_EMPTY)) != 0u) {
             *status_out = status;
             return 0;
@@ -54,68 +54,67 @@ static inline uint32_t scheduler_mmio_smoke_round(void)
     moe_sched_write64(MOE_SCHED_CTRL,
                       MOE_SCHED_CTRL_INIT | MOE_SCHED_CTRL_START);
 
-    if (scheduler_mmio_wait_plan(&status) != 0) {
-        printf_safe("[SCHED_SMOKE] timeout waiting plan, status=0x%lx\r\n",
+    if (scheduler_mmio_wait_task(&status) != 0) {
+        printf_safe("[SCHED_SMOKE] timeout waiting task, status=0x%lx\r\n",
                     status);
         return errors + 1u;
     }
 
     printf_safe("[SCHED_SMOKE] status=0x%lx\r\n", status);
-    if ((status & MOE_SCHED_STATUS_PLAN_VALID) == 0u) {
-        printf_safe("[SCHED_SMOKE] plan_valid not set\r\n");
+    if ((status & MOE_SCHED_STATUS_TASK_VALID) == 0u) {
+        printf_safe("[SCHED_SMOKE] task_valid not set\r\n");
         errors++;
     }
 
-    uint64_t plan0 = moe_sched_read64(moe_sched_plan_entry_data0_off(0u));
+    uint64_t task_word0 = moe_sched_read64(MOE_SCHED_TASK_DATA_BASE);
     uint32_t ctrl =
-        (uint32_t)((plan0 >> MOE_SCHED_PLAN_CTRL_LSB) &
-                   MOE_SCHED_PLAN_CTRL_MASK);
+        (uint32_t)((task_word0 >> MOE_SCHED_TASK_WORD_CTRL_LSB) &
+                   MOE_SCHED_TASK_WORD_CTRL_MASK);
     uint32_t task0_has_s2pf =
-        (uint32_t)((plan0 >> MOE_SCHED_PLAN_HAS_S2PF_LSB) & 0x1u);
+        (uint32_t)((task_word0 >> MOE_SCHED_TASK_WORD_HAS_S2PF_LSB) & 0x1u);
     uint32_t task0_skip_s3 =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_SKIP_S3_LSB) & 0x1u);
     uint32_t task0_skip_s1 =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_SKIP_S1_LSB) & 0x1u);
     uint32_t task0_s3 =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_SHAPE_S3_LSB) &
-                   MOE_SCHED_PLAN_SHAPE_MASK);
+                   MOE_SCHED_TASK_WORD_SHAPE_MASK);
     uint32_t task0_s1 =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_SHAPE_S1_LSB) &
-                   MOE_SCHED_PLAN_SHAPE_MASK);
+                   MOE_SCHED_TASK_WORD_SHAPE_MASK);
     uint32_t task0_tok_start =
-        (uint32_t)((plan0 >> MOE_SCHED_PLAN_TOKEN_START_LSB) &
-                   MOE_SCHED_PLAN_NTOK_MASK);
+        (uint32_t)((task_word0 >> MOE_SCHED_TASK_WORD_TOKEN_START_LSB) &
+                   MOE_SCHED_TASK_WORD_NTOK_MASK);
     uint32_t task0_ntok =
-        (uint32_t)((plan0 >> MOE_SCHED_PLAN_NTOK_LSB) &
-                   MOE_SCHED_PLAN_NTOK_MASK);
+        (uint32_t)((task_word0 >> MOE_SCHED_TASK_WORD_NTOK_LSB) &
+                   MOE_SCHED_TASK_WORD_NTOK_MASK);
     uint32_t task0_eid =
-        (uint32_t)((plan0 >> MOE_SCHED_PLAN_EID_LSB) &
-                   MOE_SCHED_PLAN_EID_MASK);
+        (uint32_t)((task_word0 >> MOE_SCHED_TASK_WORD_EID_LSB) &
+                   MOE_SCHED_TASK_WORD_EID_MASK);
     uint32_t task0_cluster =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_CLUSTER_LSB) & 0x1u);
-    uint32_t task0_inline_patch =
-        (uint32_t)((plan0 >> MOE_SCHED_PLAN_INLINE_PATCH_LSB) & 0xffu);
+    uint32_t task0_s4pf_desc =
+        (uint32_t)((task_word0 >> MOE_SCHED_TASK_WORD_S4PF_DESC_LSB) & 0xffu);
 
-    uint32_t plan_count = (uint32_t)(
-        (status >> MOE_SCHED_STATUS_PLAN_COUNT_VEC_LSB) & 0x3u);
+    uint32_t task_count = (uint32_t)(
+        (status >> MOE_SCHED_STATUS_TASK_COUNT_LSB) & 0xfu);
 
-    printf_safe("[SCHED_SMOKE] plan_count=%u\r\n", plan_count);
-    printf_safe("[SCHED_SMOKE] plan0=0x%lx cluster=%u eid=%u ntok=%u tok_start=%u s1=%u s3=%u skip_s1=%u skip_s3=%u has_s2pf=%u inline_patch=0x%x\r\n",
-                plan0, task0_cluster, task0_eid, task0_ntok, task0_tok_start,
+    printf_safe("[SCHED_SMOKE] task_count=%u\r\n", task_count);
+    printf_safe("[SCHED_SMOKE] task0=0x%lx cluster=%u eid=%u ntok=%u tok_start=%u s1=%u s3=%u skip_s1=%u skip_s3=%u has_s2pf=%u s4pf_desc=0x%x\r\n",
+                task_word0, task0_cluster, task0_eid, task0_ntok, task0_tok_start,
                 task0_s1, task0_s3, task0_skip_s1, task0_skip_s3,
-                task0_has_s2pf, task0_inline_patch);
+                task0_has_s2pf, task0_s4pf_desc);
 
-    if (plan_count == 0u || plan_count > 2u) {
-        printf_safe("[SCHED_SMOKE] unexpected plan metadata\r\n");
+    if (task_count == 0u || task_count > MOE_SCHED_TASK_FIFO_DEPTH) {
+        printf_safe("[SCHED_SMOKE] unexpected task FIFO count\r\n");
         errors++;
     }
     if (task0_eid != eid0 || task0_ntok != ntok0) {
-        printf_safe("[SCHED_SMOKE] unexpected plan0 task fields\r\n");
+        printf_safe("[SCHED_SMOKE] unexpected task0 fields\r\n");
         errors++;
     }
 
-    moe_sched_write64(MOE_SCHED_ROUND_COMMIT,
-                      moe_sched_pack_round_commit(1u));
+    moe_sched_write64(MOE_SCHED_TASK_POP, 1u);
 
     return errors;
 }

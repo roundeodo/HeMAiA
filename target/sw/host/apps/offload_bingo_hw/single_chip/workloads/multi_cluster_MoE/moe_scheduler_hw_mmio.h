@@ -9,7 +9,6 @@
 
 #include "chip_id.h"
 #include "io.h"
-#include "moe_scheduler.h"
 
 #ifndef MOE_SCHED_LOCAL_BASE
 #define MOE_SCHED_LOCAL_BASE 0x05010000ull
@@ -18,47 +17,40 @@
 #define MOE_SCHED_CTRL      0x00u
 #define MOE_SCHED_STATUS    0x08u
 #define MOE_SCHED_CONFIG    0x10u
-#define MOE_SCHED_ROUND_COMMIT 0x68u
+#define MOE_SCHED_TASK_POP 0x68u
 #define MOE_SCHED_HEAD_QUAD        0xa8u
 #define MOE_SCHED_RESERVE_QUAD     0xb0u
 #define MOE_SCHED_HEAD_PUSH_QUAD   0xb8u
-#define MOE_SCHED_PLAN_ENTRY_BASE  0x100u
-#define MOE_SCHED_PLAN_ENTRY_STRIDE 0x20u
-#define MOE_SCHED_PLAN_ENTRY_DATA0_OFF 0x00u
-#define MOE_SCHED_PLAN_ENTRY_DATA1_OFF 0x08u
+#define MOE_SCHED_TASK_DATA_BASE   0x100u
+#define MOE_SCHED_TASK_DATA_STRIDE 0x08u
 
 #define MOE_SCHED_CTRL_INIT         (1ull << 0)
 #define MOE_SCHED_CTRL_START        (1ull << 1)
 
-#define MOE_SCHED_STATUS_PLAN_VALID   (1ull << 3)
+#define MOE_SCHED_STATUS_TASK_VALID   (1ull << 3)
 #define MOE_SCHED_STATUS_ACTIVE_EMPTY (1ull << 5)
 #define MOE_SCHED_STATUS_REFILL_REQ   (1ull << 6)
-#define MOE_SCHED_STATUS_FIFO_COUNT_LSB 36u
-#define MOE_SCHED_STATUS_PLAN_COUNT_VEC_LSB 40u
-#define MOE_SCHED_PLAN_FIFO_DEPTH 4u
+#define MOE_SCHED_STATUS_TASK_COUNT_LSB 36u
+#define MOE_SCHED_TASK_FIFO_DEPTH 8u
 
-#define MOE_SCHED_E_MAX      64u
 #define MOE_SCHED_EID_RAW_W  6u
 #define MOE_SCHED_NTOK_W     9u
-#define MOE_SCHED_NR_W       7u
-#define MOE_SCHED_T_W        16u
 
-#define MOE_SCHED_PLAN_EID_LSB            0u
-#define MOE_SCHED_PLAN_TOKEN_START_LSB    6u
-#define MOE_SCHED_PLAN_NTOK_LSB           15u
-#define MOE_SCHED_PLAN_HAS_S2PF_LSB       24u
-#define MOE_SCHED_PLAN_CTRL_LSB           25u
-#define MOE_SCHED_PLAN_M_S2_LSB           38u
-#define MOE_SCHED_PLAN_M_S4_LSB           47u
-#define MOE_SCHED_PLAN_INLINE_PATCH_LSB   56u
+#define MOE_SCHED_TASK_WORD_EID_LSB            0u
+#define MOE_SCHED_TASK_WORD_TOKEN_START_LSB    6u
+#define MOE_SCHED_TASK_WORD_NTOK_LSB           15u
+#define MOE_SCHED_TASK_WORD_HAS_S2PF_LSB       24u
+#define MOE_SCHED_TASK_WORD_CTRL_LSB           25u
+#define MOE_SCHED_TASK_WORD_M_S2_LSB           38u
+#define MOE_SCHED_TASK_WORD_M_S4_LSB           47u
+#define MOE_SCHED_TASK_WORD_S4PF_DESC_LSB      56u
 
-#define MOE_SCHED_PLAN_NTOK_MASK          0x1ffull
-#define MOE_SCHED_PLAN_EID_MASK           0x3full
-#define MOE_SCHED_PLAN_SHAPE_MASK         0x3ull
-#define MOE_SCHED_PLAN_LOCAL_SLOT_MASK    0x3full
-#define MOE_SCHED_PLAN_DMA_MASK           0x3ull
-#define MOE_SCHED_PLAN_M_EXEC_MASK        0x1ffull
-#define MOE_SCHED_PLAN_CTRL_MASK          0x1fffull
+#define MOE_SCHED_TASK_WORD_NTOK_MASK          0x1ffull
+#define MOE_SCHED_TASK_WORD_EID_MASK           0x3full
+#define MOE_SCHED_TASK_WORD_SHAPE_MASK         0x3ull
+#define MOE_SCHED_TASK_WORD_LOCAL_SLOT_MASK    0x3full
+#define MOE_SCHED_TASK_WORD_M_EXEC_MASK        0x1ffull
+#define MOE_SCHED_TASK_WORD_CTRL_MASK          0x1fffull
 
 #define MOE_SCHED_TASK_CTRL_SKIP_S1_LSB    0u
 #define MOE_SCHED_TASK_CTRL_SKIP_S3_LSB    1u
@@ -67,10 +59,10 @@
 #define MOE_SCHED_TASK_CTRL_CLUSTER_LSB    6u
 #define MOE_SCHED_TASK_CTRL_LOCAL_SLOT_LSB 7u
 
-#define MOE_SCHED_INLINE_PATCH_VALID_LSB       0u
-#define MOE_SCHED_INLINE_PATCH_NO_COPY_LSB     1u
-#define MOE_SCHED_INLINE_PATCH_LOCAL_SLOT_LSB  2u
-#define MOE_SCHED_INLINE_PATCH_SLOT_MASK       0x3full
+#define MOE_SCHED_S4PF_DESC_VALID_LSB       0u
+#define MOE_SCHED_S4PF_DESC_NO_COPY_LSB     1u
+#define MOE_SCHED_S4PF_DESC_TARGET_EID_LSB  2u
+#define MOE_SCHED_S4PF_DESC_TARGET_EID_MASK 0x3full
 
 static inline uintptr_t moe_sched_base(void)
 {

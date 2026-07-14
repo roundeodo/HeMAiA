@@ -24,6 +24,18 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dummy(void *arg){
     return BINGO_RET_SUCC;
 }
 
+// Dependency-only relay. It lets the DFG join dependencies on a device lane
+// without inserting a blocked synchronization descriptor into the host lane.
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_completion_relay(void *arg){
+    bingo_kernel_scratchpad_t* sp =
+        BINGO_GET_SP(arg, __snax_bingo_kernel_dummy_args_t);
+    BINGO_TRACE_MARKER(BINGO_TRACE_COMPLETION_RELAY_START);
+    sp->return_value = 0;
+    sp->num_return_values = 0;
+    BINGO_TRACE_MARKER(BINGO_TRACE_COMPLETION_RELAY_END);
+    return BINGO_RET_SUCC;
+}
+
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_entry_point(void *arg){
     // This is a special kernel to indicate the bingo hw manager loop has started
     // In the future we can add some content here

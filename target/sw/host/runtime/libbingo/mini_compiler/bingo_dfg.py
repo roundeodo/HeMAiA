@@ -40,6 +40,8 @@ from bingo_kernel_args import (
     BINGO_GATING_MODE_STATIC,
 )
 
+DEP_TAG_WIDTH = 4
+
 
 class BingoDFG(DiGraphWrapper[BingoNode]):
     """Data Flow Graph (DFG) for Bingo."""
@@ -469,12 +471,13 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                     dummy_check_node.remote_dep_set_all = False
                     self.bingo_insert_node_between(pred, cur_node, dummy_check_node)
 
-    def bingo_transform_add_core_sequencing_edges(self) -> int:
-        """Add edges between consecutive tasks on the same core.
+    def bingo_transform_add_resource_sequencing_edges(self) -> int:
+        """Add edges between consecutive tasks on one physical resource.
 
-        Ensures deterministic execution order for tasks sharing a core,
-        even when no explicit data dependency exists between them.
-        Without these edges, the HW scheduler could dispatch same-core
+        Ensures deterministic execution order for tasks sharing one
+        ``(chiplet, cluster, core)`` resource, even when no explicit data
+        dependency exists between them. Without these edges, the HW scheduler
+        could dispatch same-resource
         tasks in any topological order, leading to non-deterministic
         behavior and harder-to-debug timing.
 
@@ -496,17 +499,17 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         topo_order = list(nx.topological_sort(self))
 
         # Group nodes by their (chiplet, cluster, core) assignment
-        core_groups: dict[tuple, list[BingoNode]] = defaultdict(list)
+        resource_groups: dict[tuple, list[BingoNode]] = defaultdict(list)
         for node in topo_order:
             key = (
                 node.assigned_chiplet_id,
                 node.assigned_cluster_id,
                 node.assigned_core_id,
             )
-            core_groups[key].append(node)
+            resource_groups[key].append(node)
 
         edges_added = 0
-        for (chip, cl, core), nodes in core_groups.items():
+        for (chip, cl, core), nodes in resource_groups.items():
             # nodes are already in topological order
             for i in range(len(nodes) - 1):
                 prev_node = nodes[i]
@@ -520,10 +523,126 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
 
         if edges_added > 0:
             print(
-                f"Core sequencing: added {edges_added} edges across "
-                f"{len(core_groups)} core groups"
+                f"Resource sequencing: added {edges_added} edges across "
+                f"{len(resource_groups)} resource groups"
             )
         return edges_added
+
+    def bingo_transform_dfg_allocate_dep_tags(self, tag_width: int) -> None:
+        """Assign one identity tag to every final dependency set/check pair."""
+        max_tags = 1 << tag_width
+        topo = list(nx.topological_sort(self))
+        position = {node: index for index, node in enumerate(topo)}
+
+        cells = {}
+        set_edge_count = {}
+        check_edge_count = {}
+        for producer, consumer in self.edges():
+            if not (producer.dep_set_enable and consumer.dep_check_enable):
+                continue
+            producer_core = producer.assigned_core_id
+            consumer_core = consumer.assigned_core_id
+            if (
+                producer_core not in consumer.dep_check_list
+                or consumer_core not in producer.dep_set_list
+            ):
+                continue
+            key = (
+                consumer.assigned_chiplet_id,
+                consumer.assigned_cluster_id,
+                consumer_core,
+                producer_core,
+            )
+            cells.setdefault(key, []).append((producer, consumer))
+            set_edge_count[producer] = set_edge_count.get(producer, 0) + 1
+            check_edge_count[consumer] = check_edge_count.get(consumer, 0) + 1
+
+        multi_endpoint_nodes = [
+            node.node_name
+            for counts in (set_edge_count, check_edge_count)
+            for node, count in counts.items()
+            if count > 1
+        ]
+        if multi_endpoint_nodes:
+            raise NotImplementedError(
+                "dependency tag allocation requires one final edge per set/check: "
+                + ", ".join(multi_endpoint_nodes)
+            )
+
+        happens_before = nx.DiGraph()
+        happens_before.add_nodes_from(self.nodes())
+        happens_before.add_edges_from(self.edges())
+        nodes_by_resource = {}
+        for node in topo:
+            resource = (
+                node.assigned_chiplet_id,
+                node.assigned_cluster_id,
+                node.assigned_core_id,
+            )
+            nodes_by_resource.setdefault(resource, []).append(node)
+        for sequence in nodes_by_resource.values():
+            for first, second in zip(sequence, sequence[1:]):
+                happens_before.add_edge(first, second)
+
+        for key, edges in cells.items():
+            edges.sort(key=lambda edge: (position[edge[0]], position[edge[1]]))
+            edge_count = len(edges)
+            reachable = [
+                nx.descendants(happens_before, consumer)
+                for _, consumer in edges
+            ]
+
+            matching_graph = nx.Graph()
+            left_nodes = [("L", index) for index in range(edge_count)]
+            for index in range(edge_count):
+                matching_graph.add_node(("L", index))
+                matching_graph.add_node(("R", index))
+            for first in range(edge_count):
+                for second in range(edge_count):
+                    if first == second:
+                        continue
+                    second_producer = edges[second][0]
+                    if (
+                        second_producer is edges[first][1]
+                        or second_producer in reachable[first]
+                    ):
+                        matching_graph.add_edge(("L", first), ("R", second))
+
+            matching = (
+                nx.algorithms.bipartite.hopcroft_karp_matching(
+                    matching_graph, top_nodes=left_nodes
+                )
+                if matching_graph.number_of_edges()
+                else {}
+            )
+            successor = {}
+            has_predecessor = set()
+            for node, match in matching.items():
+                if node[0] == "L":
+                    successor[node[1]] = match[1]
+                    has_predecessor.add(match[1])
+
+            tag_by_edge = {}
+            tag_count = 0
+            for edge_index in range(edge_count):
+                if edge_index in has_predecessor:
+                    continue
+                current = edge_index
+                while True:
+                    tag_by_edge[current] = tag_count
+                    if current not in successor:
+                        break
+                    current = successor[current]
+                tag_count += 1
+
+            if tag_count > max_tags:
+                raise ValueError(
+                    f"dependency cell {key} needs {tag_count} tags, "
+                    f"but hardware provides {max_tags}"
+                )
+            for edge_index, (producer, consumer) in enumerate(edges):
+                producer.dep_set_tag = tag_by_edge[edge_index]
+                consumer.dep_check_tag = tag_by_edge[edge_index]
 
     def bingo_assign_normal_node_dep_check_info(self) -> None:
         """Assign the dep check info for normal and gating nodes."""
@@ -1050,6 +1169,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         packed_val |= dep_check_code_val << current_shift
         current_shift += num_cores
 
+        # dep_check_tag (must match bingo_hw_manager DepTagWidth)
+        packed_val |= node.dep_check_tag << current_shift
+        current_shift += DEP_TAG_WIDTH
+
         # 7. dep_set_info
 
         # dep_set_en (1 bit)
@@ -1076,6 +1199,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             dep_set_code_val |= 1 << core_id
         packed_val |= dep_set_code_val << current_shift
         current_shift += num_cores
+
+        # dep_set_tag (must match bingo_hw_manager DepTagWidth)
+        packed_val |= node.dep_set_tag << current_shift
+        current_shift += DEP_TAG_WIDTH
 
         # Check if we exceeded 64 bits
         if current_shift > 64:
@@ -1151,6 +1278,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         )
         current_shift += num_cores
 
+        fields["dep_check_tag"] = (packed_val >> current_shift) & (
+            (1 << DEP_TAG_WIDTH) - 1
+        )
+        current_shift += DEP_TAG_WIDTH
+
         # 7. dep_set_info
         fields["dep_set_en"] = (packed_val >> current_shift) & 0x1
         current_shift += 1
@@ -1170,6 +1302,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
 
         fields["dep_set_code"] = (packed_val >> current_shift) & ((1 << num_cores) - 1)
         current_shift += num_cores
+
+        fields["dep_set_tag"] = (packed_val >> current_shift) & (
+            (1 << DEP_TAG_WIDTH) - 1
+        )
+        current_shift += DEP_TAG_WIDTH
 
         return fields
 
@@ -1504,50 +1641,83 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         kernel_name_list += "};\n"
         return kernel_name_list
 
+    def _resource_balanced_topological_sort(self, chiplet_id: int) -> list:
+        """Return a topological order interleaved by ``(cluster, core)``.
+
+        Bingo routes one global descriptor stream into independent physical
+        resource queues. Interleaving ready nodes prevents a long run for one
+        resource from filling its queue and stalling descriptors for others.
+        """
+        from collections import defaultdict
+
+        local_nodes = {
+            node
+            for node in self.nodes
+            if node.assigned_chiplet_id == chiplet_id
+        }
+        if not local_nodes:
+            return []
+
+        in_degree = {node: 0 for node in local_nodes}
+        for node in local_nodes:
+            for succ in self.successors(node):
+                if succ in local_nodes:
+                    in_degree[succ] += 1
+
+        ready_by_resource = defaultdict(list)
+        for node in local_nodes:
+            if in_degree[node] == 0:
+                key = (node.assigned_cluster_id, node.assigned_core_id)
+                ready_by_resource[key].append(node)
+
+        resources = sorted({
+            (node.assigned_cluster_id, node.assigned_core_id)
+            for node in local_nodes
+        })
+        for nodes in ready_by_resource.values():
+            nodes.sort(key=lambda node: node.node_id)
+
+        result = []
+        last_resource_idx = -1
+        while any(ready_by_resource.values()):
+            chosen_node = None
+            chosen_resource_idx = -1
+            for offset in range(1, len(resources) + 1):
+                resource_idx = (last_resource_idx + offset) % len(resources)
+                resource = resources[resource_idx]
+                if ready_by_resource[resource]:
+                    chosen_node = ready_by_resource[resource].pop(0)
+                    chosen_resource_idx = resource_idx
+                    break
+
+            if chosen_node is None:
+                break
+
+            result.append(chosen_node)
+            last_resource_idx = chosen_resource_idx
+            for succ in self.successors(chosen_node):
+                if succ not in local_nodes:
+                    continue
+                in_degree[succ] -= 1
+                if in_degree[succ] == 0:
+                    key = (succ.assigned_cluster_id, succ.assigned_core_id)
+                    ready_by_resource[key].append(succ)
+                    ready_by_resource[key].sort(key=lambda node: node.node_id)
+
+        if len(result) != len(local_nodes):
+            raise nx.NetworkXUnfeasible("DFG contains a cycle")
+        return result
+
     def bingo_emit_task_desc_list(self, target_chiplet_id: int = None) -> str:
         """Emit the task description list in the DFG."""
         task_description_list = ""
-
-        # Use topological sort, but ensure Dummy Set nodes
-        # appear immediately after their source node.
-        # 1. Get topological sort
-        topo_nodes = list(nx.topological_sort(self))
-        all_nodes = topo_nodes
-        # # 2. Apply grouping logic
-        # all_nodes = []
-        # visited = set()
-
-        # for node in topo_nodes:
-        #     if node in visited:
-        #         continue
-
-        #     all_nodes.append(node)
-        #     visited.add(node)
-
-        #     # Find successors that are dummy set nodes
-        #     # These nodes must follow the current node immediately in the descriptor list
-        #     successors = list(self.successors(node))
-        #     dummy_set_succs = [
-        #         s for s in successors
-        #         if s.node_type == "dummy" and s.dep_set_enable
-        #     ]
-
-        #     # Sort by ID for determinism
-        #     dummy_set_succs.sort(key=lambda x: x.node_id)
-
-        #     for dummy in dummy_set_succs:
-        #         if dummy not in visited:
-        #             all_nodes.append(dummy)
-        #             visited.add(dummy)
 
         chiplets_to_process = (
             [target_chiplet_id] if target_chiplet_id is not None else self.chiplet_ids
         )
 
         for chiplet_id in chiplets_to_process:
-            local_nodes = [
-                node for node in all_nodes if node.assigned_chiplet_id == chiplet_id
-            ]
+            local_nodes = self._resource_balanced_topological_sort(chiplet_id)
             num_local_nodes = len(local_nodes)
 
             # Emit num_tasks at the beginning
@@ -1570,8 +1740,8 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                     comment = f"// Node ID {node.node_id}\n"
                     comment += f"    // Fields: Type={fields['task_type']}, TaskID={fields['task_id']}\n"
                     comment += f"    //         Assigned: Chiplet={fields['assigned_chiplet_id']:02x}, Cluster={fields['assigned_cluster_id']}, Core={fields['assigned_core_id']}\n"
-                    comment += f"    //         DepCheck: En={fields['dep_check_en']}, Code=0b{fields['dep_check_code']:0{self.num_cores_per_cluster}b}\n"
-                    comment += f"    //         DepSet:   En={fields['dep_set_en']}, All={fields['dep_set_all']}, Chiplet={fields['dep_set_chiplet_id']:02x}, Cluster={fields['dep_set_cluster_id']}, Code=0b{fields['dep_set_code']:0{self.num_cores_per_cluster}b}"
+                    comment += f"    //         DepCheck: En={fields['dep_check_en']}, Code=0b{fields['dep_check_code']:0{self.num_cores_per_cluster}b}, Tag={fields['dep_check_tag']}\n"
+                    comment += f"    //         DepSet:   En={fields['dep_set_en']}, All={fields['dep_set_all']}, Chiplet={fields['dep_set_chiplet_id']:02x}, Cluster={fields['dep_set_cluster_id']}, Code=0b{fields['dep_set_code']:0{self.num_cores_per_cluster}b}, Tag={fields['dep_set_tag']}"
 
                     task_description_list += f"bingo_hw_scheduler_task_desc_list_chip_{chiplet_id:02x}[{idx}] = 0x{packed_val:016X}; {comment}\n"
 
@@ -1772,11 +1942,18 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                 + "\n".join(f"- {failure}" for failure in failures)
             )
 
-    def _emit_headers(self, f, extra_include_header_list):
+    def _emit_headers(
+        self,
+        f,
+        extra_include_header_list,
+        pre_host_include_header_list=None,
+    ):
         """Emit C header includes."""
         f.write("// Auto-generated offload_hw_bingo.h\n")
         f.write("#pragma once\n")
         f.write('#include "libbingo/bingo_api.h"\n')
+        for include in pre_host_include_header_list or []:
+            f.write(f'#include "{include}"\n')
         f.write('#include "host.h"\n')
         for include in extra_include_header_list:
             f.write(f'#include "{include}"\n')
@@ -1851,7 +2028,15 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             f"        uint64_t* host_kernel_list_chip_{chiplet_id:02x} = (uint64_t*)bingo_l3_alloc(0x{chiplet_id:02x}, num_host_tasks_chip_{chiplet_id:02x} * sizeof(uint64_t));\n\n"
         )
 
-    def _emit_task_initialization(self, f, chiplet_id, sorted_nodes, handle_name_map):
+    def _emit_task_initialization(
+        self,
+        f,
+        chiplet_id,
+        sorted_nodes,
+        handle_name_map,
+        profile_kernel_prefix=None,
+        profile_condition=None,
+    ):
         """Emit initialization for task arguments + per-kernel scratchpad."""
         f.write("        // 3. Task Arguments Init\n")
 
@@ -1880,6 +2065,42 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                 )
             node._scratchpad_c_var = sp_var
         f.write("\n")
+
+        profile_nodes = []
+        if profile_kernel_prefix:
+            profile_nodes = [
+                node
+                for node in local_nodes
+                if node.kernel_name
+                and node.kernel_name.startswith(profile_kernel_prefix)
+                and node._scratchpad_c_var
+            ]
+        if profile_kernel_prefix:
+            f.write(f"        #if {profile_condition}\n")
+            f.write(
+                f"        const uint32_t bingo_profile_sp_count_chip_{chiplet_id:02x} = {len(profile_nodes)}u;\n"
+            )
+            if profile_nodes:
+                f.write(
+                    f"        uint64_t* bingo_profile_sp_addrs_chip_{chiplet_id:02x} = "
+                    f"(uint64_t*)bingo_l3_alloc(0x{chiplet_id:02x}, "
+                    f"bingo_profile_sp_count_chip_{chiplet_id:02x} * sizeof(uint64_t));\n"
+                )
+            else:
+                f.write(
+                    f"        uint64_t* bingo_profile_sp_addrs_chip_{chiplet_id:02x} = "
+                    f"(uint64_t*)0;\n"
+                )
+            for profile_idx, node in enumerate(profile_nodes):
+                sp_var = node._scratchpad_c_var
+                f.write(
+                    f"        {sp_var}->reserved[MOE_SP_PROFILE_MAGIC_IDX] = 0u;\n"
+                )
+                f.write(
+                    f"        bingo_profile_sp_addrs_chip_{chiplet_id:02x}[{profile_idx}] = "
+                    f"(uint64_t)(uintptr_t){sp_var};\n"
+                )
+            f.write("        #endif\n\n")
 
         # Now wire SW guard fields — gating node scratchpad C vars are all known
         for node in local_nodes:
@@ -2019,6 +2240,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                     f.write(
                         f"        host_arg_list_chip_{chiplet_id:02x}[{host_task_idx}] = (uint64_t)(uintptr_t){args_var};\n"
                     )
+                    if hasattr(node.kernel_args, "get_post_init_code"):
+                        for line in node.kernel_args.get_post_init_code(
+                            args_var, handle_name_map
+                        ):
+                            f.write(f"        {line}\n")
                 else:
                     if "exit" in kernel_name:
                         f.write(
@@ -2136,6 +2362,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         output_path: str,
         app_name: str,
         post_execute_code: list[str] | None = None,
+        pre_host_include_header_list: list[str] | None = None,
+        profile_kernel_prefix: str | None = None,
+        profile_condition: str | None = None,
+        profile_report_function: str | None = None,
     ) -> None:
         """Emit the offload_hw_bingo.h file with kernel_execution logic."""
 
@@ -2148,7 +2378,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         # 2. Start emitting C code
         with open(output_path, "w") as f:
             # Step 1: Emit Headers
-            self._emit_headers(f, extra_include_header_list)
+            self._emit_headers(
+                f,
+                extra_include_header_list,
+                pre_host_include_header_list,
+            )
 
             # Step 2: Emit Debug Kernel List
             self._emit_debug_kernel_list(f)
@@ -2176,11 +2410,25 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
 
                 # D. Emit Task Initialization
                 self._emit_task_initialization(
-                    f, chiplet_id, sorted_nodes, handle_name_map
+                    f,
+                    chiplet_id,
+                    sorted_nodes,
+                    handle_name_map,
+                    profile_kernel_prefix,
+                    profile_condition,
                 )
 
                 # E. Emit Scheduler Launch
                 self._emit_scheduler_launch(f, chiplet_id)
+
+                if profile_kernel_prefix and profile_report_function:
+                    f.write(f"\n        #if {profile_condition}\n")
+                    f.write(
+                        f"        {profile_report_function}("
+                        f"bingo_profile_sp_addrs_chip_{chiplet_id:02x}, "
+                        f"bingo_profile_sp_count_chip_{chiplet_id:02x});\n"
+                    )
+                    f.write("        #endif\n")
 
                 # F. Emit Post-Execute Code (runs after scheduler completes)
                 if post_execute_code:
@@ -2200,6 +2448,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         output_file_name: str,
         extra_include_header_list: list[str] | None,
         post_execute_code: list[str] | None = None,
+        pre_host_include_header_list: list[str] | None = None,
+        profile_kernel_prefix: str | None = None,
+        profile_condition: str | None = None,
+        profile_report_function: str | None = None,
     ) -> None:
         """Compile the DFG by assigning dep info and emitting C code."""
         # 1. Transformations
@@ -2214,7 +2466,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         self.bingo_compile_conditional_regions()
         self._validate_cerf_cross_group_edges()
         # Add Dummy Set/Check Nodes
-        self.bingo_transform_add_core_sequencing_edges()
+        self.bingo_transform_add_resource_sequencing_edges()
         self.bingo_transform_dfg_add_dummy_set_nodes()
         self.bingo_transform_dfg_add_dummy_check_nodes()
         self.bingo_visualize_dfg(os.path.join(output_dir, "final_dfg"))
@@ -2222,6 +2474,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         # Assign Dep Info
         self.bingo_assign_normal_node_dep_set_info()
         self.bingo_assign_normal_node_dep_check_info()
+        self.bingo_transform_dfg_allocate_dep_tags(DEP_TAG_WIDTH)
 
         # 2. Emit C Code
         self.bingo_emit_offload_c_code(
@@ -2229,4 +2482,8 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             output_path=os.path.join(output_dir, output_file_name),
             extra_include_header_list=extra_include_header_list,
             post_execute_code=post_execute_code,
+            pre_host_include_header_list=pre_host_include_header_list,
+            profile_kernel_prefix=profile_kernel_prefix,
+            profile_condition=profile_condition,
+            profile_report_function=profile_report_function,
         )

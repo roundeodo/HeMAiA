@@ -1,0 +1,5 @@
+util/sim/xdma/xdma_ops_lib.py:13:#     Load_input (iDMA L3->L1) -> xDMA op -> Store (L1->L3) -> Host check
+target/sw/host/apps/offload_bingo_hw/single_chip/workloads/xdma_1d_1cluster/Makefile:8:#   Load (iDMA L3->L1) -> xDMA 1d_copy (L1->L1) -> Store (L1->L3) -> Host check.
+target/sw/device/apps/snax/snax-bingo-offload/libsnaxkernel/offload_sw_kernels/gemm.h:205:        // L1-vs-L3 range checks.
+target/sw/host/apps/offload_bingo_hw/single_chip/workloads/multi_cluster_MoE_test/README.md:76:2. Cluster iDMA L1->L1: no cluster/SoC CDC; local TCDM read/write arbitration
+target/sw/host/apps/offload_bingo_hw/single_chip/workloads/multi_cluster_MoE_test/main_bingo.py:359:    # Same-cluster L1-to-L1 traffic stays behind the cluster/SoC CDC.  The

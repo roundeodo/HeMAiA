@@ -77,6 +77,9 @@
       // number of pending transactions on the narrow/wide network
       narrow_trans: 32,
       wide_trans: 32,
+      // Avoid the observed every-fifth-cycle stall caused by 4-entry CDC
+      // FIFOs and the two-stage Gray-pointer synchronizer on the 512-bit path.
+      wide_cdc_log_depth: 3,
       wide_xbar: {
         max_slv_trans: 32,
         max_mst_trans: 32,

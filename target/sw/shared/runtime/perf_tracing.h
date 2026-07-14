@@ -221,7 +221,7 @@
 // 由 __moe_dyn_xdma_start_copy / __moe_dyn_wait_xdma / copy_one / copy_pair 内部发出。
 // 这些是 gather_s1 / load_gate_up / load_down / prefetch_s2/s4 / store 的子事件。
 //
-//   xDMA_CFG  = xdma_memcpy_1d_fast_full_addr() 的 30-CSR-write 阶段
+//   xDMA_CFG  = 普通 copy 的完整 1D 配置，或 gather 首笔的静态配置+地址配置
 //   xDMA_WAIT = xdma_wait_task() 等待 xDMA 传输完成的阶段
 //   iDMA_WAIT = snrt_dma_wait_all() 等待 iDMA 传输完成的阶段
 #define BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START          0x396
@@ -230,6 +230,12 @@
 #define BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END           0x399
 #define BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_START         0x39A
 #define BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_END           0x39B
+
+// One-time L15 layout initialization and dependency-only DFG relay kernels.
+#define BINGO_TRACE_MOE_OUTPUT_PADDING_INIT_START        0x39C
+#define BINGO_TRACE_MOE_OUTPUT_PADDING_INIT_END          0x39D
+#define BINGO_TRACE_COMPLETION_RELAY_START               0x39E
+#define BINGO_TRACE_COMPLETION_RELAY_END                 0x39F
 
 // Host MoE execute INIT sub-stage markers (0x3A0 - 0x3A9)
 // These only split HOST_MOE_EXEC_INIT for diagnosis; they do not change logic.
@@ -258,8 +264,8 @@
 #define BINGO_TRACE_HOST_MOE_HW_CONTROL_WRITE_END        0x3B3
 #define BINGO_TRACE_HOST_MOE_HW_RESTART_START            0x3B4
 #define BINGO_TRACE_HOST_MOE_HW_RESTART_END              0x3B5
-#define BINGO_TRACE_HOST_MOE_HW_DRAIN_PLAN_START         0x3B6
-#define BINGO_TRACE_HOST_MOE_HW_DRAIN_PLAN_END           0x3B7
+#define BINGO_TRACE_HOST_MOE_HW_DRAIN_TASKS_START        0x3B6
+#define BINGO_TRACE_HOST_MOE_HW_DRAIN_TASKS_END          0x3B7
 
 // Host HW compact-plan -> slot-args lowering sub-stage markers (0x3B8 - 0x3C5)
 // These split BINGO_TRACE_HOST_MOE_HW_LOWER for diagnosis; they do not change logic.

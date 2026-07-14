@@ -22,7 +22,7 @@
 #include "moe_scheduler.h"
 
 #if defined(MOE_ENABLE_HW_SCHEDULER)
-/* Pure HW fast build intentionally emits no SW scheduler functions.
+/* Pure HW build intentionally emits no SW scheduler functions.
  * Any accidental moe_schedule()/moe_make_hw_plan() reference in this build
  * should fail at link time instead of silently taking a software path. */
 #else
@@ -34,8 +34,11 @@
 /* =========================================================================
  * Shape constants (indexed 0=A, 1=B, 2=C)
  * =========================================================================
- * WEIGHT_BYTES_S1 = 2*2048*1408/2 = 2,883,584  (gate+up)
- * WEIGHT_BYTES_S3 = 1*2048*1408/2 = 1,441,792  (down)
+ * These timing constants intentionally retain the 2048x1408 reference model.
+ * The functional GEMM/DMA dimensions come from params.hjson; keeping this
+ * reference model preserves HW/SW ideal-schedule ordering across size tests.
+ * Reference WEIGHT_BYTES_S1 = 2*2048*1408/2 = 2,883,584  (gate+up)
+ * Reference WEIGHT_BYTES_S3 = 1*2048*1408/2 = 1,441,792  (down)
  * Shape A: M_dim=8,  bw_req=32, alloc=64
  * Shape B: M_dim=4,  bw_req=64, alloc=64
  * Shape C: M_dim=2,  bw_req=128,alloc=128
@@ -780,121 +783,6 @@ static void remove_dma_op(moe_schedule_t *out, uint16_t idx,
     }
 }
 
-/* =========================================================================
- * Legacy timing lowering: plan[] → moe_schedule_t
- *
- * Kept as an internal reference for equivalence checks.  The public
- * moe_schedule() path below uses the compact RTL-plan lowering instead.
- * ========================================================================= */
-static moe_status_t lower_plan_timing(const plan_t *plan, uint8_t n_plan,
-                                      const moe_request_t *req, moe_schedule_t *out)
-{
-    out->n_tasks=0; out->n_dma_ops=0;
-
-    for (uint8_t pi=0;pi<n_plan;pi++){
-        const plan_t *p=&plan[pi];
-        if (out->n_tasks>=MOE_MAX_TASKS) return MOE_ERR_OVERFLOW;
-
-        int ci=(int)p->cluster;
-        moe_cluster_t cl=(ci==0)?MOE_CLUSTER_C2:MOE_CLUSTER_C3;
-        moe_shape_t sh1=(moe_shape_t)p->shape_s1;
-        moe_shape_t sh3=(moe_shape_t)p->shape_s3;
-        uint32_t ntok_u=p->ntok;
-        uint8_t  skip_s1=p->skip_s1, skip_s3=p->skip_s3, has_s2pf=p->has_s2pf;
-
-        moe_task_t *tk=&out->tasks[out->n_tasks];
-        /* (dma_slots[] removed from compact moe_task_t) */
-
-        tk->cluster         =cl;
-        tk->expert_id       =(uint16_t)p->eid;
-        tk->token_start_rank=p->tok_start;
-        tk->ntokens         =(uint16_t)ntok_u;
-        tk->shape_s1        =sh1;
-        tk->shape_s3        =sh3;
-        /* bw_s1/bw_s3 removed: derivable from shape+skip if needed */
-        tk->dma_s1          =skip_s1?MOE_DMA_NONE:(kAlloc[p->shape_s1]>=128u?MOE_DMA_BOTH:MOE_DMA_IDMA);
-        tk->dma_s3          =skip_s3?MOE_DMA_NONE:(kAlloc[p->shape_s3]>=128u?MOE_DMA_BOTH:MOE_DMA_XDMA);
-        tk->skip_s1         =skip_s1;
-        tk->skip_s3         =skip_s3;
-
-        if (skip_s1){
-            /* S2 handles all tokens with fixed shape C: batch count = ceil(ntok / 2). */
-            uint32_t b2=(ntok_u+kFullMdim-1u)/kFullMdim;
-            tk->m_s2_exec=b2; tk->skip_s2=0u;
-        } else {
-            /* S2 handles tail tokens after S1 block, but S2 itself uses shape C. */
-            uint32_t tail=(ntok_u>kMdim[p->shape_s1])?(ntok_u-kMdim[p->shape_s1]):0u;
-            uint32_t b2=(tail+kFullMdim-1u)/kFullMdim;
-            tk->m_s2_exec=b2; tk->skip_s2=(b2==0u)?1u:0u;
-        }
-        if (skip_s3){
-            /* S4 handles all tokens with fixed shape C: batch count = ceil(ntok / 2). */
-            uint32_t b4=(ntok_u+kFullMdim-1u)/kFullMdim;
-            tk->m_s4_exec=b4; tk->skip_s4=0u;
-        } else {
-            /* S4 handles tail tokens after S3 block, but S4 itself uses shape C. */
-            uint32_t tail4=(ntok_u>kMdim[p->shape_s3])?(ntok_u-kMdim[p->shape_s3]):0u;
-            uint32_t b4=(tail4+kFullMdim-1u)/kFullMdim;
-            tk->m_s4_exec=b4; tk->skip_s4=(b4==0u)?1u:0u;
-        }
-        /* prefetch_eid/dma_slots/est_start_cc/est_end_cc removed from compact moe_task_t */
-
-        /* S1 DMA: compact op (task_idx, expert_id, kind, dma only) */
-        if (!skip_s1){
-            if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
-            moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
-            op->task_idx=(uint16_t)out->n_tasks;
-            op->expert_id=p->eid;
-            op->kind=MOE_DMA_OP_S1;
-            op->dma=(kAlloc[p->shape_s1]>=128u)?MOE_DMA_BOTH:MOE_DMA_IDMA;
-            /* cluster/weight/shape/alloc_bw/start_cc/end_cc removed */
-        }
-
-        /* S3 / S2-prefetch DMA: compact op */
-        if (!skip_s3 || has_s2pf){
-            if (out->n_dma_ops>=MOE_MAX_DMA_OPS) return MOE_ERR_OVERFLOW;
-            moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
-            op->task_idx=(uint16_t)out->n_tasks;
-            op->expert_id=p->eid;
-            op->dma=(kAlloc[p->shape_s3]>=128u)?MOE_DMA_BOTH:MOE_DMA_XDMA;
-            op->kind=has_s2pf?MOE_DMA_OP_S2_PREFETCH:MOE_DMA_OP_S3;
-            /* cluster/weight/shape/alloc_bw/start_cc/end_cc removed */
-        }
-
-        /* Next-S1 prefetch: gate/up via iDMA after the down DMA completes.
-         * Applies regardless of skip_s1: when skip_s1=1, iDMA is idle the
-         * entire task. */
-        {
-            int16_t next_eid=-1;
-            for (uint8_t pj=pi+1u;pj<n_plan;pj++){
-                if (plan[pj].cluster==p->cluster){ next_eid=plan[pj].eid; break; }
-            }
-            if (next_eid>=0){
-                uint8_t nc=0;
-                /* Only skip S4_PREFETCH if the current task's S1 DMA did NOT
-                 * run (skip_s1=1), meaning the initial cached expert is still
-                 * intact in the SRAM gate/up buffer.  If skip_s1=0, the S1 DMA
-                 * already overwrote the buffer with the current expert's data,
-                 * so the initial cache is gone and we must prefetch next_eid. */
-                if (ci==0 && req->cache_eid_c2==next_eid && p->skip_s1) nc=1;
-                if (ci==1 && req->cache_eid_c3==next_eid && p->skip_s1) nc=1;
-                if (!nc && p->allow_s4pf){
-                    if (out->n_dma_ops<MOE_MAX_DMA_OPS){
-                        moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
-                        op->task_idx=(uint16_t)out->n_tasks;
-                        op->expert_id=next_eid;
-                        op->kind=MOE_DMA_OP_S4_PREFETCH;
-                        op->dma=MOE_DMA_IDMA;
-                    }
-                }
-            }
-        }
-        out->n_tasks++;
-    }
-    /* est_makespan_cc removed from compact moe_schedule_t */
-    return MOE_OK;
-}
-
 moe_status_t moe_lower_hw_plan(const moe_request_t *req,
                                const moe_hw_plan_entry_t *plan,
                                uint16_t n_plan,
@@ -1037,21 +925,6 @@ moe_status_t moe_make_hw_plan(const moe_request_t *req,
     *n_plan=sw_n;
     return MOE_OK;
 }
-
-#ifdef MOE_SCHEDULER_ENABLE_LEGACY_CHECK
-moe_status_t moe_schedule_legacy_timing(const moe_request_t *req, moe_schedule_t *out)
-{
-    if (!req || !out) return MOE_ERR_BAD_INPUT;
-    uint16_t ne=req->n_experts;
-    if (ne==0u||ne>MOE_MAX_EXPERTS) return MOE_ERR_BAD_INPUT;
-    for (uint16_t i=0u;i<ne;i++) if (req->experts[i].ntokens==0u) return MOE_ERR_BAD_INPUT;
-
-    static plan_t plan[MOE_MAX_TASKS];
-    uint8_t n_plan=0;
-    (void)moe_plan(req,plan,&n_plan);
-    return lower_plan_timing(plan,n_plan,req,out);
-}
-#endif
 
 /* =========================================================================
  * Entry point

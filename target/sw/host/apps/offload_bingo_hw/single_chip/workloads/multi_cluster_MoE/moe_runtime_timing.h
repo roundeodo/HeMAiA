@@ -1,0 +1,49 @@
+// Emit compact timing records after the DFG exits. Analysis stays off-target.
+#pragma once
+
+#include "heterogeneous_runtime.h"
+#include "moe_runtime_timing_record.h"
+
+#if MOE_RUNTIME_TIMING
+
+static inline void __host_bingo_moe_print_runtime_timing(
+    uint64_t *scratchpad_addrs, uint32_t scratchpad_count)
+{
+    uint32_t record_count = 0u;
+
+    printf_safe("[MOE_TIMING_BEGIN] version=2\r\n");
+    for (uint32_t i = 0u; i < scratchpad_count; ++i) {
+        volatile bingo_kernel_scratchpad_t *sp =
+            (volatile bingo_kernel_scratchpad_t *)(uintptr_t)scratchpad_addrs[i];
+        if (sp->reserved[MOE_SP_PROFILE_MAGIC_IDX] != MOE_RUNTIME_TIMING_MAGIC)
+            continue;
+
+        uint32_t start = sp->start_time;
+        uint32_t total = sp->end_time - start;
+        uint32_t resource_offset =
+            sp->reserved[MOE_SP_PROFILE_RESOURCE_START_IDX] - start;
+        uint32_t resource_cycles =
+            sp->reserved[MOE_SP_PROFILE_RESOURCE_END_IDX] -
+            sp->reserved[MOE_SP_PROFILE_RESOURCE_START_IDX];
+
+        // Schema v2: meta task start total resource_offset resource_cycles
+        //            peer_wait units flags result. Relative fields keep every
+        //            record below the FPGA console's 80-column capture limit.
+        printf_safe(
+            "[MOE_TIMING_RECORD] %x %x %u %u %u %u %u %u %x %u\r\n",
+            sp->reserved[MOE_SP_PROFILE_META_IDX],
+            sp->reserved[MOE_SP_PROFILE_TASK_IDX],
+            start,
+            total,
+            resource_offset,
+            resource_cycles,
+            sp->reserved[MOE_SP_PROFILE_PEER_WAIT_IDX],
+            sp->reserved[MOE_SP_PROFILE_UNITS_IDX],
+            sp->reserved[MOE_SP_PROFILE_FLAGS_IDX],
+            sp->reserved[MOE_SP_PROFILE_RESULT_IDX]);
+        record_count++;
+    }
+    printf_safe("[MOE_TIMING_END] records=%u\r\n", record_count);
+}
+
+#endif

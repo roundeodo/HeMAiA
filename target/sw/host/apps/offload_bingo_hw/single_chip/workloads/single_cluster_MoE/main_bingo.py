@@ -85,7 +85,6 @@ from bingo_kernel_args import (
     HostBingoKernelIdmaArgs,
     SnaxBingoKernelGemmMinimalArgs,
     SnaxBingoKernelDualVcGemmFullArgs,
-    SnaxBingoKernelDualVcSwigluFullArgs,
     SnaxBingoKernelDualVcL15MoeFullArgs,
     HostBingoKernelMoERouterScheduleArgs,  # 补充
     HostBingoKernelComputeDelayedSoftmaxArgs,  # 补充

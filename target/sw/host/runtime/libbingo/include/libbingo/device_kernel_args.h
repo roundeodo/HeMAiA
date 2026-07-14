@@ -4,6 +4,11 @@
 //
 // Fanchen Kong <fanchen.kong@kuleuven.be>
 #pragma once
+
+// Physical L15 token row: model-sized INT16 payload followed by one 32-byte
+// bank pad. The generated workload args carry the complete row stride.
+#define BINGO_MOE_L15_ROW_PADDING_BYTES 32u
+#define BINGO_MOE_L15_CFG_WORDS 91u
 #include <stdint.h>
 
 #define __SNAX_KERNEL_ARGS_DEFINE typedef struct __attribute__((packed, aligned(4)))
@@ -525,25 +530,53 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_gemm_full_args {
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_dual_vc_gemm_full_args_t;
 
-// BINGO Dual-VersaCore SwiGLU kernel args.
-__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_swiglu_full_args {
+// Fixed-S0 Router GEMM. Model dimensions remain generated parameters; the
+// hardware shape and core assignment are part of the workload contract.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_router_gemm_s0_args {
   uint32_t input_A_addr;
-  uint32_t input_B_gate_addr;
-  uint32_t input_B_up_addr;
+  uint32_t input_B0_addr;
+  uint32_t input_B1_addr;
   uint32_t output_D0_addr;
   uint32_t output_D1_addr;
   uint32_t M;
   uint32_t K;
   uint32_t N;
-  uint32_t array_shape;
   uint32_t rescale_mult;
   uint32_t rescale_shift;
-
   BINGO_KERNEL_ARGS_TRAILER;
-} __snax_bingo_kernel_dual_vc_swiglu_full_args_t;
+} __snax_bingo_kernel_moe_router_gemm_s0_args_t;
+
+// Typed L15 configuration record consumed directly by the fused SwiGLU +
+// down-projection kernel. It contains dimensions, streamer fields and offsets.
+// Datagen emits a designated initializer of this shared type, so field changes
+// fail at compile time instead of silently shifting a positional int32 array.
+typedef struct __attribute__((packed, aligned(4))) {
+  uint32_t array_shape, meshRow, tileSize, meshCol, tokens_used;
+  uint32_t M_tiles, K_tiles, N_tiles, K1, N1;
+  int32_t mode0_A_sstride[2], mode1_A_sstride[2];
+  int32_t mode0_B_sstride[2], mode1_B_sstride[2], D_sstride[1];
+  int32_t mode0_A_tbound[6], mode0_A_tstride[6];
+  int32_t mode1_A_tbound[6], mode1_A_tstride[6];
+  int32_t mode0_B_tbound[4], mode0_B_tstride[4];
+  int32_t mode1_B_tbound[4], mode1_B_tstride[4];
+  int32_t mode0_D_tbound[4], mode0_D_tstride[4];
+  int32_t mode1_D_tbound[4], mode1_D_tstride[4];
+  int32_t A_channel_en[1], B_channel_en[1], D_channel_en[1];
+  int32_t delta_local_a, delta_local_b0, delta_local_b1, delta_local_d0;
+  int32_t delta_local_w2l, delta_local_w2r;
+  int32_t delta_local_mode1_d0, delta_local_mode1_d1;
+  int32_t tcdm_end, mode0_output_elems, mode1_output_elems;
+  int32_t mode1_output_row_stride_bytes, mode1_padded_output_elems;
+} __snax_bingo_moe_l15_shape_cfg_t;
+
+_Static_assert(
+    sizeof(__snax_bingo_moe_l15_shape_cfg_t) ==
+        BINGO_MOE_L15_CFG_WORDS * sizeof(uint32_t),
+    "L15 config ABI size mismatch");
 
 // BINGO Dual-VersaCore L15 MoE full kernel args (SwiGLU + down-proj in one pass).
-// arg[0] shape_cfg_addr: uint32_t L3 address of l15_dev_sX_cfg[] (moe_l15_shape_cfg_t).
+// arg[0] shape_cfg_addr: uint32_t TCDM address of
+//                       __snax_bingo_moe_l15_shape_cfg_t.
 // arg[1] tcdm_base:      uint32_t TCDM base of the L15 layout region.
 // arg[2] rescale_mult, arg[3] rescale_shift: post-scale factors.
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_l15_moe_full_args {
@@ -554,11 +587,55 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_l15_moe_full_args {
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_dual_vc_l15_moe_full_args_t;
 
-// Split-kernel variants: same arg layout as _full.
-typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
-        __snax_bingo_kernel_dual_vc_l15_moe_swiglu_args_t;
-typedef __snax_bingo_kernel_dual_vc_l15_moe_full_args_t
-        __snax_bingo_kernel_dual_vc_l15_moe_down_args_t;
+// Direct static-stage SwiGLU launch. N is the total number of temporal
+// N-groups across all B blocks; b_block_count selects one S1 block or all
+// blocks for the S2 tail.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_swiglu_args {
+  uint32_t input_A_addr;
+  uint32_t input_gate_B_addr;
+  uint32_t input_up_B_addr;
+  uint32_t output_D0_addr;
+  uint32_t output_D1_addr;
+  uint32_t M;
+  uint32_t K;
+  uint32_t N;
+  uint32_t b_block_count;
+  uint32_t b_block_stride;
+  uint32_t array_shape;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_swiglu_args_t;
+
+// Direct static-stage down-projection launch. Shape S0/S1 accepts one B
+// block; shape S2 may consume all contiguous blocks in one S4 launch.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_down_args {
+  uint32_t input_A_addr;
+  uint32_t input_B0_addr;
+  uint32_t input_B1_addr;
+  uint32_t output_D0_addr;
+  uint32_t output_D1_addr;
+  uint32_t M;
+  uint32_t K;
+  uint32_t N;
+  uint32_t b_block_count;
+  uint32_t b_block_stride;
+  uint32_t array_shape;
+  uint32_t output_row_stride;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_down_args_t;
+
+// One-time initialization of the bytes not written by the Mode-1 writers.
+// The initialized padding remains valid while the dedicated output buffer lives.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_init_output_padding_args {
+  uint32_t output_base;
+  uint32_t row_payload_bytes;
+  uint32_t row_stride_bytes;
+  uint32_t rows;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_init_output_padding_args_t;
 
 typedef struct __attribute__((packed, aligned(8))) {
   union {
@@ -649,11 +726,10 @@ typedef struct __attribute__((packed, aligned(4))) {
   uint32_t indiv_B_expert_stride;
   uint32_t indiv_down_B_expert_stride;
   uint32_t indiv_B_tile_bytes;
-  uint32_t indiv_D_tile_bytes;
+  uint32_t indiv_B_block_stride;
   uint32_t indiv_down_B_tile_bytes;
+  uint32_t indiv_down_B_block_stride;
   uint32_t indiv_down_D_tile_bytes;
-  uint32_t indiv_N2;
-  uint32_t indiv_down_N2;
   uint32_t indiv_K1;
   uint32_t indiv_N_per_block;
   uint32_t indiv_down_K1;
@@ -719,8 +795,8 @@ typedef struct __attribute__((packed, aligned(8)))
 } __snax_bingo_kernel_moe_dynamic_expert_args_t;
 
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_block_args {
-  uint64_t task_arg_addr;
-  uint64_t static_arg_addr;
+  uint32_t task_arg_addr;
+  uint32_t static_arg_addr;
   uint32_t block_idx;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_block_args_t;

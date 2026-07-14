@@ -177,8 +177,20 @@ inline int32_t xdma_memcpy_1d_full_addr(uint64_t src, uint64_t dst,
 // never called on the same xDMA engine without a subsequent full reconfigure,
 // because dst[1..15] are not cleared here. In the MoE workload (1D single-
 // target transfers only), this invariant always holds.
-__attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_full_addr(
-    uint64_t src, uint64_t dst, uint32_t size) {
+__attribute__((always_inline)) inline void xdma_memcpy_1d_fast_set_addresses(
+    uint64_t src, uint64_t dst) {
+    snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_LSB, (uint32_t)src);
+    snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_MSB, (uint32_t)(src >> 32));
+    snax_write_xdma_cfg_reg(XDMA_DST_ADDR_PTR_LSB, (uint32_t)dst);
+    snax_write_xdma_cfg_reg(XDMA_DST_ADDR_PTR_MSB, (uint32_t)(dst >> 32));
+}
+
+// Configure the invariant part of a single-target 1D transfer. A caller that
+// issues equal-sized copies may call this once, then patch only the four base
+// address CSRs before each xdma_start(). The start command commits a snapshot,
+// so the next address pair can be programmed while the current payload moves.
+__attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_configure(
+    uint32_t size) {
     if (size % XDMA_WIDTH != 0) {
         XDMA_DEBUG_PRINT("Size is not multiple of XDMA_WIDTH\n");
         return -1;
@@ -187,11 +199,6 @@ __attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_full_addr(
     // Avoids the CSR read in the xdma_disable_all_extensions() RMW sequence.
     snax_write_xdma_cfg_reg(XDMA_DST_ENABLE_PTR, 0);
 
-    // Source / destination base addresses
-    snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_LSB, (uint32_t)src);
-    snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_MSB, (uint32_t)(src >> 32));
-    snax_write_xdma_cfg_reg(XDMA_DST_ADDR_PTR_LSB, (uint32_t)dst);
-    snax_write_xdma_cfg_reg(XDMA_DST_ADDR_PTR_MSB, (uint32_t)(dst >> 32));
     // dst[1..15] are NOT cleared: 30 CSR writes saved.
 
     // Spatial strides (bytes per TCDM channel)
@@ -223,6 +230,14 @@ __attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_full_addr(
     snax_write_xdma_cfg_reg(XDMA_SRC_ENABLED_CHAN_PTR, 0xFFFFFFFF);
     snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_CHAN_PTR, 0xFFFFFFFF);
     snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_BYTE_PTR, 0xFFFFFFFF);
+    return 0;
+}
+
+__attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_full_addr(
+    uint64_t src, uint64_t dst, uint32_t size) {
+    int32_t rc = xdma_memcpy_1d_fast_configure(size);
+    if (rc != 0) return rc;
+    xdma_memcpy_1d_fast_set_addresses(src, dst);
     return 0;
 }
 

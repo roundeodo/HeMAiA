@@ -22,6 +22,7 @@
   x_num = noc_array[0] if noc_array else 1
   y_num = noc_array[1] if noc_array else 1
   wide_trans = int(occamy_cfg["s1_quadrant"]["wide_trans"])
+  wide_cdc_log_depth = int(occamy_cfg["s1_quadrant"].get("wide_cdc_log_depth", 2))
   narrow_trans = int(occamy_cfg["s1_quadrant"]["narrow_trans"])
   ro_cache_cfg = occamy_cfg["s1_quadrant"].get("ro_cache_cfg", {})
   ro_cache_regions = ro_cache_cfg.get("address_regions", 1)
@@ -845,10 +846,10 @@ module ${name}_quad
     narrow_cluster_out = quad_narrow_xbar.__dict__["in_cluster_{}".format(i)].copy(name="narrow_out_{}".format(i),clk="clk_acc_i[{}]".format(i),rst="rst_acc_ni[{}]".format(i)).declare(context)
     narrow_cluster_out.cdc(context, target_clk="clk_i", target_rst="rst_ni", name="narrow_cluster_out_cdc_{}".format(i)).cut(context, cuts_narrx_with_cluster, to=quad_narrow_xbar.__dict__["in_cluster_{}".format(i)])
 
-    wide_cluster_in = quad_wide_xbar.__dict__["out_cluster_{}".format(i)].change_iw(context, cluster_cfgs[i]["dma_id_width_in"], "wide_in_iwc_{}".format(i), max_txns_per_id=wide_trans).cut(context, cuts_widex_with_cluster).cdc(context, target_clk="clk_acc_i[{}]".format(i), target_rst="rst_acc_ni[{}]".format(i), name="wide_cluster_in_cdc_{}".format(i))
+    wide_cluster_in = quad_wide_xbar.__dict__["out_cluster_{}".format(i)].change_iw(context, cluster_cfgs[i]["dma_id_width_in"], "wide_in_iwc_{}".format(i), max_txns_per_id=wide_trans).cut(context, cuts_widex_with_cluster).cdc(context, target_clk="clk_acc_i[{}]".format(i), target_rst="rst_acc_ni[{}]".format(i), name="wide_cluster_in_cdc_{}".format(i), log_depth=wide_cdc_log_depth)
 
     wide_cluster_out = quad_wide_xbar.__dict__["in_cluster_{}".format(i)].copy(name="wide_out_{}".format(i),clk="clk_acc_i[{}]".format(i),rst="rst_acc_ni[{}]".format(i)).declare(context)
-    wide_cluster_out.cdc(context, target_clk="clk_i", target_rst="rst_ni", name="wide_cluster_out_cdc_{}".format(i)).cut(context, cuts_widex_with_cluster, to=quad_wide_xbar.__dict__["in_cluster_{}".format(i)])
+    wide_cluster_out.cdc(context, target_clk="clk_i", target_rst="rst_ni", name="wide_cluster_out_cdc_{}".format(i), log_depth=wide_cdc_log_depth).cut(context, cuts_widex_with_cluster, to=quad_wide_xbar.__dict__["in_cluster_{}".format(i)])
   %>
   ${cluster_name}_wrapper i_${name}_cluster_${i} (
     .clk_i               (clk_acc_i[${i}]),

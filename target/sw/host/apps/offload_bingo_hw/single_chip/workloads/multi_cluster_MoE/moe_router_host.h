@@ -1,10 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <math.h>
-#include "heterogeneous_runtime.h"
-#include "sys_dma.h"
-#include "perf_tracing.h"
 
 typedef struct
 {
@@ -31,19 +27,9 @@ static inline uint32_t moe_ctz32_no_libgcc(uint32_t x)
     return n;
 }
 
-// MoE_common_variable.h is NOT included here — its macros (input_dimension,
-// softmax_scale, etc.) clash with struct field names and local variables.
-// Those macros are only used by datagen.py and main_bingo.py (Python side).
-
-// ============================================================================
-// 这个头文件的角色
-// ============================================================================
-// 当前 workload 使用的主机侧 MoE 算子：
-//   - TopK 提取：find_top_k_expert / extract_top_k_indices_and_scores
-//   - 路由全局调度：moe_router_global_schedule（Phase 2，CVA6 调用）
-//   - Tiled 累加：experts_result_accumulate_tiled（Phase 5，CVA6 调用）
-//   - 累加 host kernel：__host_bingo_kernel_prefill_accumulate（DFG 末尾节点）
-// ============================================================================
+// Software Router Top-K extraction for the multi-cluster workload.
+// The pure-HW build uses the direct, table-producing path in host_kernel_lib.h;
+// these generic routines remain only for the pure-software comparison build.
 
 void find_top_k_expert(
     const int32_t *scores,
@@ -256,139 +242,4 @@ void moe_router_global_schedule(
 
         tokens_processed += valid_tokens_in_this_step;
     }
-}
-
-// ============================================================================
-// Prefill Tiled Accumulate
-// Handles: tiled GEMM output format [N2][M1][N1][meshRow][meshCol]
-//          dynamic per-expert token counts
-//          multiple shared experts
-//          output in same tiled format (for golden comparison)
-// ============================================================================
-void experts_result_accumulate_tiled(
-    int16_t *shared_hw_out, // all shared experts' down outputs, tiled (INT16 from RescaleDown)
-    int16_t *indiv_hw_out,  // all individual experts' down outputs, tiled (INT16 from RescaleDown)
-    uint32_t *expert_token_counts,
-    uint32_t *expert_memory_offsets,
-    uint32_t *reverse_original_token_flat_idx,
-    uint32_t *global_calculated_probability,
-    int32_t *final_layer_output,  // tiled output: (M2, N2, M1, N1, meshRow, meshCol)
-    uint32_t actual_total_tokens, // M_total
-    uint32_t N2_out,              // N2 tiles in down projection output
-    uint32_t ptc,                 // per_tile_cols = N1 × meshRow × meshCol
-    uint32_t max_tok,             // max_tokens_per_expert (= M1 × meshRow × M2)
-    uint32_t E,                   // expert_number_each_layer
-    uint32_t S,                   // shared_expert_number_k
-    uint32_t k,                   // individual_expert_number_k
-    uint32_t softmax_scale_int,
-    uint32_t shift_step)
-{
-    uint32_t dim = N2_out * ptc;                  // total output dimension per token
-    uint32_t tile_elems = max_tok * ptc;          // elements per tile per expert
-    uint32_t expert_region = N2_out * tile_elems; // total elements per expert
-
-    // ---- Phase 1: shared experts → initialize final_layer_output ----
-    // Output tiled format: [N2][M_total][meshCol]
-    // (M2=1 so outer M2 loop omitted)
-    uint32_t out_tile_elems = actual_total_tokens * ptc;
-
-    for (uint32_t s = 0; s < S; s++)
-    {
-        int16_t *se_base = &shared_hw_out[s * expert_region];
-        for (uint32_t n = 0; n < N2_out; n++)
-        {
-            int16_t *src_tile = &se_base[n * tile_elems];
-            int32_t *dst_tile = &final_layer_output[n * out_tile_elems];
-            for (uint32_t t = 0; t < actual_total_tokens; t++)
-            {
-                int16_t *src_row = &src_tile[t * ptc];
-                int32_t *dst_row = &dst_tile[t * ptc];
-                for (uint32_t c = 0; c < ptc; c++)
-                {
-                    int64_t val = (int64_t)src_row[c] * (int64_t)softmax_scale_int;
-                    if (s == 0)
-                        dst_row[c] = (int32_t)(val >> shift_step);
-                    else
-                        dst_row[c] += (int32_t)(val >> shift_step);
-                }
-            }
-        }
-    }
-
-    // ---- Phase 2: individual experts → gather-accumulate ----
-    uint32_t k_shift = moe_ctz32_no_libgcc(k);
-
-    for (uint32_t e = 0; e < E; e++)
-    {
-        uint32_t actual_tok_e = expert_token_counts[e];
-        if (actual_tok_e == 0)
-            continue;
-        if (actual_tok_e > max_tok)
-            actual_tok_e = max_tok;
-
-        int16_t *ie_base = &indiv_hw_out[e * expert_region];
-        uint32_t mem_offset_e = expert_memory_offsets[e];
-
-        for (uint32_t slot = 0; slot < actual_tok_e; slot++)
-        {
-            uint32_t flat_idx = reverse_original_token_flat_idx[mem_offset_e + slot];
-            uint32_t original_t = flat_idx >> k_shift;
-            uint32_t prob = global_calculated_probability[flat_idx];
-
-            for (uint32_t n = 0; n < N2_out; n++)
-            {
-                int16_t *src_row = &ie_base[n * tile_elems + slot * ptc];
-                int32_t *dst_row = &final_layer_output[n * out_tile_elems + original_t * ptc];
-                for (uint32_t c = 0; c < ptc; c++)
-                {
-                    int64_t val = (int64_t)src_row[c] * (int64_t)prob;
-                    dst_row[c] += (int32_t)(val >> shift_step);
-                }
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Prefill accumulate host kernel（DFG 末尾节点，调用 experts_result_accumulate_tiled）
-// ============================================================================
-static inline uint64_t __host_bingo_kernel_prefill_accumulate(void *arg)
-{
-    BINGO_TRACE_MARKER(BINGO_TRACE_HOST_ACCUMULATE_START);
-    int16_t *shared_hw = (int16_t *)(((uint64_t *)arg)[0]);  // INT16 output from RescaleDown
-    int16_t *indiv_hw = (int16_t *)(((uint64_t *)arg)[1]);   // INT16 output from RescaleDown
-    uint32_t *rev_idx = (uint32_t *)(((uint64_t *)arg)[2]);
-    uint32_t *prob = (uint32_t *)(((uint64_t *)arg)[3]);
-    uint32_t *exp_counts = (uint32_t *)(((uint64_t *)arg)[4]);
-    uint32_t *exp_offsets = (uint32_t *)(((uint64_t *)arg)[5]);
-    int32_t *final_out = (int32_t *)(((uint64_t *)arg)[6]);
-    uint32_t total_tokens = (uint32_t)(((uint64_t *)arg)[7]);
-    uint32_t N2_out = (uint32_t)(((uint64_t *)arg)[8]);
-    uint32_t per_tile_cols = (uint32_t)(((uint64_t *)arg)[9]);
-    uint32_t max_tok = (uint32_t)(((uint64_t *)arg)[10]);
-    uint32_t E_val = (uint32_t)(((uint64_t *)arg)[11]);
-    uint32_t S_val = (uint32_t)(((uint64_t *)arg)[12]);
-    uint32_t k_val = (uint32_t)(((uint64_t *)arg)[13]);
-
-    // Unpack float softmax_scale from raw bits
-    union
-    {
-        uint32_t u;
-        float f;
-    } cvt;
-    cvt.u = (uint32_t)(((uint64_t *)arg)[14]);
-    uint32_t scale_int = (uint32_t)cvt.f;
-
-    uint32_t shift = (uint32_t)(((uint64_t *)arg)[15]);
-
-    experts_result_accumulate_tiled(
-        shared_hw, indiv_hw,
-        exp_counts, exp_offsets, rev_idx, prob,
-        final_out, total_tokens,
-        N2_out, per_tile_cols, max_tok,
-        E_val, S_val, k_val,
-        scale_int, shift);
-
-    BINGO_TRACE_MARKER(BINGO_TRACE_HOST_ACCUMULATE_END);
-    return 0;
 }

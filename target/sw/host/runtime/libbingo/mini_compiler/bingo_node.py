@@ -38,6 +38,8 @@ class BingoNode(metaclass=ABCMeta):
         self._dep_set_list: list[int] = []
         self._dep_set_chiplet_id: int = 0
         self._dep_set_cluster_id: int = 0
+        self._dep_check_tag: int = 0
+        self._dep_set_tag: int = 0
         # DARTS Tier 1: Conditional Execution
         self._cond_exec_en: bool = False
         self._cond_exec_group_id: int = 0
@@ -181,6 +183,22 @@ class BingoNode(metaclass=ABCMeta):
         self._dep_set_cluster_id = value
 
     @property
+    def dep_check_tag(self) -> int:
+        return self._dep_check_tag
+
+    @dep_check_tag.setter
+    def dep_check_tag(self, value: int) -> None:
+        self._dep_check_tag = value
+
+    @property
+    def dep_set_tag(self) -> int:
+        return self._dep_set_tag
+
+    @dep_set_tag.setter
+    def dep_set_tag(self, value: int) -> None:
+        self._dep_set_tag = value
+
+    @property
     def cond_exec_en(self) -> bool:
         return self._cond_exec_en
 
@@ -222,4 +240,3 @@ class BingoNode(metaclass=ABCMeta):
         for idx in lst:
             one_hot |= (1 << idx)
         return f"{one_hot}"
-    
