@@ -208,6 +208,83 @@ def add_slot(dfg, p, mh, prefix, cluster, start_dependencies=()):
         s1_compute.append(compute)
         previous_weight_load = load_up
 
+    # Controlled compute/DMA contention experiment.  The original block-1
+    # compute above is the no-contention baseline.  These two phases repeat the
+    # exact same computation while a full gate tensor is copied into an
+    # independent L1 probe buffer.  Both operations are about 5.6k RUN cycles,
+    # so neither side finishes early enough to hide most of the contention.
+    conflict_weight_offset = (p["block_count"] - 1) * p["gate_block_bytes"]
+    conflict_output_offset = (
+        (p["block_count"] - 1) * p["s1_rows"] * p["gate_block_row_bytes"]
+    )
+
+    conflict_idma_compute = add_node(
+        dfg,
+        cluster,
+        GEMM_CORE,
+        "__snax_bingo_kernel_moe_swiglu",
+        SnaxBingoKernelMoeSwigluArgs(
+            mh[f"{prefix}_a"],
+            offset(mh[f"{prefix}_gate"], conflict_weight_offset),
+            offset(mh[f"{prefix}_up"], conflict_weight_offset),
+            offset(mh[f"{prefix}_gate_out"], conflict_output_offset),
+            mh[f"{prefix}_gate_scratch"],
+            M=p["s1_M"],
+            K=p["gate_K"],
+            N=p["gate_N_s1"],
+            b_block_count=1,
+            b_block_stride=p["gate_block_bytes"],
+            array_shape=p["s1_shape"],
+        ),
+        f"{prefix.upper()}_CONFLICT_IDMA_COMPUTE_MATCHED",
+    )
+    conflict_idma_transfer = add_node(
+        dfg,
+        cluster,
+        DMA_CORE,
+        "__snax_bingo_kernel_idma_1d_copy",
+        SnaxBingoKernelIdma1dCopyArgs(
+            mh[f"{prefix}_gate_src"], mh["probe_c0_arena"], p["dma_probe_bytes"]
+        ),
+        f"{prefix.upper()}_CONFLICT_IDMA_TRANSFER_MATCHED",
+    )
+    dfg.bingo_add_edge(s1_compute[-1], conflict_idma_compute)
+    dfg.bingo_add_edge(s1_compute[-1], conflict_idma_transfer)
+
+    conflict_xdma_compute = add_node(
+        dfg,
+        cluster,
+        GEMM_CORE,
+        "__snax_bingo_kernel_moe_swiglu",
+        SnaxBingoKernelMoeSwigluArgs(
+            mh[f"{prefix}_a"],
+            offset(mh[f"{prefix}_gate"], conflict_weight_offset),
+            offset(mh[f"{prefix}_up"], conflict_weight_offset),
+            offset(mh[f"{prefix}_gate_out"], conflict_output_offset),
+            mh[f"{prefix}_gate_scratch"],
+            M=p["s1_M"],
+            K=p["gate_K"],
+            N=p["gate_N_s1"],
+            b_block_count=1,
+            b_block_stride=p["gate_block_bytes"],
+            array_shape=p["s1_shape"],
+        ),
+        f"{prefix.upper()}_CONFLICT_XDMA_COMPUTE_MATCHED",
+    )
+    conflict_xdma_transfer = add_node(
+        dfg,
+        cluster,
+        DMA_CORE,
+        "__snax_bingo_kernel_xdma_1d_copy",
+        SnaxBingoKernelXdma1dCopyArgs(
+            mh[f"{prefix}_gate_src"], mh["probe_c0_arena"], p["dma_probe_bytes"]
+        ),
+        f"{prefix.upper()}_CONFLICT_XDMA_TRANSFER_MATCHED",
+    )
+    for predecessor in (conflict_idma_compute, conflict_idma_transfer):
+        dfg.bingo_add_edge(predecessor, conflict_xdma_compute)
+        dfg.bingo_add_edge(predecessor, conflict_xdma_transfer)
+
     s2 = add_node(
         dfg,
         cluster,
@@ -231,7 +308,8 @@ def add_slot(dfg, p, mh, prefix, cluster, start_dependencies=()):
         ),
         f"{prefix.upper()}_S2_COMPUTE_TAIL",
     )
-    dfg.bingo_add_edge(s1_compute[-1], s2)
+    dfg.bingo_add_edge(conflict_xdma_compute, s2)
+    dfg.bingo_add_edge(conflict_xdma_transfer, s2)
 
     down_half_bytes = p["block_count"] * p["down_block_bytes"]
     prefetch_s2_down = add_node(
@@ -250,7 +328,8 @@ def add_slot(dfg, p, mh, prefix, cluster, start_dependencies=()):
         f"{prefix.upper()}_S2_PREFETCH_DOWN_IDMA_XDMA",
     )
     # S2 compute and down prefetch become runnable from the same S1 boundary.
-    dfg.bingo_add_edge(s1_compute[-1], prefetch_s2_down)
+    dfg.bingo_add_edge(conflict_xdma_compute, prefetch_s2_down)
+    dfg.bingo_add_edge(conflict_xdma_transfer, prefetch_s2_down)
 
     s3 = add_node(
         dfg,

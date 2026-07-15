@@ -23,6 +23,8 @@ All probes finish before the C0 slot starts. The slot is:
 load 8 padded token rows
 S1 block 0/1: one iDMA stream loads gate then up while the previous block computes
 S1 compute: shape 1 = (4, 8, 8) per VC, combined (4, 8, 16)
+matched conflict A/B/C: block-1 compute alone, then the same compute with iDMA,
+then the same compute with xDMA; each DMA transfers 360448 B into probe L1
 S2 compute: shape 2 tail path
 S2 prefetch: iDMA loads the left down half while xDMA loads the right half
 S3 compute: one full-width shape-1 down node, no output-block split
@@ -40,6 +42,23 @@ The S2 compute and S2 prefetch share the same predecessor and can overlap. S3
 starts only after both finish. The S3 compute and next-expert prefetch also
 share a boundary and can overlap; the final store joins both paths so the test
 cannot exit while the prefetch is still active.
+
+## Matched compute/DMA contention probes
+
+The original S1 block-1 computation is the no-contention reference. It is
+followed by two controlled phases:
+
+```text
+C0_CONFLICT_IDMA_COMPUTE_MATCHED || C0_CONFLICT_IDMA_TRANSFER_MATCHED
+C0_CONFLICT_XDMA_COMPUTE_MATCHED || C0_CONFLICT_XDMA_TRANSFER_MATCHED
+```
+
+Each compute repeats the exact block-1 SwiGLU operation without changing the
+final numerical result. Each transfer copies one complete 360448-byte gate
+tensor from L3 into the independent C0 probe arena. At 64 B/cc, both compute
+and transfer have an ideal duration of 5632 cycles. The two nodes in each pair
+share all predecessors and are joined before the next pair or S2, making their
+RUN intervals directly comparable without corrupting operands.
 
 Datagen emits canonical L15 B order and 2080-byte token rows (`2048-byte INT16
 payload + 32 zero bytes`). It emits one complete C0 expert and only gate/up for
