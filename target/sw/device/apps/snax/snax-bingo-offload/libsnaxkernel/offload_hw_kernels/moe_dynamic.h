@@ -1902,7 +1902,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_init_output_gaps(void *arg)
     return BINGO_RET_SUCC;
 }
 
-static inline uint32_t __moe_gather_rows_idma(
+static inline uint32_t __moe_gather_rows_xdma(
     const uint16_t *token_refs,
     uint32_t token_ref_start,
     uint64_t input_l3_base,
@@ -1913,21 +1913,47 @@ static inline uint32_t __moe_gather_rows_idma(
     uint32_t batch_arithmetic_runs)
 {
     (void)batch_arithmetic_runs;
-    uint32_t repeats = token_bytes / MOE_BANK_A_TOKEN_TILE_BYTES;
-    for (uint32_t local_t = 0u; local_t < ntokens; local_t++) {
-        uint16_t token_ref = token_refs[token_ref_start + local_t];
-        uint32_t token_id = BINGO_MOE_TOKEN_REF_TOKEN(token_ref);
-        uint64_t src = input_l3_base +
-            (uint64_t)token_id * (uint64_t)row_stride;
-        uint64_t dst = __moe_dyn_l1_wide(
-            __moe_bank_a_addr(gather_l1_addr, local_t, token_bytes));
-        snrt_dma_start_2d_wideptr(
-            dst, src, MOE_BANK_A_TOKEN_TILE_BYTES,
-            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_A_TOKEN_TILE_BYTES, repeats);
+    if (ntokens == 0u) return BINGO_RET_SUCC;
+    if ((token_bytes % MOE_BANK_A_TOKEN_TILE_BYTES) != 0u) {
+        return BINGO_RET_FAIL;
     }
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_START);
-    snrt_dma_wait_all();
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_IDMA_WAIT_END);
+
+    uint32_t src_stride[1] = {MOE_BANK_A_TOKEN_TILE_BYTES};
+    uint32_t src_bound[1] = {
+        token_bytes / MOE_BANK_A_TOKEN_TILE_BYTES};
+    uint32_t dst_stride[1] = {MOE_BANK_TCDM_ROW_BYTES};
+    uint32_t dst_bound[1] = {
+        token_bytes / MOE_BANK_A_TOKEN_TILE_BYTES};
+    uint16_t token_ref = token_refs[token_ref_start];
+    uint32_t token_id = BINGO_MOE_TOKEN_REF_TOKEN(token_ref);
+    uint64_t src = input_l3_base +
+        (uint64_t)token_id * (uint64_t)row_stride;
+    uint64_t dst = __moe_dyn_l1_wide(
+        __moe_bank_a_addr(gather_l1_addr, 0u, token_bytes));
+
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
+    xdma_disable_all_extensions();
+    int32_t rc = xdma_memcpy_nd_full_addr(
+        src, dst,
+        8u, 8u,
+        1u, src_stride, src_bound,
+        1u, dst_stride, dst_bound,
+        0x3u, 0x3u, 0xffffffffu);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
+    if (rc != 0) return BINGO_RET_FAIL;
+
+    int32_t last_task = (int32_t)xdma_start_remote();
+    for (uint32_t local_t = 1u; local_t < ntokens; local_t++) {
+        token_ref = token_refs[token_ref_start + local_t];
+        token_id = BINGO_MOE_TOKEN_REF_TOKEN(token_ref);
+        src = input_l3_base +
+            (uint64_t)token_id * (uint64_t)row_stride;
+        dst = __moe_dyn_l1_wide(
+            __moe_bank_a_addr(gather_l1_addr, local_t, token_bytes));
+        xdma_memcpy_fast_set_addresses(src, dst);
+        last_task = (int32_t)xdma_start_remote();
+    }
+    __moe_dyn_wait_xdma(dst, src, last_task);
     return BINGO_RET_SUCC;
 }
 
@@ -1947,7 +1973,7 @@ static inline uint32_t __moe_dyn_gather_slot_tokens(
         (const uint16_t *)(uintptr_t)st->token_refs_addr;
     uint32_t expert_token_offset = cfg->expert_id * st->max_tokens_per_expert;
 
-    uint32_t rc = __moe_gather_rows_idma(
+    uint32_t rc = __moe_gather_rows_xdma(
         token_refs, expert_token_offset + cfg->token_ref_start,
         st->input_A_l3_base, st->l1_a_addr, cfg->ntokens,
         st->A_token_bytes, a_row_stride,
@@ -1988,7 +2014,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_END);
     MOE_PROFILE_COMMIT(
         arg, cfg, profile, MOE_PROFILE_STAGE_GATHER_S1,
-        MOE_PROFILE_RESOURCE_IDMA,
+        MOE_PROFILE_RESOURCE_XDMA,
         0u,
         cfg->ntokens * st->A_token_bytes,
         0u, rc);
@@ -2855,7 +2881,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)(
             (uintptr_t)cfg + BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES) : 0;
     uint32_t store_bytes = 0u;
-    uint32_t idma_bytes = 0u;
+    uint32_t gather_bytes = 0u;
+    uint32_t result = BINGO_RET_SUCC;
     int32_t xdma_task0 = -1;
     int32_t xdma_task1 = -1;
 
@@ -2921,9 +2948,15 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
 
     if (has_next) {
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_START);
-        idma_bytes += next_cfg->ntokens * st->A_token_bytes;
-        (void)__moe_dyn_gather_slot_tokens(next_cfg, st);
+        gather_bytes += next_cfg->ntokens * st->A_token_bytes;
+        result = __moe_dyn_gather_slot_tokens(next_cfg, st);
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_END);
+        if (result == BINGO_RET_SUCC) {
+            /* The last gather task is behind both store tasks in the same
+             * committed xDMA queue, so its wait also drains the store. */
+            xdma_task0 = -1;
+            xdma_task1 = -1;
+        }
     }
 
     if (xdma_task0 >= 0) {
@@ -2939,20 +2972,17 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
         "[INDIV_DONE] C%u slot=%u eid=%u start=%u ntok=%u "
         "store_bytes=%u next_gather_bytes=%u\r\n",
         snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
-        cfg->token_ref_start, cfg->ntokens, store_bytes, idma_bytes);
+        cfg->token_ref_start, cfg->ntokens, store_bytes, gather_bytes);
     uint32_t profile_resource = MOE_PROFILE_RESOURCE_NONE;
-    if (store_bytes != 0u) {
-        profile_resource = idma_bytes != 0u ? MOE_PROFILE_RESOURCE_DMA_BOTH :
-                                             MOE_PROFILE_RESOURCE_XDMA;
-    } else if (idma_bytes != 0u) {
-        profile_resource = MOE_PROFILE_RESOURCE_IDMA;
+    if (store_bytes != 0u || gather_bytes != 0u) {
+        profile_resource = MOE_PROFILE_RESOURCE_XDMA;
     }
     MOE_PROFILE_COMMIT(
         arg, cfg, profile, MOE_PROFILE_STAGE_STORE,
         profile_resource,
-        0u, store_bytes + idma_bytes, 0u,
-        BINGO_RET_SUCC);
-    return BINGO_RET_SUCC;
+        0u, store_bytes + gather_bytes, 0u,
+        result);
+    return result;
 }
 
 // ============================================================
