@@ -128,7 +128,8 @@ __host_moe_lower_task_word_to_slot(
     __moe_host_timing_start(MOE_HOST_TIMING_LOWER_PRE);
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_PRELOWER_START);
-    uint32_t l1_d_addr = state->l1_d_addr[ci];
+    uint32_t l1_d_addr = (local_slot & 1u) != 0u ?
+        state->l1_a_addr[ci] : state->l1_d_addr[ci];
     uint32_t s1_shape_m = 8u >> shape_s1;
     uint32_t s3_shape_m = 8u >> shape_s3;
     uint32_t s1_n = MOE_HW_S1_N_BASE >> (shape_s1 + 2u);

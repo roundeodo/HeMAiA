@@ -576,13 +576,14 @@ def add_production_slot_handoff_test(dfg, p, mh):
             dfg,
             cluster,
             DMA_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_prepare_store_xdma_2d",
+            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1",
             slot_args,
-            f"{prefix.upper()}_PROD_PREPARE_STORE_DURING_COMPUTE",
+            f"{prefix.upper()}_PROD_S4_PREFETCH_OR_PREPARE_STORE",
         )
-        dfg.bingo_add_edge(
-            prefetch if prefix == "c0" else s3_loads[-1], prepare
-        )
+        # Match the production DFG exactly. C0 still executes the skipped-S3
+        # control chain before this node; optimizing that chain is a separate
+        # hardware/Bingo change.
+        dfg.bingo_add_edge(s3_loads[-1], prepare)
         store = add_node(
             dfg,
             cluster,

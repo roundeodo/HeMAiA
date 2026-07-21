@@ -1129,6 +1129,15 @@ def create_dfg(params, mh):
             c3_stage_base=mh["L3_Alloc_C3_Stage"],
         ),
     )
+    # pipeline_ctrl is consumed through offset C expressions in the static
+    # device nodes. Keep direct references here so the mini compiler emits the
+    # two underlying L1 allocations as part of the production graph.
+    node_execute.kernel_args._abi_memref_c2_pipeline_ctrl = mh[
+        "C2_indiv_Pipeline_Ctrl"
+    ]
+    node_execute.kernel_args._abi_memref_c3_pipeline_ctrl = mh[
+        "C3_indiv_Pipeline_Ctrl"
+    ]
     bingo_dfg.bingo_add_node(node_execute)
     bingo_dfg.bingo_add_edge(node_prepare, node_execute)
 
@@ -1294,13 +1303,6 @@ def create_dfg(params, mh):
         # make trace node durations look cleaner; that would change the workload.
         bingo_dfg.bingo_add_edge(s3_loads[-1], prefetch_s4_next_s1)
 
-        prepare_store = add_node(
-            DMA_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_prepare_store_xdma_2d",
-            slot_args,
-        )
-        bingo_dfg.bingo_add_edge(prefetch_s4_next_s1, prepare_store)
-
         # S4: down 全量 GEMM 节点
         # cache hit(skip_s3=1)：处理所有 token；否则处理 ntokens-shape_M 尾部 token
         compute_down_full = add_node(
@@ -1316,7 +1318,7 @@ def create_dfg(params, mh):
             slot_args,
         )
         bingo_dfg.bingo_add_edge(compute_down_full, store)
-        bingo_dfg.bingo_add_edge(prepare_store, store)
+        bingo_dfg.bingo_add_edge(prefetch_s4_next_s1, store)
         return store
 
     individual_tail_nodes = [node_execute]

@@ -46,8 +46,14 @@ static inline uint32_t __host_moe_write_task_slot(
     uint32_t shape_s3 = (uint32_t)task->shape_s3;
     uint32_t s1_shape_m = 8u >> shape_s1;
     uint32_t s3_shape_m = 8u >> shape_s3;
-    uint32_t l1_d_addr = (runtime_cluster_idx == 0u) ?
-        (uint32_t)cfg->c2_l1_d : (uint32_t)cfg->c3_l1_d;
+    uint32_t l1_d_addr;
+    if ((local_slot & 1u) != 0u) {
+        l1_d_addr = (runtime_cluster_idx == 0u) ?
+            (uint32_t)cfg->c2_l1_a : (uint32_t)cfg->c3_l1_a;
+    } else {
+        l1_d_addr = (runtime_cluster_idx == 0u) ?
+            (uint32_t)cfg->c2_l1_d : (uint32_t)cfg->c3_l1_d;
+    }
     uint32_t s1_block_span =
         ((uint32_t)cfg->indiv_N_per_block / 8u) * 512u;
 

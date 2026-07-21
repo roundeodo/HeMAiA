@@ -456,11 +456,15 @@ def derive_bank_workload_params(config: dict) -> dict:
 
     token_region_end = token_pages * token_page_span
     mode0_output_region_end = token_pages * mode0_output_page_span
-    resident_end = max(
+    resident_depth_end = max(
         weight_region_end,
         token_region_end,
         mode0_output_region_end,
     )
+    # Every physical base selects banks within one 512-byte TCDM row. Slot
+    # parity may place a full token/output page at the highest bank group, so
+    # retain the complete final row instead of allocating only its depth span.
+    resident_end = resident_depth_end + BANK_TCDM_ROW_BYTES
     if resident_end > BANK_TCDM_CAPACITY_BYTES:
         raise ValueError(
             f"bank-partition resident layout needs {resident_end} bytes, "
