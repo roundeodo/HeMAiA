@@ -244,17 +244,21 @@ $(SNAX_XDMA_ADDR_H): $(SNAX_SW_GEN_MARKER)
 clean-snax-sw-gen:
 	rm -f $(SNAX_SW_GEN_MARKER) $(SNAX_XDMA_ADDR_H)
 
-# Structural sync check that every function defined in the upstream
-# snax-versacore-to-lib.c also exists in the local snax_versacore_lib.h and
-# programs the same ordered sequence of CSRs (modulo the GEMMX_*→VERSACORE_*
-# rename). See util/hemaia/check_snax_versacore_lib_sync.py for the rules.
+# Sync checks for the hand-maintained local VersaCore header:
+#   1. Legacy VersaCore functions program the same ordered CSR sequence as the
+#      upstream versacore-to implementation.
+#   2. Dual VersaCore CSR addresses match the generated upstream header,
+#      including reserved RW slots before START.
 # Runs after snax-sw-gen so the bender-managed snax checkout is present.
 .PHONY: check-snax-versacore-sync
 SNAX_VERSACORE_LOCAL_H   = $(SW_DIR)/device/runtime/snax/versacore/snax_versacore_lib.h
 SNAX_VERSACORE_UPSTREAM_C = $(SNITCH_ROOT)/target/snitch_cluster/sw/snax/versacore-to/src/snax-versacore-to-lib.c
+SNAX_DUAL_VERSACORE_UPSTREAM_H = $(SNITCH_ROOT)/target/snitch_cluster/sw/snax/dual-versacore-swiglu/include/snax-dual-versacore-swiglu-lib.h
 check-snax-versacore-sync: $(SNAX_SW_GEN_MARKER)
 	@python3 $(ROOT)/util/hemaia/check_snax_versacore_lib_sync.py \
 		$(SNAX_VERSACORE_LOCAL_H) $(SNAX_VERSACORE_UPSTREAM_C)
+	@python3 $(ROOT)/util/hemaia/check_dual_versacore_csr_layout.py \
+		$(SNAX_VERSACORE_LOCAL_H) $(SNAX_DUAL_VERSACORE_UPSTREAM_H)
 
 sw: snax-sw-gen $(PLATFORM_HEADERS) host/runtime/host.ld check-snax-versacore-sync
 	$(MAKE) -C host libs

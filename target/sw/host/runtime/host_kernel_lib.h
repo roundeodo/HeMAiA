@@ -41,9 +41,9 @@
 #define MOE_HOST_TIMING_LOWER_S4PF   11u
 #define MOE_HOST_TIMING_LOWER_SLOT   12u
 #define MOE_HOST_TIMING_LOWER_ARG    13u
-#define MOE_HOST_TIMING_LOWER_PRE    14u
-#define MOE_HOST_TIMING_LOWER_DMA    15u
-#define MOE_HOST_TIMING_LOWER_FINAL  16u
+#define MOE_HOST_TIMING_LOWER_DMA    14u
+#define MOE_HOST_TIMING_LOWER_FINAL  15u
+#define MOE_HOST_TIMING_LOWER_PRE    16u
 #define MOE_HOST_TIMING_COUNT        17u
 
 typedef struct {
@@ -93,9 +93,9 @@ static inline void __host_bingo_moe_print_phase_timing(void)
     MOE_HOST_TIMING_PRINT("LOWER_S4PF", MOE_HOST_TIMING_LOWER_S4PF);
     MOE_HOST_TIMING_PRINT("LOWER_SLOT", MOE_HOST_TIMING_LOWER_SLOT);
     MOE_HOST_TIMING_PRINT("LOWER_ARG", MOE_HOST_TIMING_LOWER_ARG);
-    MOE_HOST_TIMING_PRINT("LOWER_PRE", MOE_HOST_TIMING_LOWER_PRE);
     MOE_HOST_TIMING_PRINT("LOWER_DMA", MOE_HOST_TIMING_LOWER_DMA);
     MOE_HOST_TIMING_PRINT("LOWER_FINAL", MOE_HOST_TIMING_LOWER_FINAL);
+    MOE_HOST_TIMING_PRINT("LOWER_PRE", MOE_HOST_TIMING_LOWER_PRE);
 #endif
 }
 
@@ -561,23 +561,27 @@ static inline uint64_t __host_bingo_kernel_moe_router_schedule(void *arg)
     uint32_t *expert_token_counts_out =
         (uint32_t *)(uintptr_t)args->expert_token_counts_out_addr;
 #ifdef MOE_ENABLE_HW_SCHEDULER
-    uint16_t *expert_token_ids =
-        (uint16_t *)(uintptr_t)args->expert_token_ids_addr;
+    uint16_t *expert_token_refs =
+        (uint16_t *)(uintptr_t)args->expert_token_refs_addr;
     uint32_t token_stride = (uint32_t)args->max_tokens_per_expert;
 #endif
     uint32_t n_experts = (uint32_t)args->expert_number_each_layer;
-    uint32_t top_k = (uint32_t)args->individual_expert_number_k;
 #ifdef MOE_ENABLE_HW_SCHEDULER
 #if !defined(MOE_HW_ROUTER_MESH_ROW) || !defined(MOE_HW_ROUTER_MESH_COL) || \
     !defined(MOE_HW_ROUTER_M1) || !defined(MOE_HW_ROUTER_N1) || \
-    !defined(MOE_HW_ROUTER_MR_SHIFT)
+    !defined(MOE_HW_ROUTER_MR_SHIFT) || !defined(MOE_HW_TOP_K)
 #error "pure-HW Router path requires compile-time MOE_HW_ROUTER_* constants"
 #endif
+#if MOE_HW_TOP_K != 2
+#error "pure-HW Router path is specialized for top_k=2"
+#endif
+    const uint32_t top_k = 2u;
     const uint32_t mesh_row = MOE_HW_ROUTER_MESH_ROW;
     const uint32_t mesh_col = MOE_HW_ROUTER_MESH_COL;
     const uint32_t router_m1 = MOE_HW_ROUTER_M1;
     const uint32_t router_n1 = MOE_HW_ROUTER_N1;
 #else
+    uint32_t top_k = (uint32_t)args->individual_expert_number_k;
     uint32_t mesh_row = (uint32_t)args->mesh_row;
     uint32_t mesh_col = (uint32_t)args->mesh_col;
     uint32_t router_m1 = (uint32_t)args->router_m1;
@@ -677,21 +681,21 @@ static inline uint64_t __host_bingo_kernel_moe_router_schedule(void *arg)
                 }
             }
 
-            uint32_t out_base = (tokens_done + local_t) * top_k;
+            uint32_t out_base = (tokens_done + local_t) << 1u;
+            global_scores_out[out_base + 0u] = best0_score;
             if (MOE_SCHED_DEBUG_PRINT) {
                 global_indices_out[out_base + 0u] = (uint16_t)best0_eid;
-                global_scores_out[out_base + 0u] = best0_score;
             }
             uint32_t pos0 = best0_eid * token_stride + local_counts[best0_eid]++;
-            expert_token_ids[pos0] = (uint16_t)(tokens_done + local_t);
-            if (top_k > 1u) {
-                if (MOE_SCHED_DEBUG_PRINT) {
-                    global_indices_out[out_base + 1u] = (uint16_t)best1_eid;
-                    global_scores_out[out_base + 1u] = best1_score;
-                }
-                uint32_t pos1 = best1_eid * token_stride + local_counts[best1_eid]++;
-                expert_token_ids[pos1] = (uint16_t)(tokens_done + local_t);
+            expert_token_refs[pos0] =
+                BINGO_MOE_TOKEN_REF_PACK(tokens_done + local_t, 0u);
+            global_scores_out[out_base + 1u] = best1_score;
+            if (MOE_SCHED_DEBUG_PRINT) {
+                global_indices_out[out_base + 1u] = (uint16_t)best1_eid;
             }
+            uint32_t pos1 = best1_eid * token_stride + local_counts[best1_eid]++;
+            expert_token_refs[pos1] =
+                BINGO_MOE_TOKEN_REF_PACK(tokens_done + local_t, 1u);
         }
     }
     for (uint32_t e = 0u; e < n_experts; e++) {
@@ -766,14 +770,6 @@ static inline uint64_t __host_bingo_kernel_moe_router_schedule(void *arg)
 #endif
 
 #ifdef MOE_ENABLE_MULTI_CLUSTER_MOE
-static inline void __host_moe_clear_dyn_arg(__snax_bingo_kernel_moe_dynamic_expert_args_t *arg)
-{
-    memset(arg, 0, sizeof(*arg));
-    for (uint32_t i = 0; i < 4u; i++) {
-        arg->dma_slot_expert_id[i] = -1;
-    }
-}
-
 static inline void __host_moe_initialize_device_args(
     uintptr_t c2_stage_base,
     uintptr_t c3_stage_base,
@@ -812,20 +808,9 @@ static inline void __host_moe_initialize_device_args(
                                                              c3_stage_slots),
                        static_bytes);
 
-    for (uint32_t slot = 0; slot < num_slots; slot++) {
-        __snax_bingo_kernel_moe_dynamic_expert_args_t *c2_arg =
-            (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-            (c2_stage_slots + (uint64_t)slot * (uint64_t)slot_bytes);
-        __host_moe_clear_dyn_arg(c2_arg);
-    }
-    for (uint32_t slot = 0; slot < num_slots; slot++) {
-        __snax_bingo_kernel_moe_dynamic_expert_args_t *c3_arg =
-            (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-            (c3_stage_slots + (uint64_t)slot * (uint64_t)slot_bytes);
-        __host_moe_clear_dyn_arg(c3_arg);
-    }
-
     uint64_t bytes = (uint64_t)num_slots * (uint64_t)slot_bytes;
+    memset((void *)c2_stage_slots, 0, (size_t)bytes);
+    memset((void *)c3_stage_slots, 0, (size_t)bytes);
     asm volatile("fence rw, rw" ::: "memory");
     sys_dma_blk_memcpy(get_current_chip_id(),
                        c2_dynamic_args_base,

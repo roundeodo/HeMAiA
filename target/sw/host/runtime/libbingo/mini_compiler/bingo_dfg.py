@@ -258,7 +258,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         #                    gemm(Cl1)
         for cur_node in self.node_list:
             # First find all the successors
-            succs_list = [succ for succ in self.successors(cur_node)]
+            succs_list = [
+                succ
+                for succ in self.successors(cur_node)
+                if not self[cur_node][succ].get("descriptor_sequence", False)
+            ]
             # For all the remote successors, we insert a dummy set node
             remote_succ_list = [
                 succ
@@ -395,7 +399,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         The final normal task checks only the last remaining core.
         """
         for cur_node in self.node_list:
-            preds_list = [pred for pred in self.predecessors(cur_node)]
+            preds_list = [
+                pred
+                for pred in self.predecessors(cur_node)
+                if not self[pred][cur_node].get("descriptor_sequence", False)
+            ]
             # Group predecessors by core_id
             predecessor_core_dict = {}
             for pred in preds_list:
@@ -433,6 +441,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             remaining_preds = [
                 pred
                 for pred in self.predecessors(cur_node)
+                if not self[pred][cur_node].get("descriptor_sequence", False)
                 if not (pred.node_type == "dummy" and pred.dep_check_enable)
             ]
             remaining_core_ids = sorted(
@@ -446,6 +455,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                         p
                         for p in self.predecessors(cur_node)
                         if p.assigned_core_id == split_core
+                        and not self[p][cur_node].get("descriptor_sequence", False)
                         and not (p.node_type == "dummy" and p.dep_check_enable)
                     ]
                     if not core_preds:
@@ -487,9 +497,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
           3. Within each group, add an edge from node[i] to node[i+1]
              if no path already connects them (avoids redundant edges).
 
-        Must be called AFTER entry/exit/conditional/dummy transforms
-        (which insert infrastructure nodes on specific cores) and
-        BEFORE dep info assignment.
+        Must be called after entry/exit/conditional transforms and before
+        dummy-set insertion.  The consecutive-resource relation is retained
+        even when an existing DFG path already orders the two nodes, because
+        dummy-set insertion must place all producer side effects before the
+        next task queued on that resource.
 
         Returns:
             Number of sequencing edges added.
@@ -508,18 +520,24 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             )
             resource_groups[key].append(node)
 
+        resource_successors = {}
         edges_added = 0
         for (chip, cl, core), nodes in resource_groups.items():
             # nodes are already in topological order
             for i in range(len(nodes) - 1):
                 prev_node = nodes[i]
                 next_node = nodes[i + 1]
+                resource_successors[prev_node] = next_node
                 # Skip if an edge (direct or transitive path) already exists
                 if not self.has_edge(prev_node, next_node) and not nx.has_path(
                     self, prev_node, next_node
                 ):
-                    self.add_edge(prev_node, next_node)
+                    self.add_edge(
+                        prev_node, next_node, resource_sequence=True
+                    )
                     edges_added += 1
+
+        self._resource_sequence_successors = resource_successors
 
         if edges_added > 0:
             print(
@@ -528,16 +546,98 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
             )
         return edges_added
 
+    def bingo_transform_chain_dummy_sets_before_resource_successors(self) -> int:
+        """Keep each producer's dummy sets ahead of its next resource task.
+
+        Dummy-set descriptors execute on the producer's physical resource and
+        carry fan-out dependency notifications.  If an unrelated task on that
+        resource is emitted between the producer and one of its dummy sets, a
+        blocked unrelated task can prevent the notification forever.  The HW
+        waiting/checkout queues are FIFO, so descriptor order is observable
+        behavior here, not merely a topological-sort preference.
+
+        Chain all direct dummy-set successors deterministically, then order the
+        last one before the producer's next pre-transform resource task.  This
+        adds ordering constraints only; dummy descriptors remain no-check
+        tasks and keep their original dependency-set targets.
+        """
+        resource_successors = getattr(
+            self, "_resource_sequence_successors", {}
+        )
+        edges_added = 0
+
+        for producer in list(self.nodes):
+            dummy_sets = [
+                succ
+                for succ in self.successors(producer)
+                if succ.node_type == "dummy"
+                and succ.dep_set_enable
+                and not succ.dep_check_enable
+                and (
+                    succ.assigned_chiplet_id,
+                    succ.assigned_cluster_id,
+                    succ.assigned_core_id,
+                )
+                == (
+                    producer.assigned_chiplet_id,
+                    producer.assigned_cluster_id,
+                    producer.assigned_core_id,
+                )
+            ]
+            if not dummy_sets:
+                continue
+
+            dummy_sets.sort(
+                key=lambda node: (
+                    node.dep_set_chiplet_id,
+                    node.dep_set_cluster_id,
+                    tuple(node.dep_set_list),
+                    node.node_id,
+                )
+            )
+
+            for first, second in zip(dummy_sets, dummy_sets[1:]):
+                if not nx.has_path(self, first, second):
+                    self.add_edge(first, second, descriptor_sequence=True)
+                    edges_added += 1
+
+            next_resource_task = resource_successors.get(producer)
+            last_dummy = dummy_sets[-1]
+            if (
+                next_resource_task is not None
+                and next_resource_task is not last_dummy
+                and not nx.has_path(self, last_dummy, next_resource_task)
+            ):
+                self.add_edge(
+                    last_dummy,
+                    next_resource_task,
+                    descriptor_sequence=True,
+                )
+                edges_added += 1
+
+        if edges_added > 0:
+            print(
+                "Dummy-set sequencing: added "
+                f"{edges_added} physical queue-order edges"
+            )
+        return edges_added
+
     def bingo_transform_dfg_allocate_dep_tags(self, tag_width: int) -> None:
         """Assign one identity tag to every final dependency set/check pair."""
         max_tags = 1 << tag_width
-        topo = list(nx.topological_sort(self))
-        position = {node: index for index, node in enumerate(topo)}
+        descriptor_order = [
+            node
+            for chiplet_id in self.chiplet_ids
+            for node in self._resource_balanced_topological_sort(chiplet_id)
+        ]
+        position = {node: index for index, node in enumerate(descriptor_order)}
 
         cells = {}
         set_edge_count = {}
         check_edge_count = {}
-        for producer, consumer in self.edges():
+        for producer, consumer, edge_data in self.edges(data=True):
+            if edge_data.get("descriptor_sequence", False):
+                continue
             if not (producer.dep_set_enable and consumer.dep_check_enable):
                 continue
             producer_core = producer.assigned_core_id
@@ -573,7 +673,11 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         happens_before.add_nodes_from(self.nodes())
         happens_before.add_edges_from(self.edges())
         nodes_by_resource = {}
-        for node in topo:
+        # Tag reuse must follow the order actually pushed into each physical
+        # resource queue. A different valid topological order can reverse an
+        # otherwise unordered set and clear, collapsing two sets into one
+        # scoreboard presence bit.
+        for node in descriptor_order:
             resource = (
                 node.assigned_chiplet_id,
                 node.assigned_cluster_id,
@@ -654,6 +758,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                 preds = [
                     pred
                     for pred in self.predecessors(cur_node)
+                    if not self[pred][cur_node].get("descriptor_sequence", False)
                     if not (pred.node_type == "dummy" and pred.dep_check_enable)
                 ]
                 # If there are local predecessors, assign dep_check info
@@ -690,6 +795,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                 succs = [
                     succ
                     for succ in self.successors(cur_node)
+                    if not self[cur_node][succ].get("descriptor_sequence", False)
                     if not (succ.node_type == "dummy" and succ.dep_set_enable)
                 ]
                 if len(succs) > 1:
@@ -2007,7 +2113,31 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                 else:  # L3
                     alloc_call = f"bingo_l3_alloc(0x{h.chip_id:02x}, {h.size})"
 
-                f.write(f"        uint64_t {c_var} = {alloc_call};\n")
+                alignment = getattr(h, "alignment", None)
+                if alignment is None:
+                    f.write(f"        uint64_t {c_var} = {alloc_call};\n")
+                else:
+                    raw_var = f"{c_var}_raw"
+                    if h.mem_level == "L1":
+                        aligned_alloc_call = (
+                            f"bingo_l1_alloc(0x{h.chip_id:02x}, {h.cluster_id}, "
+                            f"{h.size} + {alignment - 1})"
+                        )
+                    elif h.mem_level == "L2":
+                        aligned_alloc_call = (
+                            f"bingo_l2_alloc(0x{h.chip_id:02x}, "
+                            f"{h.size} + {alignment - 1})"
+                        )
+                    else:
+                        aligned_alloc_call = (
+                            f"bingo_l3_alloc(0x{h.chip_id:02x}, "
+                            f"{h.size} + {alignment - 1})"
+                        )
+                    f.write(f"        uint64_t {raw_var} = {aligned_alloc_call};\n")
+                    f.write(
+                        f"        uint64_t {c_var} = "
+                        f"({raw_var} + {alignment - 1}) & ~((uint64_t){alignment - 1});\n"
+                    )
                 if getattr(h, "condition", None):
                     f.write("        #endif\n")
             f.write("\n")
@@ -2468,6 +2598,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
         # Add Dummy Set/Check Nodes
         self.bingo_transform_add_resource_sequencing_edges()
         self.bingo_transform_dfg_add_dummy_set_nodes()
+        self.bingo_transform_chain_dummy_sets_before_resource_successors()
         self.bingo_transform_dfg_add_dummy_check_nodes()
         self.bingo_visualize_dfg(os.path.join(output_dir, "final_dfg"))
         self.bingo_export_dfg_to_csv(os.path.join(output_dir, "final_dfg"))

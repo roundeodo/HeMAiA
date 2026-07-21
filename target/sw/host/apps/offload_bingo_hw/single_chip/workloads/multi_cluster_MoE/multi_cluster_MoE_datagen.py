@@ -3,10 +3,10 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Dual-VersaCore multi_cluster_MoE datagen  (L15 layout, k8_8x4_4lane hw)
+# Dual-VersaCore multi_cluster_MoE datagen (bank-partition layout)
 #
-# This script emits only runtime data consumed by the workload: padded token
-# rows, router/individual/shared weights, and one flat L15 device config.
+# This script emits dense L3 token rows and canonical S0 4-column weight panels.
+# Device kernels map those tensors into the bank-partitioned L1 representation.
 #
 # Hardware: snax_dual_versacore_int16x4_4lane_postproc_v2_cluster
 #   Shape family (K=8, N-direction expand):
@@ -16,14 +16,13 @@
 #   Writer: D0(1ch) + D1(1ch), 4-lane postproc (4 int16/beat = 8 bytes/beat)
 #   TCDM: 34 ports (A:16 + B0:8 + B1:8 + D0:1 + D1:1), sparse_interconnect=true
 #
-# L15 TCDM 布局（full-size A-first, padded rows, bank coloring）:
-#   A(token buf) → B0(W/gate) → B1(V/up) → Mode0_D0 →
-#   W2_left → W2_right → Mode1_D0/D1
-#   a_row_stride = k0_bytes + a_pad = K0_total*2 + 32 bytes
-#   Mode1_D row stride follows a_row_stride as in the standalone L15 reference.
-#   b1_color=272, w2l_color=128, m1d0_color=256 (bank-rotation offsets)
+# TCDM bank layout:
+#   banks 0..15  = A / Mode1 D
+#   banks 16..47 = B0/B1 ping/pong
+#   banks 48..63 = Mode0 D
+# Mode0 and Mode1 weights use disjoint row-depth regions (4 MiB + 2 MiB).
 #
-# 参数说明（params.hjson → L15 全局变量对应关系）:
+# 参数说明（params.hjson → 模型全局变量对应关系）:
 #   k0_total = hidden_size                          (shared gate/up 输入 K)
 #   n0_total = intermediate_size                    (shared gate/up 输出 N)
 #   k1_total = intermediate_size                    (down 输入 K)
@@ -31,7 +30,7 @@
 #   n1_per_vc = hidden_size / 2                     (每个 writer 输出 N)
 #   m_total = total_tokens                          (token 总数)
 #
-# 修改 params.hjson 中的模型维度会同时调整数据、L15 配置和 DFG 参数。
+# 修改 params.hjson 中的模型维度会同时调整数据、bank layout 和 DFG 参数。
 
 import numpy as np
 import argparse
@@ -59,17 +58,17 @@ sys.path.insert(0, str(SNITCH_UTIL_SIM))
 from data_utils import (  # noqa: E402
     format_vector_definition,
 )
-from moe_l15_layout import (  # noqa: E402
+from moe_layout import (  # noqa: E402
     L15_CFG_WORDS,
-    L15_TOKEN_PADDING_BYTES,
+    L15_TOKEN_ROW_GAP_BYTES,
     SHAPE_DIMS,
-    derive_workload_params,
+    derive_bank_workload_params,
     token_row_stride,
 )
 
 np.random.seed(320)
 
-# ── L15 shape family (K=8, N-direction expand) ───────────────────────────────
+# Legacy L15 config builders below are retained for comparison experiments.
 # (name, array_shape, meshRow, tileSize, meshCol)
 def log(msg):
     print(f"[datagen] {msg}", file=sys.stderr, flush=True)
@@ -114,7 +113,7 @@ def build_l15_shape_cfg_fields(shape, globals_, placement, m_tiles=1):
     mode0_d_m_stride = n0_tiles * d_stride1
     d_bound0 = 8
     beats_per_row = mesh_col // 4
-    # Mode-1 D output uses the same padded per-token row stride as Mode-0 A.
+    # Mode-1 D output uses the same per-token row stride as Mode-0 A.
     mode1_token_stride = a_row_stride
     if mode1_token_stride < n1_total * 2:
         raise ValueError("L15 Mode-1 output row stride is smaller than logical output")
@@ -169,7 +168,7 @@ def build_l15_shape_cfg_fields(shape, globals_, placement, m_tiles=1):
         "mode0_output_elems": m_tiles * mesh_row * n0_total,
         "mode1_output_elems": m_tiles * mesh_row * n1_total,
         "mode1_output_row_stride_bytes": mode1_token_stride,
-        "mode1_padded_output_elems": m_tiles * mesh_row * (mode1_token_stride // 2),
+        "mode1_output_span_elems": m_tiles * mesh_row * (mode1_token_stride // 2),
     }
     word_count = sum(len(value) if isinstance(value, list) else 1 for value in fields.values())
     if word_count != L15_CFG_WORDS:
@@ -196,7 +195,7 @@ def format_l15_cfg_definition(name, fields):
 
 
 def emit_moe_data(**kw):
-    p = derive_workload_params(kw)
+    p = derive_bank_workload_params(kw)
     ashape = p["array_shape"]
     meshRow = p["meshRow"]
     tileSize = p["tileSize"]
@@ -260,30 +259,38 @@ def emit_moe_data(**kw):
     s0_shape = SHAPE_DIMS[0]
     data_str = []
     token_payload_bytes = p["A_token_bytes"]
-    token_stride_bytes = p["A_token_padded_bytes"]
+    token_stride_bytes = p["A_token_row_stride_bytes"]
 
-    # One canonical token buffer is consumed by router, shared experts and
-    # individual gather. Each physical row is payload followed by 32 zero bytes.
-    log(
-        f"generating input_A: {M_total} rows, "
-        f"{token_payload_bytes}B payload + {L15_TOKEN_PADDING_BYTES}B zero padding"
-    )
+    # L3 is ordinary dense row-major storage.  Each L1 gather issues one 2D
+    # descriptor per token and maps successive 16-byte K tiles to successive
+    # 512-byte TCDM rows at that token's two-bank offset.
+    log(f"generating dense input_A: {M_total} x {token_payload_bytes}B")
     A_phys = np.random.randint(
-        -256, 255, size=(rM2, rM1, meshRow_A, K1_A, tileSize_A), dtype=np.int16
+        -256, 255, size=(M_total, K1_A, tileSize_A), dtype=np.int16
     )
-    M_total_tokens = rM2 * rM1 * meshRow_A
-    A_token_data = A_phys.reshape(M_total_tokens, K1_A * tileSize_A).view(
-        np.uint8
-    )
-    A_token_pad = np.zeros(
-        (M_total_tokens, L15_TOKEN_PADDING_BYTES), dtype=np.uint8
-    )
-    A_flat = np.concatenate([A_token_data, A_token_pad], axis=1).reshape(-1)
+    A_token_data = A_phys.reshape(M_total, K1_A * tileSize_A).view(np.uint8)
+    A_flat = A_token_data.reshape(-1)
     assert A_flat.size == M_total * token_stride_bytes
     pad = (-len(A_flat)) % 64
     if pad:
         A_flat = np.pad(A_flat, (0, pad), constant_values=0)
-    data_str += [format_vector_definition("uint8_t", "input_A", A_flat)]
+    data_str += [
+        format_vector_definition("uint8_t", "input_A", A_flat, alignment=64)
+    ]
+
+    # The current Router kernel still has the historical +32-byte row stride
+    # in its streamer configuration.  Keep this private compatibility copy;
+    # shared and individual experts use dense input_A and the bank-aware 2D API.
+    router_A = np.zeros(
+        (p["padded_tokens"], p["router_legacy_A_row_stride_bytes"]),
+        dtype=np.uint8,
+    )
+    router_A[:M_total, :token_payload_bytes] = A_token_data
+    data_str += [
+        format_vector_definition(
+            "uint8_t", "router_input_A", router_A.reshape(-1), alignment=64
+        )
+    ]
 
     log("generating router_B (INT4 packed)")
     rB_values = np.random.randint(
@@ -392,30 +399,10 @@ def emit_moe_data(**kw):
             )
         ]
 
-    # Shared experts use the validated full-size L15 placement:
-    # A -> B0 -> B1 -> Mode0 D0 -> W2L -> W2R -> padded Mode1 D.
-    placement = {
-        "delta_local_a": p["l15_delta_local_a"],
-        "delta_local_b0": p["l15_delta_local_b0"],
-        "delta_local_b1": p["l15_delta_local_b1"],
-        "delta_local_d0": p["l15_delta_local_d0"],
-        "delta_local_w2l": p["l15_delta_local_w2l"],
-        "delta_local_w2r": p["l15_delta_local_w2r"],
-        "delta_local_mode1_d0": p["l15_delta_local_mode1_d0"],
-        "delta_local_mode1_d1": p["l15_delta_local_mode1_d1"],
-        "tcdm_end": p["l15_delta_cfg"],
-    }
-    cfg_fields = build_l15_shape_cfg_fields(
-        s0_shape, globals_, placement, m_tiles=sdM1
-    )
-    data_str += [
-        "// Shared-expert fused SwiGLU + down-projection config.\n"
-        + format_l15_cfg_definition("l15_dev_shared_s0_cfg", cfg_fields)
-    ]
-    tcdm_kb = placement["tcdm_end"] / 1024
+    tcdm_kb = p["bank_tcdm_size"] / 1024
     log(
-        f"L15 S0 shared layout: stride={token_stride_bytes}B, "
-        f"end={placement['tcdm_end']}B ({tcdm_kb:.1f} KiB)"
+        f"bank layout: dense L3 stride={token_stride_bytes}B, "
+        f"resident flat end={p['bank_tcdm_size']}B ({tcdm_kb:.1f} KiB)"
     )
     return data_str
 
@@ -425,7 +412,7 @@ def emit_header_file(**kw):
         "// Auto-generated by multi_cluster_MoE_datagen.py",
         "// Hardware: snax_dual_versacore_int16x4_4lane_postproc_v2_cluster",
         "// Runtime data only; no golden/check tensors.",
-        f"// Token rows: valid INT16 payload followed by {L15_TOKEN_PADDING_BYTES} zero bytes.",
+        "// Token rows are dense; L1 bank placement is produced by 2D DMA.",
         "// Do NOT edit by hand.",
         "#pragma once",
         "#include <stdint.h>",

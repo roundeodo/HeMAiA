@@ -27,8 +27,10 @@ static inline void __host_bingo_moe_print_runtime_timing(
             sp->reserved[MOE_SP_PROFILE_RESOURCE_START_IDX];
 
         // Schema v2: meta task start total resource_offset resource_cycles
-        //            peer_wait units flags result. Relative fields keep every
-        //            record below the FPGA console's 80-column capture limit.
+        //            peer_wait units flags result. "units" is DMA bytes for a
+        //            DMA resource and hardware-busy cycles for VersaCore.
+        //            Relative fields keep every record below the FPGA console's
+        //            80-column capture limit.
         printf_safe(
             "[MOE_TIMING_RECORD] %x %x %u %u %u %u %u %u %x %u\r\n",
             sp->reserved[MOE_SP_PROFILE_META_IDX],

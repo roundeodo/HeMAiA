@@ -13,12 +13,9 @@ sys.path.insert(0, str(ROOT_DIR / "target/sw/host/runtime/libbingo/mini_compiler
 
 from bingo_dfg import BingoDFG  # noqa: E402
 from bingo_kernel_args import (  # noqa: E402
-    SnaxBingoKernelDualDmaArgs,
+    HostBingoKernelCheckResultArgs,
     SnaxBingoKernelIdma1dCopyArgs,
-    SnaxBingoKernelMoeDownArgs,
-    SnaxBingoKernelMoeInitOutputPaddingArgs,
-    SnaxBingoKernelMoeSwigluArgs,
-    SnaxBingoKernelXdma1dCopyArgs,
+    SnaxBingoKernelMoeDynamicExpertBlockArgs,
 )
 from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol  # noqa: E402
 from bingo_node import BingoNode  # noqa: E402
@@ -26,7 +23,10 @@ from moe_test_layout import derive_params  # noqa: E402
 
 GEMM_CORE = 0
 DMA_CORE = 1
-TEST_CLUSTERS = (("c0", 0),)
+HOST_CORE = 2
+PROD_CLUSTERS = (("c0", 0, 1),)
+MOE_PIPELINE_CTRL_SLOT_BYTES = 1024
+MOE_PIPELINE_CTRL_BANK_OFFSET = 448
 
 
 def offset(handle, byte_offset: int):
@@ -35,6 +35,237 @@ def offset(handle, byte_offset: int):
     if isinstance(handle, BingoMemSymbol):
         return BingoMemSymbol(handle.symbol_name, offset=handle.offset + byte_offset)
     return f"{handle.get_c_var_name()} + {byte_offset}"
+
+
+class ProductionMoeCluster0SetupArgs(HostBingoKernelCheckResultArgs):
+    """Initialize one computed slot plus one gather-only next-slot descriptor."""
+
+    SLOT_BYTES = 384
+    HEADER_BYTES = 64
+    NTOKENS = 6
+
+    def __init__(self, p, mh):
+        super().__init__(
+            golden_data_addr=mh["input"],
+            output_data_addr=mh["input"],
+            data_size=1,
+            name="SETUP_PRODUCTION_SLOT",
+        )
+        self.p = p
+        self.mh = mh
+        # These L1 buffers are addressed through the production static ABI,
+        # rather than through a generated kernel-argument field. Keep direct
+        # references so the mini compiler allocates them and emits addresses.
+        for prefix, _, _ in PROD_CLUSTERS:
+            for name in (
+                "layout",
+                "gate",
+                "up",
+                "down",
+                "gate_out",
+                "pipeline_ctrl",
+                "prod_output_l3",
+            ):
+                setattr(self, f"_abi_memref_{prefix}_{name}", mh[f"{prefix}_{name}"])
+
+    def _addr(self, value, handle_name_map, as_64bit=True):
+        assignments = {}
+        self._process_addr(
+            value,
+            "value",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+            as_64bit=as_64bit,
+        )
+        return assignments["value"]
+
+    def get_post_init_code(self, args_var, handle_name_map):
+        del args_var
+        p = self.p
+        mh = self.mh
+        row_stride = p["token_row_stride"]
+        s3_row_bytes = p["token_payload_bytes"] // (2 * p["block_count"])
+        down_half_bytes = p["down_weight_bytes"] // 2
+        down_b_n_stride = [p["down_K"] * (16 << shape) for shape in range(3)]
+        down_a_m_stride = [
+            (
+                (p["down_K"] * 8)
+                // (p["base_mesh_col"] << shape)
+            )
+            * 64
+            for shape in range(3)
+        ]
+        down_d_m_stride = [
+            (p["base_mesh_row"] >> shape) * row_stride for shape in range(3)
+        ]
+        lines = [
+            f"_Static_assert(BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES == {self.SLOT_BYTES}u, "
+            '"test and production dynamic slot ABI diverged");',
+            '_Static_assert(BINGO_MOE_STATIC_ARG_SLOT_BYTES == 192u, '
+            '"test and production static slot ABI diverged");',
+        ]
+
+        for prefix, _, s1_dma in PROD_CLUSTERS:
+            runtime_cluster = 0 if prefix == "c0" else 1
+            static_l3 = self._addr(mh[f"{prefix}_prod_static_l3"], handle_name_map)
+            runtime_l3 = self._addr(mh[f"{prefix}_prod_runtime_l3"], handle_name_map)
+            runtime_l1 = self._addr(
+                mh[f"{prefix}_prod_runtime_l1"], handle_name_map, as_64bit=False
+            )
+            token_refs_l1 = self._addr(
+                mh[f"{prefix}_token_refs_l1"], handle_name_map, as_64bit=False
+            )
+            input_l3 = self._addr(mh["input"], handle_name_map)
+            gate_l3 = self._addr(mh[f"{prefix}_gate_src"], handle_name_map)
+            up_l3 = self._addr(mh[f"{prefix}_up_src"], handle_name_map)
+            down_l3 = self._addr(mh[f"{prefix}_down_src"], handle_name_map)
+            output_l3 = self._addr(
+                mh[f"{prefix}_prod_output_l3"], handle_name_map
+            )
+            l1_a = self._addr(mh[f"{prefix}_a"], handle_name_map, as_64bit=False)
+            l1_gate = self._addr(
+                mh[f"{prefix}_gate"], handle_name_map, as_64bit=False
+            )
+            l1_up = self._addr(
+                mh[f"{prefix}_up"], handle_name_map, as_64bit=False
+            )
+            l1_down = self._addr(
+                mh[f"{prefix}_down"], handle_name_map, as_64bit=False
+            )
+            l1_d = self._addr(
+                mh[f"{prefix}_gate_out"], handle_name_map, as_64bit=False
+            )
+            l1_down_d = self._addr(
+                mh[f"{prefix}_out"], handle_name_map, as_64bit=False
+            )
+            l1_scratch = self._addr(
+                mh[f"{prefix}_gate_scratch"], handle_name_map, as_64bit=False
+            )
+
+            static_name = f"prod_{prefix}_st"
+            runtime_name = f"prod_{prefix}_rt"
+            slot0_name = f"prod_{prefix}_slot0"
+            slot1_name = f"prod_{prefix}_slot1"
+            skip_s3 = 1 if prefix == "c0" else 0
+            s3_dma = 0 if prefix == "c0" else 2
+            ctrl0 = (
+                1
+                | (skip_s3 << 2)
+                | (p["s1_shape"] << 5)
+                | (p["s1_shape"] << 7)
+                | (s1_dma << 9)
+                | (s3_dma << 11)
+                | (runtime_cluster << 13)
+            )
+            ctrl1 = (
+                1
+                | (runtime_cluster << 13)
+                | (1 << 14)
+            )
+            s2_prefetch_vd = ((1 | (3 << 1)) << (2 * 3)) if prefix == "c0" else 0
+            s4_token_start = 0 if prefix == "c0" else p["s1_rows"]
+            s4_m_exec = 3 if prefix == "c0" else 1
+
+            lines += [
+                f"__snax_bingo_moe_dynamic_expert_static_args_t *{static_name} = "
+                f"(__snax_bingo_moe_dynamic_expert_static_args_t *)(uintptr_t){static_l3};",
+                f"uint8_t *{runtime_name} = (uint8_t *)(uintptr_t){runtime_l3};",
+                f"memset({static_name}, 0, sizeof(*{static_name}));",
+                f"memset({runtime_name}, 0, {self.HEADER_BYTES + 2 * self.SLOT_BYTES}u);",
+                f"memset((void *)(uintptr_t){output_l3}, 0, {p['prod_output_bytes']}u);",
+                f"{static_name}->token_refs_addr = {token_refs_l1};",
+                f"{static_name}->input_A_l3_base = {input_l3};",
+                f"{static_name}->indiv_gate_B_l3 = {gate_l3};",
+                f"{static_name}->indiv_up_B_l3 = {up_l3};",
+                f"{static_name}->indiv_down_B_l3 = {down_l3};",
+                f"{static_name}->output_l3_base = {output_l3};",
+                f"{static_name}->active_state_l1_addr = {runtime_l1};",
+                f"{static_name}->l1_a_addr = {l1_a};",
+                f"{static_name}->l1_b_gate_addr = {l1_gate};",
+                f"{static_name}->l1_b_up_addr = {l1_up};",
+                f"{static_name}->l1_b_down_addr = {l1_down};",
+                f"{static_name}->l1_d_addr = {l1_d};",
+                f"{static_name}->l1_down_d_addr = {l1_down_d};",
+                f"{static_name}->l1_d1_scratch_addr = {l1_scratch};",
+                f"{static_name}->A_token_bytes = {p['token_payload_bytes']}u;",
+                f"{static_name}->indiv_B_expert_stride = {p['gate_weight_bytes']}u;",
+                f"{static_name}->indiv_down_B_expert_stride = {p['down_weight_bytes']}u;",
+                f"{static_name}->indiv_B_block_stride = {p['gate_block_bytes']}u;",
+                f"{static_name}->indiv_down_B_block_stride = {p['down_block_bytes']}u;",
+                f"{static_name}->s1_block_count = {p['block_count']}u;",
+                f"{static_name}->s3_block_count = {p['block_count']}u;",
+                f"{static_name}->indiv_K1 = {p['gate_K']}u;",
+                f"{static_name}->indiv_N_per_block = {p['indiv_N_per_block']}u;",
+                f"{static_name}->indiv_down_K1 = {p['down_K']}u;",
+                f"{static_name}->indiv_down_N_per_block = {p['indiv_down_N_per_block']}u;",
+                f"{static_name}->rescale_mult = 1u;",
+                f"{static_name}->rescale_shift = 0u;",
+                f"{static_name}->output_expert_stride_bytes = {p['prod_output_bytes']}u;",
+                f"{static_name}->max_tokens_per_expert = {2 * self.NTOKENS}u;",
+                f"{static_name}->A_row_stride = {row_stride}u;",
+                f"{static_name}->s3_row_bytes = {s3_row_bytes}u;",
+                f"{static_name}->down_half_weight_bytes = {down_half_bytes}u;",
+                f"{static_name}->down_b_k_section = {p['down_K'] * 8 * 2}u;",
+                f"{static_name}->down_b_n_stride[0] = {down_b_n_stride[0]}u;",
+                f"{static_name}->down_b_n_stride[1] = {down_b_n_stride[1]}u;",
+                f"{static_name}->down_b_n_stride[2] = {down_b_n_stride[2]}u;",
+                f"{static_name}->down_a_m_stride[0] = {down_a_m_stride[0]}u;",
+                f"{static_name}->down_a_m_stride[1] = {down_a_m_stride[1]}u;",
+                f"{static_name}->down_a_m_stride[2] = {down_a_m_stride[2]}u;",
+                f"{static_name}->down_d_m_stride[0] = {down_d_m_stride[0]}u;",
+                f"{static_name}->down_d_m_stride[1] = {down_d_m_stride[1]}u;",
+                f"{static_name}->down_d_m_stride[2] = {down_d_m_stride[2]}u;",
+                f"((uint32_t *){runtime_name})[2] = 2u;",
+                f"((uint32_t *){runtime_name})[3] = 2u;",
+                f"__snax_bingo_kernel_moe_dynamic_expert_args_t *{slot0_name} = "
+                f"(__snax_bingo_kernel_moe_dynamic_expert_args_t *)"
+                f"({runtime_name} + {self.HEADER_BYTES}u);",
+                f"__snax_bingo_kernel_moe_dynamic_expert_args_t *{slot1_name} = "
+                f"(__snax_bingo_kernel_moe_dynamic_expert_args_t *)"
+                f"({runtime_name} + {self.HEADER_BYTES + self.SLOT_BYTES}u);",
+                f"{slot0_name}->ctrl = {ctrl0}u;",
+                f"{slot0_name}->expert_id = 0u;",
+                f"{slot0_name}->token_ref_start = 0u;",
+                f"{slot0_name}->ntokens = {self.NTOKENS}u;",
+                f"{slot0_name}->m_s2_exec = 1u;",
+                f"{slot0_name}->m_s4_exec = {s4_m_exec}u;",
+                f"{slot0_name}->dma_slot_vd = {s2_prefetch_vd}u;",
+                f"{slot0_name}->dma_slot_eids = 0u;",
+                f"{slot1_name}->ctrl = {ctrl1}u;",
+                f"{slot1_name}->expert_id = 0u;",
+                f"{slot1_name}->token_ref_start = {self.NTOKENS}u;",
+                f"{slot1_name}->ntokens = {self.NTOKENS}u;",
+            ]
+            for block in range(p["block_count"]):
+                output_offset = block * p["bank_mode0_output_block_span"]
+                lines += [
+                    f"{slot0_name}->s1_call[{block}].valid = 1u;",
+                    f"{slot0_name}->s1_call[{block}].output_D0_addr = "
+                    f"{l1_d} + {output_offset}u;",
+                    f"{slot0_name}->s1_call[{block}].N = {p['gate_N_s1']}u;",
+                    f"{slot0_name}->s1_call[{block}].array_shape = {p['s1_shape']}u;",
+                    f"{slot0_name}->s3_call[{block}].valid = {1 - skip_s3}u;",
+                    f"{slot0_name}->s3_call[{block}].N = {p['down_N_s3_block']}u;",
+                    f"{slot0_name}->s3_call[{block}].array_shape = {p['s1_shape']}u;",
+                    f"{slot0_name}->s3_call[{block}].reserved = 0u;",
+                ]
+            lines += [
+                f"{slot0_name}->s2_call.valid = 1u;",
+                f"{slot0_name}->s2_call.token_start = {p['s1_rows']}u;",
+                f"{slot0_name}->s2_call.reserved = 0u;",
+                f"{slot0_name}->s2_call.M = 1u;",
+                f"{slot0_name}->s2_call.N = {p['gate_N_s2']}u;",
+                f"{slot0_name}->s2_call.array_shape = {p['s2_shape']}u;",
+                f"{slot0_name}->s4_call.valid = 1u;",
+                f"{slot0_name}->s4_call.token_start = {s4_token_start}u;",
+                f"{slot0_name}->s4_call.reserved0 = 0u;",
+                f"{slot0_name}->s4_call.reserved1 = 0u;",
+                f"{slot0_name}->s4_call.M = {s4_m_exec}u;",
+                f"{slot0_name}->s4_call.N = {p['down_N_s4']}u;",
+                f"{slot0_name}->s4_call.array_shape = {p['s2_shape']}u;",
+            ]
+        return lines
 
 
 def get_args():
@@ -54,54 +285,80 @@ def load_params(args):
     return derive_params({**cfg, **hwcfg})
 
 
-def define_memory(p):
-    mh = {"input": BingoMemSymbol("moe_test_input_A")}
-    mh["next_gate_src"] = BingoMemSymbol("moe_test_next_gate_B")
-    mh["next_up_src"] = BingoMemSymbol("moe_test_next_up_B")
-    for prefix, cluster in TEST_CLUSTERS:
+def define_cluster0_production_memory(p):
+    """Allocate C0 using the same single-arena layout as the large workload."""
+    mh = {
+        "input": BingoMemSymbol("moe_test_input_A"),
+        "prod_slot_token_refs": BingoMemSymbol("moe_test_prod_slot_token_refs"),
+    }
+    for prefix, cluster, _ in PROD_CLUSTERS:
         mh[f"{prefix}_gate_src"] = BingoMemSymbol(f"moe_test_{prefix}_gate_B")
         mh[f"{prefix}_up_src"] = BingoMemSymbol(f"moe_test_{prefix}_up_B")
         mh[f"{prefix}_down_src"] = BingoMemSymbol(f"moe_test_{prefix}_down_B")
-        for name, size in (
-            ("a", p["token_buffer_bytes"]),
-            ("gate", p["gate_weight_bytes"]),
-            ("up", p["gate_weight_bytes"]),
-            ("down", p["down_weight_bytes"]),
-            ("gate_out", p["gate_output_bytes"]),
-            ("gate_scratch", p["gate_scratch_bytes"]),
-            ("out", p["output_bytes"]),
-            ("next_gate", p["gate_weight_bytes"]),
-            ("next_up", p["gate_weight_bytes"]),
-        ):
-            mh[f"{prefix}_{name}"] = BingoMemAlloc(
-                f"moe_test_{prefix}_{name}",
-                size=size,
-                mem_level="L1",
-                chip_id=0,
-                cluster_id=cluster,
-            )
-        mh[f"{prefix}_out_l3"] = BingoMemAlloc(
-            f"moe_test_{prefix}_out_l3", size=p["output_bytes"], mem_level="L3"
+        layout = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_l1_layout",
+            size=p["bank_tcdm_size"],
+            mem_level="L1",
+            chip_id=0,
+            cluster_id=cluster,
+            alignment=p["bank_tcdm_row_bytes"],
         )
-
-    probe_bytes = p["dma_probe_bytes"]
-    mh["probe_c0_arena"] = BingoMemAlloc(
-        "moe_test_probe_c0_arena",
-        size=2 * probe_bytes,
-        mem_level="L1",
-        chip_id=0,
-        cluster_id=0,
-    )
-    mh["probe_c1_arena"] = BingoMemAlloc(
-        "moe_test_probe_c1_arena",
-        size=2 * probe_bytes + 64,
-        mem_level="L1",
-        chip_id=0,
-        cluster_id=1,
-    )
-    mh["probe_out_l3"] = BingoMemAlloc(
-        "moe_test_probe_out_l3", size=probe_bytes, mem_level="L3"
-    )
+        mh[f"{prefix}_layout"] = layout
+        mh[f"{prefix}_a"] = offset(layout, p["bank_delta_local_a"])
+        mh[f"{prefix}_gate"] = offset(layout, p["bank_delta_local_b0"])
+        mh[f"{prefix}_up"] = offset(layout, p["bank_delta_local_b1"])
+        mh[f"{prefix}_down"] = offset(
+            layout,
+            p["bank_mode1_region_offset"] + p["bank_delta_local_b0"],
+        )
+        mh[f"{prefix}_gate_out"] = offset(layout, p["bank_delta_local_d0"])
+        mh[f"{prefix}_gate_scratch"] = mh[f"{prefix}_gate_out"]
+        mh[f"{prefix}_out"] = offset(layout, p["bank_delta_local_mode1_d0"])
+        mh[f"{prefix}_token_refs_l1"] = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_token_refs_l1",
+            size=p["prod_token_refs_bytes"],
+            mem_level="L1",
+            chip_id=0,
+            cluster_id=cluster,
+            alignment=64,
+        )
+        mh[f"{prefix}_prod_static_l3"] = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_static_l3", size=192, mem_level="L3"
+        )
+        mh[f"{prefix}_prod_runtime_l3"] = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_runtime_l3",
+            size=64 + 2 * ProductionMoeCluster0SetupArgs.SLOT_BYTES,
+            mem_level="L3",
+        )
+        mh[f"{prefix}_prod_static_l1"] = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_static_l1",
+            size=192,
+            mem_level="L1",
+            chip_id=0,
+            cluster_id=cluster,
+            alignment=64,
+        )
+        mh[f"{prefix}_prod_runtime_l1"] = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_runtime_l1",
+            size=64 + 2 * ProductionMoeCluster0SetupArgs.SLOT_BYTES,
+            mem_level="L1",
+            chip_id=0,
+            cluster_id=cluster,
+            alignment=64,
+        )
+        mh[f"{prefix}_pipeline_ctrl"] = BingoMemAlloc(
+            f"moe_test_{prefix}_pipeline_ctrl",
+            size=2 * MOE_PIPELINE_CTRL_SLOT_BYTES,
+            mem_level="L1",
+            chip_id=0,
+            cluster_id=cluster,
+            alignment=p["bank_tcdm_row_bytes"],
+        )
+        mh[f"{prefix}_prod_output_l3"] = BingoMemAlloc(
+            f"moe_test_{prefix}_prod_output_l3",
+            size=p["prod_output_bytes"],
+            mem_level="L3",
+        )
     return mh
 
 
@@ -129,412 +386,233 @@ def add_copy(dfg, cluster, src, dst, size, node_name=""):
     )
 
 
-def add_slot(dfg, p, mh, prefix, cluster, start_dependencies=()):
-    load_a = add_copy(
-        dfg,
-        cluster,
-        mh["input"],
-        mh[f"{prefix}_a"],
-        p["token_buffer_bytes"],
-        f"{prefix.upper()}_LOAD_8_TOKEN_ROWS_IDMA",
-    )
-    init_output_padding = add_node(
-        dfg,
-        cluster,
-        GEMM_CORE,
-        "__snax_bingo_kernel_moe_init_output_padding",
-        SnaxBingoKernelMoeInitOutputPaddingArgs(
-            mh[f"{prefix}_out"],
-            p["token_payload_bytes"],
-            p["token_row_stride"],
-            p["total_tokens"],
-        ),
-        f"{prefix.upper()}_INIT_OUTPUT_PADDING",
-    )
-    for dependency in start_dependencies:
-        dfg.bingo_add_edge(dependency, load_a)
-        dfg.bingo_add_edge(dependency, init_output_padding)
 
-    s1_compute = []
-    previous_weight_load = load_a
-    for block in range(p["block_count"]):
-        weight_offset = block * p["gate_block_bytes"]
-        load_gate = add_copy(
+def add_production_slot_handoff_test(dfg, p, mh):
+    """Execute slot0 fully, then store it while gathering six slot1 tokens."""
+    setup = add_node(
+        dfg,
+        0,
+        HOST_CORE,
+        "__host_bingo_kernel_check_result",
+        ProductionMoeCluster0SetupArgs(p, mh),
+        "SETUP_PRODUCTION_SLOT",
+    )
+    final_stores = []
+
+    for prefix, cluster, _ in PROD_CLUSTERS:
+        refs_to_l1 = add_copy(
             dfg,
             cluster,
-            offset(mh[f"{prefix}_gate_src"], weight_offset),
-            offset(mh[f"{prefix}_gate"], weight_offset),
-            p["gate_block_bytes"],
-            f"{prefix.upper()}_S1_LOAD_GATE_BLOCK_{block}_IDMA",
+            mh["prod_slot_token_refs"],
+            mh[f"{prefix}_token_refs_l1"],
+            p["prod_token_refs_bytes"],
+            f"{prefix.upper()}_PROD_LOAD_TOKEN_REFS",
         )
-        load_up = add_copy(
+        static_to_l1 = add_copy(
             dfg,
             cluster,
-            offset(mh[f"{prefix}_up_src"], weight_offset),
-            offset(mh[f"{prefix}_up"], weight_offset),
-            p["gate_block_bytes"],
-            f"{prefix.upper()}_S1_LOAD_UP_BLOCK_{block}_IDMA",
+            mh[f"{prefix}_prod_static_l3"],
+            mh[f"{prefix}_prod_static_l1"],
+            192,
+            f"{prefix.upper()}_PROD_LOAD_STATIC_ABI",
         )
-        dfg.bingo_add_edge(previous_weight_load, load_gate)
-        dfg.bingo_add_edge(load_gate, load_up)
-        compute = add_node(
+        runtime_to_l1 = add_copy(
+            dfg,
+            cluster,
+            mh[f"{prefix}_prod_runtime_l3"],
+            mh[f"{prefix}_prod_runtime_l1"],
+            64 + 2 * ProductionMoeCluster0SetupArgs.SLOT_BYTES,
+            f"{prefix.upper()}_PROD_LOAD_DYNAMIC_ABI",
+        )
+        dfg.bingo_add_edge(setup, refs_to_l1)
+        dfg.bingo_add_edge(refs_to_l1, static_to_l1)
+        dfg.bingo_add_edge(static_to_l1, runtime_to_l1)
+
+        slot0_addr = offset(mh[f"{prefix}_prod_runtime_l1"], 64)
+        static_addr = mh[f"{prefix}_prod_static_l1"]
+        pipeline_ctrl_addr = offset(
+            mh[f"{prefix}_pipeline_ctrl"], MOE_PIPELINE_CTRL_BANK_OFFSET
+        )
+        slot_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+            slot0_addr, static_addr, pipeline_ctrl_addr, 0
+        )
+        gather = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
+            slot_args,
+            f"{prefix.upper()}_PROD_SLOT0_GATHER_6_TOKENS",
+        )
+        dfg.bingo_add_edge(runtime_to_l1, gather)
+
+        prepare_pipeline = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dynamic_expert_prepare_pipeline",
+            slot_args,
+            f"{prefix.upper()}_PROD_PREPARE_S1_S2_PIPELINE",
+        )
+        dfg.bingo_add_edge(gather, prepare_pipeline)
+
+        s1_loads = []
+        s1_computes = []
+        for block in range(p["block_count"]):
+            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+                slot0_addr, static_addr, pipeline_ctrl_addr, block
+            )
+            load = add_node(
+                dfg,
+                cluster,
+                DMA_CORE,
+                "__snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block",
+                block_args,
+                f"{prefix.upper()}_PROD_S1_LOAD_BLOCK_{block}",
+            )
+            compute = add_node(
+                dfg,
+                cluster,
+                GEMM_CORE,
+                "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_block_pc",
+                block_args,
+                f"{prefix.upper()}_PROD_S1_COMPUTE_BLOCK_{block}",
+            )
+            if block == 0:
+                config = add_node(
+                    dfg,
+                    cluster,
+                    GEMM_CORE,
+                    "__snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0",
+                    block_args,
+                    f"{prefix.upper()}_PROD_S1_CONFIG_BLOCK0_DURING_LOAD0",
+                )
+                dfg.bingo_add_edge(prepare_pipeline, load)
+                dfg.bingo_add_edge(prepare_pipeline, config)
+                dfg.bingo_add_edge(config, compute)
+            else:
+                dfg.bingo_add_edge(s1_loads[-1], load)
+                if block >= 2:
+                    dfg.bingo_add_edge(s1_computes[-2], load)
+                dfg.bingo_add_edge(s1_computes[-1], compute)
+            dfg.bingo_add_edge(load, compute)
+            s1_loads.append(load)
+            s1_computes.append(compute)
+
+        prefetch = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down",
+            slot_args,
+            f"{prefix.upper()}_PROD_S2_DOWN_PREFETCH",
+        )
+        s2 = add_node(
             dfg,
             cluster,
             GEMM_CORE,
-            "__snax_bingo_kernel_moe_swiglu",
-            SnaxBingoKernelMoeSwigluArgs(
-                mh[f"{prefix}_a"],
-                offset(mh[f"{prefix}_gate"], weight_offset),
-                offset(mh[f"{prefix}_up"], weight_offset),
-                offset(
-                    mh[f"{prefix}_gate_out"],
-                    block * p["s1_rows"] * p["gate_block_row_bytes"],
-                ),
-                mh[f"{prefix}_gate_scratch"],
-                M=p["s1_M"],
-                K=p["gate_K"],
-                N=p["gate_N_s1"],
-                b_block_count=1,
-                b_block_stride=p["gate_block_bytes"],
-                array_shape=p["s1_shape"],
-            ),
-            f"{prefix.upper()}_S1_COMPUTE_BLOCK_{block}_SHAPE_4x8x16",
+            "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full",
+            slot_args,
+            f"{prefix.upper()}_PROD_S2_COMPUTE_LAST_2_TOKENS",
         )
-        dfg.bingo_add_edge(load_up, compute)
-        if s1_compute:
-            dfg.bingo_add_edge(s1_compute[-1], compute)
-        else:
-            dfg.bingo_add_edge(init_output_padding, compute)
-        s1_compute.append(compute)
-        previous_weight_load = load_up
+        dfg.bingo_add_edge(s1_computes[-1], prefetch)
+        dfg.bingo_add_edge(s1_computes[-1], s2)
 
-    # Controlled compute/DMA contention experiment.  The original block-1
-    # compute above is the no-contention baseline.  These two phases repeat the
-    # exact same computation while a full gate tensor is copied into an
-    # independent L1 probe buffer.  Both operations are about 5.6k RUN cycles,
-    # so neither side finishes early enough to hide most of the contention.
-    conflict_weight_offset = (p["block_count"] - 1) * p["gate_block_bytes"]
-    conflict_output_offset = (
-        (p["block_count"] - 1) * p["s1_rows"] * p["gate_block_row_bytes"]
-    )
+        s3_loads = []
+        s3_computes = []
+        for block in range(p["block_count"]):
+            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+                slot0_addr, static_addr, pipeline_ctrl_addr, block
+            )
+            load = add_node(
+                dfg,
+                cluster,
+                DMA_CORE,
+                "__snax_bingo_kernel_moe_dynamic_expert_load_down_block",
+                block_args,
+                f"{prefix.upper()}_PROD_S3_LOAD_BLOCK_{block}",
+            )
+            compute = add_node(
+                dfg,
+                cluster,
+                GEMM_CORE,
+                "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block_pc",
+                block_args,
+                f"{prefix.upper()}_PROD_S3_COMPUTE_BLOCK_{block}",
+            )
+            if block == 0:
+                config = add_node(
+                    dfg,
+                    cluster,
+                    GEMM_CORE,
+                    "__snax_bingo_kernel_moe_dynamic_expert_configure_down_block0",
+                    block_args,
+                    f"{prefix.upper()}_PROD_S3_CONFIG_BLOCK0_DURING_LOAD0",
+                )
+                for predecessor in (s2, prefetch):
+                    dfg.bingo_add_edge(predecessor, load)
+                    dfg.bingo_add_edge(predecessor, config)
+                dfg.bingo_add_edge(config, compute)
+            else:
+                dfg.bingo_add_edge(s3_loads[-1], load)
+                if block >= 2:
+                    dfg.bingo_add_edge(s3_computes[-2], load)
+                dfg.bingo_add_edge(s3_computes[-1], compute)
+            dfg.bingo_add_edge(load, compute)
+            s3_loads.append(load)
+            s3_computes.append(compute)
 
-    conflict_idma_compute = add_node(
-        dfg,
-        cluster,
-        GEMM_CORE,
-        "__snax_bingo_kernel_moe_swiglu",
-        SnaxBingoKernelMoeSwigluArgs(
-            mh[f"{prefix}_a"],
-            offset(mh[f"{prefix}_gate"], conflict_weight_offset),
-            offset(mh[f"{prefix}_up"], conflict_weight_offset),
-            offset(mh[f"{prefix}_gate_out"], conflict_output_offset),
-            mh[f"{prefix}_gate_scratch"],
-            M=p["s1_M"],
-            K=p["gate_K"],
-            N=p["gate_N_s1"],
-            b_block_count=1,
-            b_block_stride=p["gate_block_bytes"],
-            array_shape=p["s1_shape"],
-        ),
-        f"{prefix.upper()}_CONFLICT_IDMA_COMPUTE_MATCHED",
-    )
-    conflict_idma_transfer = add_node(
-        dfg,
-        cluster,
-        DMA_CORE,
-        "__snax_bingo_kernel_idma_1d_copy",
-        SnaxBingoKernelIdma1dCopyArgs(
-            mh[f"{prefix}_gate_src"], mh["probe_c0_arena"], p["dma_probe_bytes"]
-        ),
-        f"{prefix.upper()}_CONFLICT_IDMA_TRANSFER_MATCHED",
-    )
-    dfg.bingo_add_edge(s1_compute[-1], conflict_idma_compute)
-    dfg.bingo_add_edge(s1_compute[-1], conflict_idma_transfer)
+        s4 = add_node(
+            dfg,
+            cluster,
+            GEMM_CORE,
+            "__snax_bingo_kernel_moe_dynamic_expert_compute_down_full",
+            slot_args,
+            f"{prefix.upper()}_PROD_S4_COMPUTE_REMAINDER",
+        )
+        dfg.bingo_add_edge(s3_computes[-1], s4)
 
-    conflict_xdma_compute = add_node(
-        dfg,
-        cluster,
-        GEMM_CORE,
-        "__snax_bingo_kernel_moe_swiglu",
-        SnaxBingoKernelMoeSwigluArgs(
-            mh[f"{prefix}_a"],
-            offset(mh[f"{prefix}_gate"], conflict_weight_offset),
-            offset(mh[f"{prefix}_up"], conflict_weight_offset),
-            offset(mh[f"{prefix}_gate_out"], conflict_output_offset),
-            mh[f"{prefix}_gate_scratch"],
-            M=p["s1_M"],
-            K=p["gate_K"],
-            N=p["gate_N_s1"],
-            b_block_count=1,
-            b_block_stride=p["gate_block_bytes"],
-            array_shape=p["s1_shape"],
-        ),
-        f"{prefix.upper()}_CONFLICT_XDMA_COMPUTE_MATCHED",
-    )
-    conflict_xdma_transfer = add_node(
-        dfg,
-        cluster,
-        DMA_CORE,
-        "__snax_bingo_kernel_xdma_1d_copy",
-        SnaxBingoKernelXdma1dCopyArgs(
-            mh[f"{prefix}_gate_src"], mh["probe_c0_arena"], p["dma_probe_bytes"]
-        ),
-        f"{prefix.upper()}_CONFLICT_XDMA_TRANSFER_MATCHED",
-    )
-    for predecessor in (conflict_idma_compute, conflict_idma_transfer):
-        dfg.bingo_add_edge(predecessor, conflict_xdma_compute)
-        dfg.bingo_add_edge(predecessor, conflict_xdma_transfer)
+        prepare = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dynamic_expert_prepare_store_xdma_2d",
+            slot_args,
+            f"{prefix.upper()}_PROD_PREPARE_STORE_DURING_COMPUTE",
+        )
+        dfg.bingo_add_edge(
+            prefetch if prefix == "c0" else s3_loads[-1], prepare
+        )
+        store = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next",
+            slot_args,
+            f"{prefix.upper()}_PROD_SLOT0_STORE_GATHER_SLOT1_6_TOKENS",
+        )
+        dfg.bingo_add_edge(s4, store)
+        dfg.bingo_add_edge(prepare, store)
+        final_stores.append(store)
 
-    s2 = add_node(
-        dfg,
-        cluster,
-        GEMM_CORE,
-        "__snax_bingo_kernel_moe_swiglu",
-        SnaxBingoKernelMoeSwigluArgs(
-            offset(mh[f"{prefix}_a"], p["s1_rows"] * p["token_row_stride"]),
-            mh[f"{prefix}_gate"],
-            mh[f"{prefix}_up"],
-            offset(
-                mh[f"{prefix}_gate_out"],
-                p["s1_rows"] * p["gate_full_row_bytes"],
-            ),
-            mh[f"{prefix}_gate_scratch"],
-            M=p["s2_M"],
-            K=p["gate_K"],
-            N=p["gate_N_s2"],
-            b_block_count=p["block_count"],
-            b_block_stride=p["gate_block_bytes"],
-            array_shape=p["s2_shape"],
-        ),
-        f"{prefix.upper()}_S2_COMPUTE_TAIL",
-    )
-    dfg.bingo_add_edge(conflict_xdma_compute, s2)
-    dfg.bingo_add_edge(conflict_xdma_transfer, s2)
-
-    down_half_bytes = p["block_count"] * p["down_block_bytes"]
-    prefetch_s2_down = add_node(
-        dfg,
-        cluster,
-        DMA_CORE,
-        "__snax_bingo_kernel_dual_dma",
-        SnaxBingoKernelDualDmaArgs(
-            mh[f"{prefix}_down_src"],
-            mh[f"{prefix}_down"],
-            down_half_bytes,
-            offset(mh[f"{prefix}_down_src"], down_half_bytes),
-            offset(mh[f"{prefix}_down"], down_half_bytes),
-            down_half_bytes,
-        ),
-        f"{prefix.upper()}_S2_PREFETCH_DOWN_IDMA_XDMA",
-    )
-    # S2 compute and down prefetch become runnable from the same S1 boundary.
-    dfg.bingo_add_edge(conflict_xdma_compute, prefetch_s2_down)
-    dfg.bingo_add_edge(conflict_xdma_transfer, prefetch_s2_down)
-
-    s3 = add_node(
-        dfg,
-        cluster,
-        GEMM_CORE,
-        "__snax_bingo_kernel_moe_down",
-        SnaxBingoKernelMoeDownArgs(
-            mh[f"{prefix}_gate_out"],
-            mh[f"{prefix}_down"],
-            offset(mh[f"{prefix}_down"], down_half_bytes),
-            mh[f"{prefix}_out"],
-            offset(mh[f"{prefix}_out"], p["down_vc_row_bytes"]),
-            M=p["s1_M"],
-            K=p["down_K"],
-            N=p["down_N_s3_full"],
-            b_block_count=1,
-            b_block_stride=down_half_bytes,
-            array_shape=p["s1_shape"],
-            output_row_stride=p["token_row_stride"],
-        ),
-        f"{prefix.upper()}_S3_COMPUTE_FULL_SHAPE_4x8x16",
-    )
-    dfg.bingo_add_edge(s2, s3)
-    dfg.bingo_add_edge(prefetch_s2_down, s3)
-
-    prefetch_next_swiglu = add_node(
-        dfg,
-        cluster,
-        DMA_CORE,
-        "__snax_bingo_kernel_dual_dma",
-        SnaxBingoKernelDualDmaArgs(
-            mh["next_gate_src"],
-            mh[f"{prefix}_next_gate"],
-            p["gate_weight_bytes"],
-            mh["next_up_src"],
-            mh[f"{prefix}_next_up"],
-            p["gate_weight_bytes"],
-        ),
-        f"{prefix.upper()}_S3_PREFETCH_NEXT_GATE_UP_IDMA_XDMA",
-    )
-    # Start the next-expert prefetch at the same S3 boundary. The first edge
-    # also prevents it from contending with the preceding dual-DMA prefetch.
-    dfg.bingo_add_edge(prefetch_s2_down, prefetch_next_swiglu)
-    dfg.bingo_add_edge(s2, prefetch_next_swiglu)
-
-    tail_output_offset = p["s1_rows"] * p["token_row_stride"]
-    s4 = add_node(
-        dfg,
-        cluster,
-        GEMM_CORE,
-        "__snax_bingo_kernel_moe_down",
-        SnaxBingoKernelMoeDownArgs(
-            offset(
-                mh[f"{prefix}_gate_out"],
-                p["s1_rows"] * p["gate_full_row_bytes"],
-            ),
-            mh[f"{prefix}_down"],
-            offset(
-                mh[f"{prefix}_down"],
-                p["block_count"] * p["down_block_bytes"],
-            ),
-            offset(mh[f"{prefix}_out"], tail_output_offset),
-            offset(
-                mh[f"{prefix}_out"], tail_output_offset + p["down_vc_row_bytes"]
-            ),
-            M=p["s2_M"],
-            K=p["down_K"],
-            N=p["down_N_s4"],
-            b_block_count=p["block_count"],
-            b_block_stride=p["down_block_bytes"],
-            array_shape=p["s2_shape"],
-            output_row_stride=p["token_row_stride"],
-        ),
-        f"{prefix.upper()}_S4_COMPUTE_TAIL",
-    )
-    dfg.bingo_add_edge(s3, s4)
-
-    store = add_copy(
-        dfg,
-        cluster,
-        mh[f"{prefix}_out"],
-        mh[f"{prefix}_out_l3"],
-        p["output_bytes"],
-        f"{prefix.upper()}_STORE_OUTPUT_IDMA",
-    )
-    dfg.bingo_add_edge(s4, store)
-    dfg.bingo_add_edge(prefetch_next_swiglu, store)
-    return store
-
-
-def add_dma_probes(dfg, p, mh):
-    size = p["dma_probe_bytes"]
-    c0_arena = mh["probe_c0_arena"]
-
-    idma_baseline = add_node(
+    done = add_node(
         dfg,
         0,
-        DMA_CORE,
-        "__snax_bingo_kernel_idma_1d_copy",
-        SnaxBingoKernelIdma1dCopyArgs(mh["c0_gate_src"], c0_arena, size),
-        "DMA_PROBE_IDMA_C0_L3_TO_L1",
-    )
-
-    xdma_load_baseline = add_node(
-        dfg,
-        0,
-        DMA_CORE,
-        "__snax_bingo_kernel_xdma_1d_copy",
-        SnaxBingoKernelXdma1dCopyArgs(mh["c0_gate_src"], c0_arena, size),
-        "DMA_PROBE_XDMA_C0_L3_TO_L1",
-    )
-    dfg.bingo_add_edge(idma_baseline, xdma_load_baseline)
-
-    xdma_store_baseline = add_node(
-        dfg,
-        0,
-        DMA_CORE,
-        "__snax_bingo_kernel_xdma_1d_copy",
-        SnaxBingoKernelXdma1dCopyArgs(c0_arena, mh["probe_out_l3"], size),
-        "DMA_PROBE_XDMA_C0_L1_TO_L3",
-    )
-    dfg.bingo_add_edge(xdma_load_baseline, xdma_store_baseline)
-
-    dual_same_phase = add_node(
-        dfg,
-        0,
-        DMA_CORE,
-        "__snax_bingo_kernel_dual_dma",
-        SnaxBingoKernelDualDmaArgs(
-            mh["c0_gate_src"],
-            offset(c0_arena, size),
-            size,
-            mh["c0_up_src"],
-            c0_arena,
-            size,
+        HOST_CORE,
+        "__host_bingo_kernel_check_result",
+        HostBingoKernelCheckResultArgs(
+            golden_data_addr=mh["input"],
+            output_data_addr=mh["input"],
+            data_size=1,
+            name="PRODUCTION_SLOT_DONE",
         ),
-        "DMA_PROBE_DUAL_C0_SAME_BANK_PHASE",
+        "PRODUCTION_SLOT_DONE",
     )
-    dfg.bingo_add_edge(xdma_store_baseline, dual_same_phase)
+    for store in final_stores:
+        dfg.bingo_add_edge(store, done)
+    return done
 
-    dual_shifted_phase = add_node(
-        dfg,
-        0,
-        DMA_CORE,
-        "__snax_bingo_kernel_dual_dma",
-        SnaxBingoKernelDualDmaArgs(
-            mh["c0_gate_src"],
-            offset(c0_arena, size + 64),
-            size,
-            mh["c0_up_src"],
-            c0_arena,
-            size,
-        ),
-        "DMA_PROBE_DUAL_C0_SHIFTED_BANK_PHASE",
-    )
-    dfg.bingo_add_edge(dual_same_phase, dual_shifted_phase)
 
-    cross_xdma_c0 = add_node(
-        dfg,
-        0,
-        DMA_CORE,
-        "__snax_bingo_kernel_xdma_1d_copy",
-        SnaxBingoKernelXdma1dCopyArgs(
-            mh["c0_gate_src"], mh["probe_c0_arena"], size
-        ),
-        "DMA_PROBE_XDMA_C0_CROSS_CLUSTER_CONCURRENT",
-    )
-    cross_xdma_c1 = add_node(
-        dfg,
-        1,
-        DMA_CORE,
-        "__snax_bingo_kernel_xdma_1d_copy",
-        SnaxBingoKernelXdma1dCopyArgs(
-            mh["next_gate_src"], mh["probe_c1_arena"], size
-        ),
-        "DMA_PROBE_XDMA_C1_CROSS_CLUSTER_CONCURRENT",
-    )
-    dfg.bingo_add_edge(dual_shifted_phase, cross_xdma_c0)
-    dfg.bingo_add_edge(dual_shifted_phase, cross_xdma_c1)
-
-    cross_idma_c0 = add_node(
-        dfg,
-        0,
-        DMA_CORE,
-        "__snax_bingo_kernel_idma_1d_copy",
-        SnaxBingoKernelIdma1dCopyArgs(
-            mh["c0_up_src"], offset(mh["probe_c0_arena"], size), size
-        ),
-        "DMA_PROBE_IDMA_C0_CROSS_CLUSTER_CONCURRENT",
-    )
-    cross_idma_c1 = add_node(
-        dfg,
-        1,
-        DMA_CORE,
-        "__snax_bingo_kernel_idma_1d_copy",
-        SnaxBingoKernelIdma1dCopyArgs(
-            mh["next_up_src"], offset(mh["probe_c1_arena"], size), size
-        ),
-        "DMA_PROBE_IDMA_C1_CROSS_CLUSTER_CONCURRENT",
-    )
-    for cross_idma in (cross_idma_c0, cross_idma_c1):
-        dfg.bingo_add_edge(cross_xdma_c0, cross_idma)
-        dfg.bingo_add_edge(cross_xdma_c1, cross_idma)
-
-    return (cross_idma_c0, cross_idma_c1)
 
 
 def create_dfg(p, mh):
@@ -545,9 +623,11 @@ def create_dfg(p, mh):
         is_host_as_acc=True,
         chiplet_ids=[0x00],
     )
-    probe_completion = add_dma_probes(dfg, p, mh)
-    for prefix, cluster in TEST_CLUSTERS:
-        add_slot(dfg, p, mh, prefix, cluster, probe_completion)
+    print(
+        "Execute one complete C0 slot0, then store slot0 while gathering "
+        "six tokens for slot1; slot1 compute is intentionally absent"
+    )
+    add_production_slot_handoff_test(dfg, p, mh)
     return dfg
 
 
@@ -555,7 +635,7 @@ def main():
     args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
     params = load_params(args)
-    memory = define_memory(params)
+    memory = define_cluster0_production_memory(params)
     dfg = create_dfg(params, memory)
     dfg.bingo_compile_dfg(
         params["app_name"],
@@ -563,7 +643,6 @@ def main():
         args.output_offload_file_name,
         extra_include_header_list=["multi_cluster_MoE_test_data.h"],
     )
-
 
 if __name__ == "__main__":
     main()

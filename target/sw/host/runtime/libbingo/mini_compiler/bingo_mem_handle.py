@@ -35,6 +35,7 @@ class BingoMemAlloc:
         cluster_id: int = 0,
         offset: int = 0,
         condition: str = None,
+        alignment: int = None,
     ):
         """
         :param name: Logical name for the buffer (used for variable naming in generated C).
@@ -44,6 +45,7 @@ class BingoMemAlloc:
         :param cluster_id: Required for L1.
         :param offset: Byte offset to add to the allocated address.
         :param condition: Optional C preprocessor condition guarding this allocation.
+        :param alignment: Optional power-of-two alignment for the returned address.
         """
         self.name = name
         self.size = size
@@ -52,6 +54,9 @@ class BingoMemAlloc:
         self.cluster_id = cluster_id
         self.offset = offset
         self.condition = condition
+        if alignment is not None and (alignment <= 0 or alignment & (alignment - 1)):
+            raise ValueError("alignment must be a positive power of two")
+        self.alignment = alignment
     
     def get_c_var_name(self):
         return f"ptr_{self.name}"

@@ -1,8 +1,8 @@
 #pragma once
 
-// Pure-HW scheduler state carried while dense RTL task words are drained directly
-// into the per-cluster L3 slot records. This header has no SW schedule ABI,
-// validation path, or fallback path.
+// Pure-HW scheduler state used while CVA6 drains dense RTL task words and
+// materializes complete device call records in per-cluster L3 slots. This
+// header has no SW schedule ABI, validation path, or fallback path.
 
 #ifndef MOE_ENABLE_HW_SCHEDULER
 #error "host_moe_hw_path.h is only valid in a pure-HW scheduler build"
@@ -26,12 +26,14 @@ __host_moe_lower_task_word_to_slot(
 #if !defined(MOE_HW_S1_BLOCKS) || !defined(MOE_HW_S3_BLOCKS) || \
     !defined(MOE_HW_S1_ROW_BYTES) || !defined(MOE_HW_DOWN_ROW_BYTES) || \
     !defined(MOE_HW_A_ROW_STRIDE) || !defined(MOE_HW_DOWN_ROW_STRIDE) || \
-    !defined(MOE_HW_DOWN_HALF_ROW_BYTES) || !defined(MOE_HW_S1_N_BASE) || \
+    !defined(MOE_HW_DOWN_HALF_ROW_BYTES) || !defined(MOE_HW_S1_BLOCK_SPAN) || \
+    !defined(MOE_HW_S1_N_BASE) || \
     !defined(MOE_HW_S3_N_BASE)
 #error "pure-HW lowering requires compile-time MOE_HW_* layout constants"
 #endif
-#if MOE_HW_S1_BLOCKS != 2 || MOE_HW_S3_BLOCKS != 2
-#error "current compact dynamic ABI contains exactly two S1 and two S3 calls"
+#if MOE_HW_S1_BLOCKS > BINGO_MOE_MAX_BLOCKS || \
+    MOE_HW_S3_BLOCKS > BINGO_MOE_MAX_BLOCKS
+#error "generated MoE block count exceeds the dynamic task ABI"
 #endif
     uint32_t ctrl =
         (uint32_t)((task_word >> MOE_SCHED_TASK_WORD_CTRL_LSB) &
@@ -46,7 +48,7 @@ __host_moe_lower_task_word_to_slot(
     uint32_t shape_s1 =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_SHAPE_S1_LSB) &
                    MOE_SCHED_TASK_WORD_SHAPE_MASK);
-    uint32_t token_start_rank =
+    uint32_t token_ref_start =
         (uint32_t)((task_word >> MOE_SCHED_TASK_WORD_TOKEN_START_LSB) &
                    MOE_SCHED_TASK_WORD_NTOK_MASK);
     uint32_t ntok_u =
@@ -114,17 +116,9 @@ __host_moe_lower_task_word_to_slot(
     __moe_host_timing_start(MOE_HOST_TIMING_LOWER_ARG);
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_ARG_PROGRAM_START);
-    dst_arg->dma_slot_vd = 0u;
-    dst_arg->s1_call[0].valid_output_word = 0u;
-    dst_arg->s1_call[1].valid_output_word = 0u;
-    dst_arg->s2_call.valid_input_word = 0u;
-    dst_arg->s3_call[0].valid_n_word = 0u;
-    dst_arg->s3_call[1].valid_n_word = 0u;
-    dst_arg->s4_call.valid_input_word = 0u;
     dst_arg->ctrl_expert_word = MOE_PACK_U32_PAIR(arg_ctrl, expert_id);
-    dst_arg->token_range_word = MOE_PACK_U32_PAIR(token_start_rank, ntok_u);
+    dst_arg->token_range_word = MOE_PACK_U32_PAIR(token_ref_start, ntok_u);
     dst_arg->m_exec_word = MOE_PACK_U32_PAIR(m_s2_exec, m_s4_exec);
-    dst_arg->wait_for_peer_slots = local_slot;
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_ARG_PROGRAM_END);
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_end(MOE_HOST_TIMING_LOWER_ARG);
@@ -134,56 +128,45 @@ __host_moe_lower_task_word_to_slot(
     __moe_host_timing_start(MOE_HOST_TIMING_LOWER_PRE);
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_PRELOWER_START);
-    uint32_t l1_a_addr = state->l1_a_addr[ci];
     uint32_t l1_d_addr = state->l1_d_addr[ci];
-    uint32_t l1_down_d_addr = state->l1_down_d_addr[ci];
     uint32_t s1_shape_m = 8u >> shape_s1;
     uint32_t s3_shape_m = 8u >> shape_s3;
+    uint32_t s1_n = MOE_HW_S1_N_BASE >> (shape_s1 + 2u);
+    uint32_t s3_n = MOE_HW_S3_N_BASE >> (shape_s3 + 2u);
 
-    if (skip_s1 == 0u) {
-        uint64_t n_shape_word = MOE_PACK_U32_PAIR(
-            MOE_HW_S1_N_BASE >> (shape_s1 + 2u), shape_s1);
-        dst_arg->s1_call[0].valid_output_word =
-            MOE_PACK_U32_PAIR(1u, l1_d_addr);
-        dst_arg->s1_call[0].n_shape_word = n_shape_word;
-        dst_arg->s1_call[1].valid_output_word = MOE_PACK_U32_PAIR(
-            1u, l1_d_addr + s1_shape_m * MOE_HW_S1_ROW_BYTES);
-        dst_arg->s1_call[1].n_shape_word = n_shape_word;
+#pragma GCC unroll 8
+    for (uint32_t n = 0u; n < MOE_HW_S1_BLOCKS; n++) {
+        __snax_bingo_moe_dyn_s1_call_args_t *call = &dst_arg->s1_call[n];
+        call->valid_output_word = MOE_PACK_U32_PAIR(
+            skip_s1 == 0u,
+            l1_d_addr + n * MOE_HW_S1_BLOCK_SPAN);
+        call->n_shape_word = MOE_PACK_U32_PAIR(s1_n, shape_s1);
     }
 
-    if (skip_s2 == 0u && m_s2_exec != 0u) {
-        uint32_t a_offset = skip_s1 == 0u ?
-            s1_shape_m * MOE_HW_A_ROW_STRIDE : 0u;
-        uint32_t d_offset = skip_s1 == 0u ?
-            s1_shape_m * MOE_HW_S1_BLOCKS * MOE_HW_S1_ROW_BYTES : 0u;
-        dst_arg->s2_call.valid_input_word = MOE_PACK_U32_PAIR(
-            1u, l1_a_addr + a_offset);
-        dst_arg->s2_call.output_m_word = MOE_PACK_U32_PAIR(
-            l1_d_addr + d_offset, m_s2_exec);
+    uint32_t s2_token_start = (skip_s1 == 0u) ? s1_shape_m : 0u;
+    dst_arg->s2_call.valid_input_word = MOE_PACK_U32_PAIR(
+        skip_s2 == 0u && m_s2_exec != 0u,
+        s2_token_start);
+    dst_arg->s2_call.output_m_word = MOE_PACK_U32_PAIR(
+        0u, m_s2_exec);
+    dst_arg->s2_call.n_shape_word = MOE_PACK_U32_PAIR(
+        (MOE_HW_S1_BLOCKS * MOE_HW_S1_N_BASE) >> 4u, 2u);
+
+#pragma GCC unroll 8
+    for (uint32_t n = 0u; n < MOE_HW_S3_BLOCKS; n++) {
+        __snax_bingo_moe_dyn_s3_call_args_t *call = &dst_arg->s3_call[n];
+        call->valid_n_word = MOE_PACK_U32_PAIR(skip_s3 == 0u, s3_n);
+        call->shape_reserved_word = MOE_PACK_U32_PAIR(shape_s3, 0u);
     }
 
-    if (skip_s3 == 0u) {
-        uint64_t valid_n_word = MOE_PACK_U32_PAIR(
-            1u, MOE_HW_S3_N_BASE >> (shape_s3 + 2u));
-        uint64_t shape_word = MOE_PACK_U32_PAIR(shape_s3, 0u);
-        dst_arg->s3_call[0].valid_n_word = valid_n_word;
-        dst_arg->s3_call[0].shape_reserved_word = shape_word;
-        dst_arg->s3_call[1].valid_n_word = valid_n_word;
-        dst_arg->s3_call[1].shape_reserved_word = shape_word;
-    }
-
-    if (skip_s4 == 0u && m_s4_exec != 0u) {
-        uint32_t a_offset = skip_s3 == 0u ?
-            s3_shape_m * MOE_HW_S3_BLOCKS * MOE_HW_S1_ROW_BYTES : 0u;
-        uint32_t d_offset = skip_s3 == 0u ?
-            s3_shape_m * MOE_HW_DOWN_ROW_STRIDE : 0u;
-        dst_arg->s4_call.valid_input_word = MOE_PACK_U32_PAIR(
-            1u, l1_d_addr + a_offset);
-        dst_arg->s4_call.output_pair_word = MOE_PACK_U32_PAIR(
-            l1_down_d_addr + d_offset,
-            l1_down_d_addr + d_offset + MOE_HW_DOWN_HALF_ROW_BYTES);
-        dst_arg->s4_call.M = m_s4_exec;
-    }
+    uint32_t s4_token_start = (skip_s3 == 0u) ? s3_shape_m : 0u;
+    dst_arg->s4_call.valid_input_word = MOE_PACK_U32_PAIR(
+        skip_s4 == 0u && m_s4_exec != 0u,
+        s4_token_start);
+    dst_arg->s4_call.output_pair_word = MOE_PACK_U32_PAIR(0u, 0u);
+    dst_arg->s4_call.m_n_word = MOE_PACK_U32_PAIR(
+        m_s4_exec, (MOE_HW_S3_BLOCKS * MOE_HW_S3_N_BASE) >> 4u);
+    dst_arg->s4_call.shape_reserved_word = MOE_PACK_U32_PAIR(2u, 0u);
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_PRELOWER_END);
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_end(MOE_HOST_TIMING_LOWER_PRE);
@@ -193,11 +176,14 @@ __host_moe_lower_task_word_to_slot(
     __moe_host_timing_start(MOE_HOST_TIMING_LOWER_DMA);
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_DMA_PATCH_START);
+    uint32_t dma_slot_vd = 0u;
+    uint32_t dma_slot_eids = 0u;
     if (skip_s1 == 0u) {
-        dst_arg->dma_slot_vd |=
+        dma_slot_vd |=
             ((uint32_t)1u | (dma_s1 << 1u)) <<
             ((uint32_t)MOE_TASK_DMA_SLOT_S1 * 3u);
-        dst_arg->dma_slot_expert_id[MOE_TASK_DMA_SLOT_S1] = (int32_t)expert_id;
+        dma_slot_eids |=
+            (expert_id & 0x3fu) << ((uint32_t)MOE_TASK_DMA_SLOT_S1 * 6u);
     }
     if (skip_s3 == 0u || has_s2pf != 0u) {
         uint32_t slot = (has_s2pf != 0u) ?
@@ -205,21 +191,23 @@ __host_moe_lower_task_word_to_slot(
         uint32_t dma_s3_for_slot = (has_s2pf != 0u) ?
             ((shape_s3 >= 2u) ? (uint32_t)MOE_DMA_BOTH : (uint32_t)MOE_DMA_XDMA) :
             dma_s3;
-        dst_arg->dma_slot_vd |=
+        dma_slot_vd |=
             ((uint32_t)1u | (dma_s3_for_slot << 1u)) << (slot * 3u);
-        dst_arg->dma_slot_expert_id[slot] = (int32_t)expert_id;
+        dma_slot_eids |= (expert_id & 0x3fu) << (slot * 6u);
     }
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_start(MOE_HOST_TIMING_LOWER_S4PF);
 #endif
     if ((s4pf_desc & (1u << MOE_SCHED_S4PF_DESC_VALID_LSB)) != 0u &&
         (s4pf_desc & (1u << MOE_SCHED_S4PF_DESC_NO_COPY_LSB)) == 0u) {
-        dst_arg->dma_slot_vd |=
+        dma_slot_vd |=
             ((uint32_t)1u | ((uint32_t)MOE_DMA_IDMA << 1u)) <<
             ((uint32_t)MOE_TASK_DMA_SLOT_S4_PREFETCH * 3u);
-        dst_arg->dma_slot_expert_id[MOE_TASK_DMA_SLOT_S4_PREFETCH] =
-            (int32_t)s4pf_target_eid;
+        dma_slot_eids |=
+            (s4pf_target_eid & 0x3fu) <<
+            ((uint32_t)MOE_TASK_DMA_SLOT_S4_PREFETCH * 6u);
     }
+    dst_arg->dma_slot_word = MOE_PACK_U32_PAIR(dma_slot_vd, dma_slot_eids);
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_end(MOE_HOST_TIMING_LOWER_S4PF);
 #endif
@@ -234,7 +222,7 @@ __host_moe_lower_task_word_to_slot(
         "[INDIV_PLAN] C%u slot=%u eid=%u start=%u ntok=%u "
         "shape_s1=%u shape_s3=%u skip=%u%u%u%u s2pf=%u "
         "s4pf=%u/%u/e%u word=0x%08x_%08x\r\n",
-        ci + 2u, local_slot, expert_id, token_start_rank, ntok_u,
+        ci + 2u, local_slot, expert_id, token_ref_start, ntok_u,
         shape_s1, shape_s3, skip_s1, skip_s2, skip_s3, skip_s4,
         has_s2pf,
         (s4pf_desc >> MOE_SCHED_S4PF_DESC_VALID_LSB) & 1u,
@@ -308,7 +296,6 @@ static inline void __host_moe_run_scheduler_and_lower(
             next_rem_pos++;
         }
     }
-
     writed(((uint64_t)((cache_eid_c2 < 0) ? 0x80u : (uint8_t)cache_eid_c2)) |
            ((uint64_t)((cache_eid_c3 < 0) ? 0x80u : (uint8_t)cache_eid_c3) << 8) |
            ((uint64_t)(rem_count & 0x7fu) << 16) |
@@ -496,18 +483,6 @@ static inline uint64_t __host_bingo_kernel_moe_prepare_request(void *arg)
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_FINAL_STATE_START);
     uint32_t c2_slots = lower_state.slot_count[0];
     uint32_t c3_slots = lower_state.slot_count[1];
-    for (uint32_t slot = c3_slots; slot < c2_slots; slot++) {
-        __snax_bingo_kernel_moe_dynamic_expert_args_t *slot_args =
-            (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-            (cfg->c2_stage_base + (uint64_t)slot * (uint64_t)slot_bytes);
-        slot_args->wait_for_peer_slots = c3_slots;
-    }
-    for (uint32_t slot = c2_slots; slot < c3_slots; slot++) {
-        __snax_bingo_kernel_moe_dynamic_expert_args_t *slot_args =
-            (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-            (cfg->c3_stage_base + (uint64_t)slot * (uint64_t)slot_bytes);
-        slot_args->wait_for_peer_slots = c2_slots;
-    }
     cam_state[0] = lower_state.final_cam[0];
     cam_state[1] = lower_state.final_cam[1];
     runtime_state[2] = c2_slots;
@@ -538,19 +513,11 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
     uint32_t c2_slots = runtime_state[2];
     uint32_t c3_slots = runtime_state[3];
     uint32_t slot_bytes = (uint32_t)cfg->dynamic_arg_slot_bytes;
-    runtime_state[0] = 0u;
-    runtime_state[1] = 0u;
-
     uint32_t *c2_stage_header = (uint32_t *)(uintptr_t)cfg->c2_stage_base;
     uint32_t *c3_stage_header = (uint32_t *)(uintptr_t)cfg->c3_stage_base;
-    c2_stage_header[0] = 0u;
-    c2_stage_header[1] = 0u;
-    c2_stage_header[2] = c2_slots;
-    c2_stage_header[3] = c3_slots;
-    c3_stage_header[0] = 0u;
-    c3_stage_header[1] = 0u;
-    c3_stage_header[2] = c2_slots;
-    c3_stage_header[3] = c3_slots;
+    uint64_t active_slot_word = MOE_PACK_U32_PAIR(c2_slots, c3_slots);
+    ((uint64_t *)c2_stage_header)[1] = active_slot_word;
+    ((uint64_t *)c3_stage_header)[1] = active_slot_word;
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_EXEC_INIT_END);
 
     uint64_t c2_runtime_bytes = 64u +
@@ -561,14 +528,31 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
 
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_EXEC_FLUSH1_START);
     asm volatile("fence rw, rw" ::: "memory");
-    sys_dma_blk_memcpy(
+    (void)sys_dma_memcpy(
         chip_id, cfg->c2_active_state_l1_addr,
         (uint64_t)chiplet_addr_transform_full(chip_id, cfg->c2_stage_base),
         c2_runtime_bytes);
-    sys_dma_blk_memcpy(
+    uint32_t last_tf_id = (uint32_t)sys_dma_memcpy(
         chip_id, cfg->c3_active_state_l1_addr,
         (uint64_t)chiplet_addr_transform_full(chip_id, cfg->c3_stage_base),
         c3_runtime_bytes);
+    /* Gather runs on a cluster DM core. Keep its scalar token-reference reads
+     * in local TCDM instead of stalling descriptor submission on L3 reads. */
+    uint64_t token_refs_src = (uint64_t)chiplet_addr_transform_full(
+        chip_id, cfg->expert_token_refs_addr);
+    if (c2_slots != 0u) {
+        last_tf_id = (uint32_t)sys_dma_memcpy(
+            chip_id, cfg->c2_token_refs_l1_addr, token_refs_src,
+            cfg->token_refs_bytes);
+    }
+    if (c3_slots != 0u) {
+        last_tf_id = (uint32_t)sys_dma_memcpy(
+            chip_id, cfg->c3_token_refs_l1_addr, token_refs_src,
+            cfg->token_refs_bytes);
+    }
+    while (*(sys_dma_done_ptr(chip_id)) != last_tf_id) {
+        asm volatile("nop");
+    }
     asm volatile("fence rw, rw" ::: "memory");
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_EXEC_FLUSH1_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_EXECUTE_END);

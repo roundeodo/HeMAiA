@@ -472,6 +472,133 @@ class SnaxBingoKernelDualVcL15MoeFullArgs(BingoKernelArgs):
         return assignments
 
 
+class SnaxBingoKernelMoeStageTokens2dArgs(BingoKernelArgs):
+    def __init__(self, src_addr, dst_addr, token_count: int, token_bytes: int):
+        self.src_addr = src_addr
+        self.dst_addr = dst_addr
+        self.token_count = token_count
+        self.token_bytes = token_bytes
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_moe_stage_tokens_2d_args_t"
+
+    def get_c_field_assignments(self, handle_name_map):
+        assignments = {}
+        self._process_addr(
+            self.src_addr, "src_addr", assignments, handle_name_map,
+            split_64bit=False, as_64bit=True,
+        )
+        self._process_addr(
+            self.dst_addr, "dst_addr", assignments, handle_name_map,
+            split_64bit=False,
+        )
+        assignments["token_count"] = str(self.token_count)
+        assignments["token_bytes"] = str(self.token_bytes)
+        return assignments
+
+
+class SnaxBingoKernelMoeStageWeightPair2dArgs(BingoKernelArgs):
+    def __init__(
+        self, src0_addr, src1_addr, dst0_addr, dst1_addr,
+        bytes_per_block: int, block_count: int, binding: int,
+        phase_xor: int = 0,
+    ):
+        self.src0_addr = src0_addr
+        self.src1_addr = src1_addr
+        self.dst0_addr = dst0_addr
+        self.dst1_addr = dst1_addr
+        self.bytes_per_block = bytes_per_block
+        self.block_count = block_count
+        self.binding = binding
+        self.phase_xor = phase_xor
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_moe_stage_weight_pair_2d_args_t"
+
+    def get_c_field_assignments(self, handle_name_map):
+        assignments = {}
+        for field in ("src0_addr", "src1_addr"):
+            self._process_addr(
+                getattr(self, field), field, assignments, handle_name_map,
+                split_64bit=False, as_64bit=True,
+            )
+        for field in ("dst0_addr", "dst1_addr"):
+            self._process_addr(
+                getattr(self, field), field, assignments, handle_name_map,
+                split_64bit=False,
+            )
+        assignments["bytes_per_block"] = str(self.bytes_per_block)
+        assignments["block_count"] = str(self.block_count)
+        assignments["binding"] = str(self.binding)
+        assignments["phase_xor"] = str(self.phase_xor)
+        return assignments
+
+
+class SnaxBingoKernelMoeStoreTokens2dArgs(BingoKernelArgs):
+    def __init__(
+        self, src_d0_addr, src_d1_addr, dst_addr,
+        token_count: int, token_bytes: int,
+    ):
+        self.src_d0_addr = src_d0_addr
+        self.src_d1_addr = src_d1_addr
+        self.dst_addr = dst_addr
+        self.token_count = token_count
+        self.token_bytes = token_bytes
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_moe_store_tokens_2d_args_t"
+
+    def get_c_field_assignments(self, handle_name_map):
+        assignments = {}
+        for field in ("src_d0_addr", "src_d1_addr"):
+            self._process_addr(
+                getattr(self, field), field, assignments, handle_name_map,
+                split_64bit=False,
+            )
+        self._process_addr(
+            self.dst_addr, "dst_addr", assignments, handle_name_map,
+            split_64bit=False, as_64bit=True,
+        )
+        assignments["token_count"] = str(self.token_count)
+        assignments["token_bytes"] = str(self.token_bytes)
+        return assignments
+
+
+class SnaxBingoKernelDualVcBankMoeFullArgs(BingoKernelArgs):
+    def __init__(
+        self, tcdm_base, token_count: int, hidden_size: int,
+        intermediate_size: int, s1_block_count: int, s3_block_count: int,
+        chunk_cols: int,
+        rescale_mult: int = 1, rescale_shift: int = 0,
+    ):
+        self.tcdm_base = tcdm_base
+        self.token_count = token_count
+        self.hidden_size = hidden_size
+        self.intermediate_size = intermediate_size
+        self.s1_block_count = s1_block_count
+        self.s3_block_count = s3_block_count
+        self.chunk_cols = chunk_cols
+        self.rescale_mult = rescale_mult
+        self.rescale_shift = rescale_shift
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_dual_vc_bank_moe_full_args_t"
+
+    def get_c_field_assignments(self, handle_name_map):
+        assignments = {}
+        self._process_addr(
+            self.tcdm_base, "tcdm_base", assignments, handle_name_map,
+            split_64bit=False,
+        )
+        for field in (
+            "token_count", "hidden_size", "intermediate_size",
+            "s1_block_count", "s3_block_count", "chunk_cols",
+            "rescale_mult", "rescale_shift",
+        ):
+            assignments[field] = str(getattr(self, field))
+        return assignments
+
+
 class SnaxBingoKernelMoeSwigluArgs(BingoKernelArgs):
     """Direct S1/S2 SwiGLU args without scheduler or dynamic-slot ABI."""
 
@@ -601,49 +728,125 @@ class SnaxBingoKernelMoeDownArgs(BingoKernelArgs):
         return assignments
 
 
-class SnaxBingoKernelMoeInitOutputPaddingArgs(BingoKernelArgs):
-    """Args for the one-time L15 output-padding initializer."""
+class SnaxBingoKernelMoeActiveCfgPreloadTestArgs(BingoKernelArgs):
+    """Arguments shared by the exact last-S1 -> S2 -> S3 regression."""
 
     def __init__(
         self,
-        output_base: Union[BingoMemAlloc, int],
-        row_payload_bytes: int,
-        row_stride_bytes: int,
-        rows: int,
+        input_s1_A_addr,
+        input_s2_A_addr,
+        input_gate_B_addr,
+        input_up_B_addr,
+        s1_output_D0_addr,
+        s2_output_D0_addr,
+        swiglu_output_D1_addr,
+        down_input_A_addr,
+        input_down_B0_addr,
+        input_down_B1_addr,
+        down_output_D0_addr,
+        down_output_D1_addr,
+        s1_M: int,
+        s1_N: int,
+        s1_array_shape: int,
+        s2_M: int,
+        swiglu_K: int,
+        s2_N: int,
+        s2_b_block_count: int,
+        swiglu_b_block_stride: int,
+        s2_array_shape: int,
+        down_M: int,
+        down_K: int,
+        down_N: int,
+        down_array_shape: int,
+        down_output_row_stride: int,
+        rescale_mult: int = 1,
+        rescale_shift: int = 0,
     ):
-        self.output_base = output_base
-        self.row_payload_bytes = row_payload_bytes
-        self.row_stride_bytes = row_stride_bytes
-        self.rows = rows
+        self.input_s1_A_addr = input_s1_A_addr
+        self.input_s2_A_addr = input_s2_A_addr
+        self.input_gate_B_addr = input_gate_B_addr
+        self.input_up_B_addr = input_up_B_addr
+        self.s1_output_D0_addr = s1_output_D0_addr
+        self.s2_output_D0_addr = s2_output_D0_addr
+        self.swiglu_output_D1_addr = swiglu_output_D1_addr
+        self.down_input_A_addr = down_input_A_addr
+        self.input_down_B0_addr = input_down_B0_addr
+        self.input_down_B1_addr = input_down_B1_addr
+        self.down_output_D0_addr = down_output_D0_addr
+        self.down_output_D1_addr = down_output_D1_addr
+        self.s1_M = s1_M
+        self.s1_N = s1_N
+        self.s1_array_shape = s1_array_shape
+        self.s2_M = s2_M
+        self.swiglu_K = swiglu_K
+        self.s2_N = s2_N
+        self.s2_b_block_count = s2_b_block_count
+        self.swiglu_b_block_stride = swiglu_b_block_stride
+        self.s2_array_shape = s2_array_shape
+        self.down_M = down_M
+        self.down_K = down_K
+        self.down_N = down_N
+        self.down_array_shape = down_array_shape
+        self.down_output_row_stride = down_output_row_stride
+        self.rescale_mult = rescale_mult
+        self.rescale_shift = rescale_shift
 
     def get_struct_name(self) -> str:
-        return "__snax_bingo_kernel_moe_init_output_padding_args_t"
+        return "__snax_bingo_kernel_moe_active_cfg_preload_test_args_t"
 
-    def get_c_field_assignments(
-        self, handle_name_map: Dict[BingoMemAlloc, str]
-    ) -> Dict[str, str]:
+    def get_c_field_assignments(self, handle_name_map):
         assignments = {}
-        self._process_addr(
-            self.output_base,
-            "output_base",
-            assignments,
-            handle_name_map,
-            split_64bit=False,
-        )
-        assignments["row_payload_bytes"] = str(self.row_payload_bytes)
-        assignments["row_stride_bytes"] = str(self.row_stride_bytes)
-        assignments["rows"] = str(self.rows)
+        for field in (
+            "input_s1_A_addr",
+            "input_s2_A_addr",
+            "input_gate_B_addr",
+            "input_up_B_addr",
+            "s1_output_D0_addr",
+            "s2_output_D0_addr",
+            "swiglu_output_D1_addr",
+            "down_input_A_addr",
+            "input_down_B0_addr",
+            "input_down_B1_addr",
+            "down_output_D0_addr",
+            "down_output_D1_addr",
+        ):
+            self._process_addr(
+                getattr(self, field), field, assignments, handle_name_map,
+                split_64bit=False,
+            )
+        for field in (
+            "s1_M",
+            "s1_N",
+            "s1_array_shape",
+            "s2_M",
+            "swiglu_K",
+            "s2_N",
+            "s2_b_block_count",
+            "swiglu_b_block_stride",
+            "s2_array_shape",
+            "down_M",
+            "down_K",
+            "down_N",
+            "down_array_shape",
+            "down_output_row_stride",
+            "rescale_mult",
+            "rescale_shift",
+        ):
+            assignments[field] = str(getattr(self, field))
         return assignments
+
 
 class SnaxBingoKernelMoeDynamicExpertBlockArgs(BingoKernelArgs):
     def __init__(
         self,
         task_arg_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         static_arg_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        pipeline_ctrl_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         block_idx: int,
     ):
         self.task_arg_addr = task_arg_addr
         self.static_arg_addr = static_arg_addr
+        self.pipeline_ctrl_addr = pipeline_ctrl_addr
         self.block_idx = block_idx
 
     def get_struct_name(self) -> str:
@@ -667,8 +870,52 @@ class SnaxBingoKernelMoeDynamicExpertBlockArgs(BingoKernelArgs):
             handle_name_map,
             split_64bit=False,
         )
+        self._process_addr(
+            self.pipeline_ctrl_addr,
+            "pipeline_ctrl_addr",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+        )
         assignments["block_idx"] = str(self.block_idx)
         return assignments
+
+
+class SnaxBingoKernelMoeInitOutputGapsArgs(BingoKernelArgs):
+    """One-time initialization for L15 row gaps skipped by Mode-1 writers."""
+
+    def __init__(
+        self,
+        output_base: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        row_payload_bytes: int,
+        row_stride_bytes: int,
+        rows: int,
+    ):
+        self.output_base = output_base
+        self.row_payload_bytes = row_payload_bytes
+        self.row_stride_bytes = row_stride_bytes
+        self.rows = rows
+
+    def get_struct_name(self) -> str:
+        return "__snax_bingo_kernel_moe_init_output_gaps_args_t"
+
+    def get_c_field_assignments(
+        self, handle_name_map: Dict[BingoMemAlloc, str]
+    ) -> Dict[str, str]:
+        assignments = {}
+        self._process_addr(
+            self.output_base,
+            "output_base",
+            assignments,
+            handle_name_map,
+            split_64bit=False,
+        )
+        assignments["row_payload_bytes"] = str(self.row_payload_bytes)
+        assignments["row_stride_bytes"] = str(self.row_stride_bytes)
+        assignments["rows"] = str(self.rows)
+        return assignments
+
+
 # BINGO XDMA 1D Copy
 class SnaxBingoKernelXdma1dCopyArgs(BingoKernelArgs):
     def __init__(self, src_addr: Union[BingoMemAlloc, int], dst_addr: Union[BingoMemAlloc, int], size: int):
@@ -1126,7 +1373,7 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
         router_m1: int,
         router_n1: int,
         expert_token_counts_out_addr: Union[BingoMemAlloc, str, int] = 0,
-        expert_token_ids_addr: Union[BingoMemAlloc, str, int] = 0,
+        expert_token_refs_addr: Union[BingoMemAlloc, str, int] = 0,
         max_tokens_per_expert: int = 0,
     ):
         self.total_tokens = total_tokens
@@ -1134,7 +1381,7 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
         self.global_indices_out_addr = global_indices_out_addr
         self.global_scores_out_addr = global_scores_out_addr
         self.expert_token_counts_out_addr = expert_token_counts_out_addr
-        self.expert_token_ids_addr = expert_token_ids_addr
+        self.expert_token_refs_addr = expert_token_refs_addr
         self.max_tokens_per_expert = max_tokens_per_expert
         self.expert_number_each_layer = expert_number_each_layer
         self.individual_expert_number_k = individual_expert_number_k
@@ -1184,8 +1431,8 @@ class HostBingoKernelMoERouterScheduleArgs(BingoKernelArgs):
             as_64bit=True,
         )
         self._process_addr(
-            self.expert_token_ids_addr,
-            "expert_token_ids_addr",
+            self.expert_token_refs_addr,
+            "expert_token_refs_addr",
             assignments,
             handle_name_map,
             split_64bit=False,
@@ -1216,60 +1463,42 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         cam_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         request_out_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         schedule_out_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        expert_token_ids_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        expert_token_refs_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         n_experts: int,
         topk_indices_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         M_total: int,
         top_k: int,
-        expert_token_counts_valid: int = 0,
         runtime_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c2_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c3_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         dynamic_arg_slot_bytes: int = 0,
-        dynamic_num_slots: int = 0,
         c2_l1_a: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c2_l1_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c2_l1_down_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c3_l1_a: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c3_l1_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c3_l1_down_d: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
-        A_token_bytes: int = 0,
-        indiv_D_tile_bytes: int = 0,
-        indiv_down_D_tile_bytes: int = 0,
-        indiv_N_per_block: int = 0,
-        indiv_down_N_per_block: int = 0,
-        s1_block_count: int = 0,
-        s3_block_count: int = 0,
         max_tokens_per_expert: int = 0,
     ):
         self.expert_token_counts_addr = expert_token_counts_addr
         self.cam_state_addr = cam_state_addr
         self.request_out_addr = request_out_addr
         self.schedule_out_addr = schedule_out_addr
-        self.expert_token_ids_addr = expert_token_ids_addr
+        self.expert_token_refs_addr = expert_token_refs_addr
         self.n_experts = n_experts
         self.topk_indices_l3 = topk_indices_l3
         self.M_total = M_total
         self.top_k = top_k
-        self.expert_token_counts_valid = expert_token_counts_valid
         self.runtime_state_addr = runtime_state_addr
         self.c2_stage_base = c2_stage_base
         self.c3_stage_base = c3_stage_base
         self.dynamic_arg_slot_bytes = dynamic_arg_slot_bytes
-        self.dynamic_num_slots = dynamic_num_slots
         self.c2_l1_a = c2_l1_a
         self.c2_l1_d = c2_l1_d
         self.c2_l1_down_d = c2_l1_down_d
         self.c3_l1_a = c3_l1_a
         self.c3_l1_d = c3_l1_d
         self.c3_l1_down_d = c3_l1_down_d
-        self.A_token_bytes = A_token_bytes
-        self.indiv_D_tile_bytes = indiv_D_tile_bytes
-        self.indiv_down_D_tile_bytes = indiv_down_D_tile_bytes
-        self.indiv_N_per_block = indiv_N_per_block
-        self.indiv_down_N_per_block = indiv_down_N_per_block
-        self.s1_block_count = s1_block_count
-        self.s3_block_count = s3_block_count
         self.max_tokens_per_expert = max_tokens_per_expert
 
     def get_struct_name(self) -> str:
@@ -1321,30 +1550,19 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
             as_64bit=True,
         )
         assignments["dynamic_arg_slot_bytes"] = str(self.dynamic_arg_slot_bytes)
-        for attr in (
-            "c2_l1_a",
-            "c2_l1_d",
-            "c2_l1_down_d",
-            "c3_l1_a",
-            "c3_l1_d",
-            "c3_l1_down_d",
+        for value, field in (
+            (self.c2_l1_a, "c2_l1_a"),
+            (self.c2_l1_d, "c2_l1_d"),
+            (self.c2_l1_down_d, "c2_l1_down_d"),
+            (self.c3_l1_a, "c3_l1_a"),
+            (self.c3_l1_d, "c3_l1_d"),
+            (self.c3_l1_down_d, "c3_l1_down_d"),
         ):
             self._process_addr(
-                getattr(self, attr),
-                attr,
-                assignments,
-                handle_name_map,
-                split_64bit=False,
-                as_64bit=True,
+                value, field, assignments, handle_name_map,
+                split_64bit=False, as_64bit=True,
             )
         assignments[_MOE_SW_SCHED_ABI_IF] = ""
-        assignments["A_token_bytes"] = str(self.A_token_bytes)
-        assignments["indiv_D_tile_bytes"] = str(self.indiv_D_tile_bytes)
-        assignments["indiv_down_D_tile_bytes"] = str(self.indiv_down_D_tile_bytes)
-        assignments["indiv_N_per_block"] = str(self.indiv_N_per_block)
-        assignments["indiv_down_N_per_block"] = str(self.indiv_down_N_per_block)
-        assignments["s1_block_count"] = str(self.s1_block_count)
-        assignments["s3_block_count"] = str(self.s3_block_count)
         assignments["max_tokens_per_expert"] = str(self.max_tokens_per_expert)
         self._process_addr(
             self.request_out_addr,
@@ -1363,8 +1581,8 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
             as_64bit=True,
         )
         self._process_addr(
-            self.expert_token_ids_addr,
-            "expert_token_ids_addr",
+            self.expert_token_refs_addr,
+            "expert_token_refs_addr",
             assignments,
             handle_name_map,
             split_64bit=False,
@@ -1380,8 +1598,6 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
         )
         assignments["M_total"] = str(self.M_total)
         assignments["top_k"] = str(self.top_k)
-        assignments["expert_token_counts_valid"] = str(self.expert_token_counts_valid)
-        assignments["dynamic_num_slots"] = str(self.dynamic_num_slots)
         assignments[_MOE_SW_SCHED_ABI_ENDIF] = ""
         return assignments
 
@@ -1392,9 +1608,11 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
 class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
     def __init__(
         self,
-        request_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         schedule_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
-        expert_token_ids_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        expert_token_refs_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        c2_token_refs_l1_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        c3_token_refs_l1_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
+        token_refs_bytes: int,
         cam_state_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         input_A_l3_base: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         indiv_gate_B_l3: Union[BingoMemAlloc, BingoMemSymbol, int, str],
@@ -1419,24 +1637,23 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
         c2_active_state_l1_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         c3_active_state_l1_addr: Union[BingoMemAlloc, BingoMemSymbol, int, str],
         A_token_bytes: int,
-        indiv_B_expert_stride: int,
-        indiv_down_B_expert_stride: int,
-        indiv_B_tile_bytes: int = 0,
+        indiv_B_expert_stride: int = 0,
+        indiv_down_B_expert_stride: int = 0,
         indiv_B_block_stride: int = 0,
-        indiv_D_tile_bytes: int = 0,
-        indiv_down_B_tile_bytes: int = 0,
         indiv_down_B_block_stride: int = 0,
-        indiv_down_D_tile_bytes: int = 0,
         s1_block_count: int = 0,
         s3_block_count: int = 0,
         indiv_K1: int = 0,
         indiv_N_per_block: int = 0,
         indiv_down_K1: int = 0,
         indiv_down_N_per_block: int = 0,
-        rescale_mult: int = 1,
-        rescale_shift: int = 0,
+        mesh_row: int = 8,
+        mesh_col: int = 4,
+        tile_size: int = 8,
         output_expert_stride_bytes: int = 0,
         max_tokens_per_expert: int = 0,
+        rescale_mult: int = 1,
+        rescale_shift: int = 0,
         c2_static_args_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c3_static_args_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c2_dynamic_args_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
@@ -1446,9 +1663,11 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
         c2_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
         c3_stage_base: Union[BingoMemAlloc, BingoMemSymbol, int, str] = 0,
     ):
-        self.request_addr = request_addr
         self.schedule_addr = schedule_addr
-        self.expert_token_ids_addr = expert_token_ids_addr
+        self.expert_token_refs_addr = expert_token_refs_addr
+        self.c2_token_refs_l1_addr = c2_token_refs_l1_addr
+        self.c3_token_refs_l1_addr = c3_token_refs_l1_addr
+        self.token_refs_bytes = token_refs_bytes
         self.cam_state_addr = cam_state_addr
         self.input_A_l3_base = input_A_l3_base
         self.indiv_gate_B_l3 = indiv_gate_B_l3
@@ -1475,22 +1694,21 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
         self.A_token_bytes = A_token_bytes
         self.indiv_B_expert_stride = indiv_B_expert_stride
         self.indiv_down_B_expert_stride = indiv_down_B_expert_stride
-        self.indiv_B_tile_bytes = indiv_B_tile_bytes
         self.indiv_B_block_stride = indiv_B_block_stride
-        self.indiv_D_tile_bytes = indiv_D_tile_bytes
-        self.indiv_down_B_tile_bytes = indiv_down_B_tile_bytes
         self.indiv_down_B_block_stride = indiv_down_B_block_stride
-        self.indiv_down_D_tile_bytes = indiv_down_D_tile_bytes
         self.s1_block_count = s1_block_count
         self.s3_block_count = s3_block_count
         self.indiv_K1 = indiv_K1
         self.indiv_N_per_block = indiv_N_per_block
         self.indiv_down_K1 = indiv_down_K1
         self.indiv_down_N_per_block = indiv_down_N_per_block
-        self.rescale_mult = rescale_mult
-        self.rescale_shift = rescale_shift
+        self.mesh_row = mesh_row
+        self.mesh_col = mesh_col
+        self.tile_size = tile_size
         self.output_expert_stride_bytes = output_expert_stride_bytes
         self.max_tokens_per_expert = max_tokens_per_expert
+        self.rescale_mult = rescale_mult
+        self.rescale_shift = rescale_shift
         self.c2_static_args_base = c2_static_args_base
         self.c3_static_args_base = c3_static_args_base
         self.c2_dynamic_args_base = c2_dynamic_args_base
@@ -1537,15 +1755,33 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
             return self._addr_expr(value, handle_name_map)
 
         def static_record(name: str, cluster: str) -> list[str]:
+            row_stride = self.A_token_bytes
+            s3_row_bytes = (self.indiv_down_N_per_block // 4) * 512
+            down_half_weight_bytes = (
+                self.s3_block_count * self.indiv_down_B_block_stride
+            )
+            down_b_n_stride = [
+                self.indiv_down_K1 * (16 << shape) for shape in range(3)
+            ]
+            down_a_m_stride = [
+                (
+                    (self.indiv_down_K1 * self.tile_size)
+                    // (self.mesh_col << shape)
+                )
+                * 64
+                for shape in range(3)
+            ]
+            down_d_m_stride = [
+                (self.mesh_row >> shape) * row_stride for shape in range(3)
+            ]
             return [
                 f"const __snax_bingo_moe_dynamic_expert_static_args_t {name} = {{",
-                f"    .token_ids_addr = {addr(self.expert_token_ids_addr)},",
+                f"    .token_refs_addr = (uint32_t){addr(getattr(self, cluster + '_token_refs_l1_addr'))},",
                 f"    .input_A_l3_base = {addr(self.input_A_l3_base)},",
                 f"    .indiv_gate_B_l3 = {addr(self.indiv_gate_B_l3)},",
                 f"    .indiv_up_B_l3 = {addr(self.indiv_up_B_l3)},",
                 f"    .indiv_down_B_l3 = {addr(self.indiv_down_B_l3)},",
                 f"    .output_l3_base = {addr(self.output_l3_addr)},",
-                f"    .runtime_state_addr = {addr(self.runtime_state_addr)},",
                 f"    .active_state_l1_addr = (uint32_t){addr(getattr(self, cluster + '_active_state_l1_addr'))},",
                 f"    .l1_a_addr = (uint32_t){addr(getattr(self, cluster + '_l1_a'))},",
                 f"    .l1_b_gate_addr = (uint32_t){addr(getattr(self, cluster + '_l1_b_gate'))},",
@@ -1557,11 +1793,10 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
                 f"    .A_token_bytes = {self.A_token_bytes}u,",
                 f"    .indiv_B_expert_stride = {self.indiv_B_expert_stride}u,",
                 f"    .indiv_down_B_expert_stride = {self.indiv_down_B_expert_stride}u,",
-                f"    .indiv_B_tile_bytes = {self.indiv_B_tile_bytes}u,",
                 f"    .indiv_B_block_stride = {self.indiv_B_block_stride}u,",
-                f"    .indiv_down_B_tile_bytes = {self.indiv_down_B_tile_bytes}u,",
                 f"    .indiv_down_B_block_stride = {self.indiv_down_B_block_stride}u,",
-                f"    .indiv_down_D_tile_bytes = {self.indiv_down_D_tile_bytes}u,",
+                f"    .s1_block_count = {self.s1_block_count}u,",
+                f"    .s3_block_count = {self.s3_block_count}u,",
                 f"    .indiv_K1 = {self.indiv_K1}u,",
                 f"    .indiv_N_per_block = {self.indiv_N_per_block}u,",
                 f"    .indiv_down_K1 = {self.indiv_down_K1}u,",
@@ -1570,8 +1805,19 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
                 f"    .rescale_shift = {self.rescale_shift}u,",
                 f"    .output_expert_stride_bytes = {self.output_expert_stride_bytes}u,",
                 f"    .max_tokens_per_expert = {self.max_tokens_per_expert}u,",
-                f"    .s1_block_count = {self.s1_block_count}u,",
-                f"    .s3_block_count = {self.s3_block_count}u,",
+                f"    .A_row_stride = {row_stride}u,",
+                f"    .s3_row_bytes = {s3_row_bytes}u,",
+                f"    .down_half_weight_bytes = {down_half_weight_bytes}u,",
+                f"    .down_b_k_section = {self.indiv_down_K1 * self.tile_size * 2}u,",
+                "    .down_b_n_stride = {"
+                + ", ".join(f"{value}u" for value in down_b_n_stride)
+                + "},",
+                "    .down_a_m_stride = {"
+                + ", ".join(f"{value}u" for value in down_a_m_stride)
+                + "},",
+                "    .down_d_m_stride = {"
+                + ", ".join(f"{value}u" for value in down_d_m_stride)
+                + "},",
                 "};",
             ]
 
@@ -1625,12 +1871,29 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
             handle_name_map,
         )
         assignments["dynamic_arg_slot_bytes"] = str(self.dynamic_arg_slot_bytes)
+        self._process_addr64(
+            self.expert_token_refs_addr,
+            "expert_token_refs_addr",
+            assignments,
+            handle_name_map,
+        )
+        self._process_addr64(
+            self.c2_token_refs_l1_addr,
+            "c2_token_refs_l1_addr",
+            assignments,
+            handle_name_map,
+        )
+        self._process_addr64(
+            self.c3_token_refs_l1_addr,
+            "c3_token_refs_l1_addr",
+            assignments,
+            handle_name_map,
+        )
+        assignments["token_refs_bytes"] = str(self.token_refs_bytes)
 
         assignments[_MOE_SW_SCHED_ABI_IF] = ""
         for value, field in (
-            (self.request_addr, "request_addr"),
             (self.schedule_addr, "schedule_addr"),
-            (self.expert_token_ids_addr, "expert_token_ids_addr"),
             (self.cam_state_addr, "cam_state_addr"),
             (self.c2_l1_a, "c2_l1_a"),
             (self.c2_l1_d, "c2_l1_d"),
@@ -1641,8 +1904,12 @@ class HostBingoKernelMoEExecuteArgs(BingoKernelArgs):
         ):
             self._process_addr64(value, field, assignments, handle_name_map)
         assignments["A_token_bytes"] = str(self.A_token_bytes)
-        assignments["indiv_D_tile_bytes"] = str(self.indiv_D_tile_bytes)
-        assignments["indiv_down_D_tile_bytes"] = str(self.indiv_down_D_tile_bytes)
+        assignments["indiv_D_tile_bytes"] = str(
+            self.indiv_N_per_block * self.s1_block_count * self.max_tokens_per_expert * 2
+        )
+        assignments["indiv_down_D_tile_bytes"] = str(
+            self.A_token_bytes * self.max_tokens_per_expert
+        )
         assignments["s1_block_count"] = str(self.s1_block_count)
         assignments["s3_block_count"] = str(self.s3_block_count)
         assignments["indiv_N_per_block"] = str(self.indiv_N_per_block)

@@ -21,7 +21,7 @@ SRCS = ../../src/offload_bingo_hw.c
 BINGO_HOST ?= 1 # True to include the bingo runtime
 INCL_DEVICE_BINARY ?= 1 # True to include the device binary
 
-# DATA: 由 datagen 生成运行时输入、权重和 fused L15 配置。
+# DATA: 由 datagen 生成 dense token 输入和 canonical packed weights。
 DATA_CFG ?= $(MK_DIR)/params.hjson
 DATA_H = $(MK_DIR)/multi_cluster_MoE_data.h
 DATAGEN_FLAGS ?=
@@ -30,13 +30,16 @@ BENDER   = bender
 SNITCH_ROOT = $(shell $(BENDER) path snitch_cluster)
 HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_rebalanced_cluster.hjson
 
-$(DATA_H): $(MK_DIR)/multi_cluster_MoE_datagen.py $(MK_DIR)/moe_l15_layout.py $(DATA_CFG) $(HW_CFG)
+$(DATA_H): $(MK_DIR)/multi_cluster_MoE_datagen.py $(MK_DIR)/moe_layout.py $(DATA_CFG) $(HW_CFG)
 	python3 $< -c $(DATA_CFG) --hwcfg $(HW_CFG) $(DATAGEN_FLAGS) > $@
 
 # Offload: 由 main_bingo.py 生成 DFG 对应的 offload 头文件
 OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
 CONFIG_H = $(MK_DIR)/multi_cluster_MoE_config.h
-$(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_l15_layout.py $(DATA_CFG) $(HW_CFG)
+BINGO_KERNEL_ARGS_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_kernel_args.py
+BINGO_DFG_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_dfg.py
+$(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
+	$(BINGO_DFG_PY) $(BINGO_KERNEL_ARGS_PY) $(DATA_CFG) $(HW_CFG)
 	python3 $< --cfg $(DATA_CFG) --hwcfg $(HW_CFG) --output_dir $(MK_DIR) --output_offload_file_name $(notdir $(OFFLOAD_H))
 	rm -f $(MK_DIR)/*.png $(MK_DIR)/*.csv
 

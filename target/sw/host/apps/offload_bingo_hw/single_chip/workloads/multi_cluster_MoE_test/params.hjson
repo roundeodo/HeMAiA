@@ -1,14 +1,16 @@
-# Static single-cluster individual-expert pattern test.
-#
-# C0 executes exactly one 8-token slot. S1 and the full-width S3 use shape 1
-# (per VC: meshRow=4, tileSize=8, meshCol=8; dual-VC combined N width=16).
-# S2 overlaps an iDMA+xDMA down-weight prefetch. S3 overlaps an iDMA+xDMA
-# prefetch of the next expert's gate/up weights. The remaining four rows are
-# handled by normal shape-2 S2/S4 calls.
-# DMA probes derive their transfer size from the complete gate-weight tensor,
-# so model-dimension changes automatically update both workload and probes.
+# Two-slot production-path test for the 2048 -> 1024 -> 2048 individual expert.
 {
+    array_shape: 0
     total_tokens: 8
-    hidden_size: 1024
-    intermediate_size: 704
+    hidden_size: 2048
+    intermediate_size: 1024
+    weight_chunk_cols: 128
+    s1_block_count: 8
+    s3_block_count: 8
+    num_indiv_experts: 8
+    num_shared_experts: 2
+    top_k: 2
+    addNonZeroC: 0
+    addZeroC: 1
+    accumPrevC: 0
 }

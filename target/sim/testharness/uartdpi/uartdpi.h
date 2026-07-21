@@ -11,6 +11,7 @@ struct uartdpi_ctx {
     char ptyname[64];
     int host;
     int device;
+    int pty_write_warned;
     char tmp_read;
     FILE *log_file;
 };

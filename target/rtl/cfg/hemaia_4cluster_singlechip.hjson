@@ -76,13 +76,13 @@
     s1_quadrant: {
       // number of pending transactions on the narrow/wide network
       narrow_trans: 32,
-      wide_trans: 32,
+      wide_trans: 64,
       // Avoid the observed every-fifth-cycle stall caused by 4-entry CDC
       // FIFOs and the two-stage Gray-pointer synchronizer on the 512-bit path.
       wide_cdc_log_depth: 3,
       wide_xbar: {
-        max_slv_trans: 32,
-        max_mst_trans: 32,
+        max_slv_trans: 64,
+        max_mst_trans: 64,
         fall_through: false,
       },
       wide_xbar_slv_id_width: 3
@@ -104,10 +104,10 @@
     //                        S2(meshRow=2,tileSize=8,meshCol=16)
     // tileSize fixed=8; meshCol changes with shape -> N_per_block = N1 x meshCol is shape-dependent
     clusters:[
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
-      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search_2",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search_2",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search_2",
+      "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search_2",
       ],
 
     hemaia_xdma_cfg: {

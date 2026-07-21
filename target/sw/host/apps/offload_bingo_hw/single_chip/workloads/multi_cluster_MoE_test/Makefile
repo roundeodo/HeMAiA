@@ -17,7 +17,7 @@ OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
 
 BENDER = bender
 SNITCH_ROOT = $(shell $(BENDER) path snitch_cluster)
-HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search.hjson
+HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane_bgran2_highgran_search_2.hjson
 
 $(DATA_H): $(MK_DIR)/multi_cluster_MoE_test_datagen.py $(MK_DIR)/moe_test_layout.py $(DATA_CFG) $(HW_CFG)
 	python3 $< -c $(DATA_CFG) --hwcfg $(HW_CFG) > $@

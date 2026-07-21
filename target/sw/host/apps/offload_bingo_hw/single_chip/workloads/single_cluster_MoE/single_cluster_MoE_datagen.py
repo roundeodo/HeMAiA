@@ -850,7 +850,7 @@ def emit_MoE_data(**kwargs):
         _l15_tcdm_end,
         meshRow * l15_n0_total,
         meshRow * l15_n1_total,
-        # int32: mode1_output_row_stride_bytes, mode1_padded_output_elems
+        # int32: mode1_output_row_stride_bytes, mode1_output_span_elems
         _l15_a_row_stride,
         meshRow * (_l15_a_row_stride // 2),
     ]

@@ -6,20 +6,35 @@
 #pragma once
 
 // Physical L15 token row: model-sized INT16 payload followed by one 32-byte
-// bank pad. The generated workload args carry the complete row stride.
-#define BINGO_MOE_L15_ROW_PADDING_BYTES 32u
+// address gap. DMA and streamer payload accesses skip this gap; its value is
+// intentionally undefined at runtime.
+#define BINGO_MOE_L15_ROW_GAP_BYTES 32u
+
+/* Expert-major routing reference. The low 15 bits select the original token;
+ * bit 15 records its TopK rank. Individual gather masks the rank bit, while a
+ * later weighted-accumulation node uses it to select probability[token][rank].
+ * Keeping both values in the existing uint16 table avoids a separate kpos ABI. */
+#define BINGO_MOE_TOKEN_REF_TOKEN_MASK 0x7fffu
+#define BINGO_MOE_TOKEN_REF_RANK_SHIFT 15u
+#define BINGO_MOE_TOKEN_REF_PACK(token_id, rank) \
+  ((uint16_t)(((uint32_t)(token_id) & BINGO_MOE_TOKEN_REF_TOKEN_MASK) | \
+              (((uint32_t)(rank) & 1u) << BINGO_MOE_TOKEN_REF_RANK_SHIFT)))
+#define BINGO_MOE_TOKEN_REF_TOKEN(ref) \
+  ((uint32_t)(ref) & BINGO_MOE_TOKEN_REF_TOKEN_MASK)
+#define BINGO_MOE_TOKEN_REF_RANK(ref) \
+  (((uint32_t)(ref) >> BINGO_MOE_TOKEN_REF_RANK_SHIFT) & 1u)
 #define BINGO_MOE_L15_CFG_WORDS 91u
 #include <stdint.h>
 
 #define __SNAX_KERNEL_ARGS_DEFINE typedef struct __attribute__((packed, aligned(4)))
 
-// Every BINGO core-level kernel args struct ends with this 3-field trailer:
+// Every dispatched BINGO kernel-argument struct ends with this 3-field trailer:
 //   - gating_sp_addr  : SW guard / CERF group sharing (0 = no guard)
 //   - cond_node_index : this node's index in the activation array
 //   - scratchpad_ptr  : pointer to this kernel's bingo_kernel_scratchpad_t
 //
 // The trailer is consumed by BINGO_SW_GUARD_CHECK / BINGO_GET_SP on the
-// device side. Append it to every BINGO args struct as the last entry —
+// device side. Append it to every dispatched BINGO args struct as the last entry —
 // the user's `;` after the macro invocation supplies the `;` for the
 // last field (standard preprocessor-list idiom).
 //
@@ -566,7 +581,7 @@ typedef struct __attribute__((packed, aligned(4))) {
   int32_t delta_local_w2l, delta_local_w2r;
   int32_t delta_local_mode1_d0, delta_local_mode1_d1;
   int32_t tcdm_end, mode0_output_elems, mode1_output_elems;
-  int32_t mode1_output_row_stride_bytes, mode1_padded_output_elems;
+  int32_t mode1_output_row_stride_bytes, mode1_output_span_elems;
 } __snax_bingo_moe_l15_shape_cfg_t;
 
 _Static_assert(
@@ -586,6 +601,57 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_l15_moe_full_args {
   uint32_t rescale_shift;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_dual_vc_l15_moe_full_args_t;
+
+// Dense L3 token rows -> bank-partitioned L1 A.  One token occupies two banks;
+// each 16-byte K tile advances one complete 512-byte TCDM row.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_stage_tokens_2d_args {
+  uint64_t src_addr;
+  uint32_t dst_addr;
+  uint32_t token_count;
+  uint32_t token_bytes;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_stage_tokens_2d_args_t;
+
+// Canonical S0 4-column panels -> one bank-partitioned weight chunk pair.
+// binding uses the dynamic MoE encoding: 1=iDMA, 2=xDMA, 3=one tensor each.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_stage_weight_pair_2d_args {
+  uint64_t src0_addr;
+  uint64_t src1_addr;
+  uint32_t dst0_addr;
+  uint32_t dst1_addr;
+  uint32_t bytes_per_block;
+  uint32_t block_count;
+  uint32_t binding;
+  uint32_t phase_xor;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_stage_weight_pair_2d_args_t;
+
+// Bank-partitioned Mode1 D0/D1 -> dense L3 token rows.  xDMA spatial channels
+// select tokens while the temporal AGU walks 4-int16 beats down TCDM rows.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_store_tokens_2d_args {
+  uint32_t src_d0_addr;
+  uint32_t src_d1_addr;
+  uint64_t dst_addr;
+  uint32_t token_count;
+  uint32_t token_bytes;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_store_tokens_2d_args_t;
+
+// Static shared-expert fused execution over the bank-partitioned resident
+// layout. Each logical block is one physical chunk. Both block counts are
+// generated host-side so the device hot path performs no dimension division.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_dual_vc_bank_moe_full_args {
+  uint32_t tcdm_base;
+  uint32_t token_count;
+  uint32_t hidden_size;
+  uint32_t intermediate_size;
+  uint32_t s1_block_count;
+  uint32_t s3_block_count;
+  uint32_t chunk_cols;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_dual_vc_bank_moe_full_args_t;
 
 // Direct static-stage SwiGLU launch. N is the total number of temporal
 // N-groups across all B blocks; b_block_count selects one S1 block or all
@@ -627,93 +693,58 @@ __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_down_args {
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_down_args_t;
 
-// One-time initialization of the bytes not written by the Mode-1 writers.
-// The initialized padding remains valid while the dedicated output buffer lives.
-__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_init_output_padding_args {
+// Regression-only arguments for the production last-S1 -> S2 -> S3 chain.
+// Three kernels share this image so each task consumes the CSR configuration
+// staged by its predecessor without an intervening reconfiguration.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_active_cfg_preload_test_args {
+  uint32_t input_s1_A_addr;
+  uint32_t input_s2_A_addr;
+  uint32_t input_gate_B_addr;
+  uint32_t input_up_B_addr;
+  uint32_t s1_output_D0_addr;
+  uint32_t s2_output_D0_addr;
+  uint32_t swiglu_output_D1_addr;
+  uint32_t down_input_A_addr;
+  uint32_t input_down_B0_addr;
+  uint32_t input_down_B1_addr;
+  uint32_t down_output_D0_addr;
+  uint32_t down_output_D1_addr;
+  uint32_t s1_M;
+  uint32_t s1_N;
+  uint32_t s1_array_shape;
+  uint32_t s2_M;
+  uint32_t swiglu_K;
+  uint32_t s2_N;
+  uint32_t s2_b_block_count;
+  uint32_t swiglu_b_block_stride;
+  uint32_t s2_array_shape;
+  uint32_t down_M;
+  uint32_t down_K;
+  uint32_t down_N;
+  uint32_t down_array_shape;
+  uint32_t down_output_row_stride;
+  uint32_t rescale_mult;
+  uint32_t rescale_shift;
+  BINGO_KERNEL_ARGS_TRAILER;
+} __snax_bingo_kernel_moe_active_cfg_preload_test_args_t;
+
+// One-time initialization of L15 row gaps skipped by Mode-1 writers. This is
+// used only for shared outputs whose host-iDMA writeback copies the full span.
+__SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_init_output_gaps_args {
   uint32_t output_base;
   uint32_t row_payload_bytes;
   uint32_t row_stride_bytes;
   uint32_t rows;
   BINGO_KERNEL_ARGS_TRAILER;
-} __snax_bingo_kernel_moe_init_output_padding_args_t;
-
-typedef struct __attribute__((packed, aligned(8))) {
-  union {
-    struct {
-      uint32_t valid;
-      uint32_t output_D0_addr;
-    };
-    uint64_t valid_output_word;
-  } __attribute__((aligned(8)));
-  union {
-    struct {
-      uint32_t N;
-      uint32_t array_shape;
-    };
-    uint64_t n_shape_word;
-  } __attribute__((aligned(8)));
-} __snax_bingo_moe_dyn_s1_call_args_t;
-
-typedef struct __attribute__((packed, aligned(8))) {
-  union {
-    struct {
-      uint32_t valid;
-      uint32_t input_A_addr;
-    };
-    uint64_t valid_input_word;
-  } __attribute__((aligned(8)));
-  union {
-    struct {
-      uint32_t output_D0_addr;
-      uint32_t M;
-    };
-    uint64_t output_m_word;
-  } __attribute__((aligned(8)));
-} __snax_bingo_moe_dyn_s2_call_args_t;
-
-typedef struct __attribute__((packed, aligned(8))) {
-  union {
-    struct {
-      uint32_t valid;
-      uint32_t N;
-    };
-    uint64_t valid_n_word;
-  } __attribute__((aligned(8)));
-  union {
-    struct {
-      uint32_t array_shape;
-      uint32_t reserved;
-    };
-    uint64_t shape_reserved_word;
-  } __attribute__((aligned(8)));
-} __snax_bingo_moe_dyn_s3_call_args_t;
+} __snax_bingo_kernel_moe_init_output_gaps_args_t;
 
 typedef struct __attribute__((packed, aligned(4))) {
-  union {
-    struct {
-      uint32_t valid;
-      uint32_t input_A_addr;
-    };
-    uint64_t valid_input_word;
-  } __attribute__((aligned(8)));
-  union {
-    struct {
-      uint32_t output_D0_addr;
-      uint32_t output_D1_addr;
-    };
-    uint64_t output_pair_word;
-  } __attribute__((aligned(8)));
-  uint32_t M;
-} __snax_bingo_moe_dyn_s4_call_args_t;
-
-typedef struct __attribute__((packed, aligned(4))) {
-  uint64_t token_ids_addr;
+  uint64_t token_refs_addr;
   uint64_t input_A_l3_base;
   uint64_t indiv_gate_B_l3;
   uint64_t indiv_up_B_l3;
   uint64_t indiv_down_B_l3;
   uint64_t output_l3_base;
-  uint64_t runtime_state_addr;
   uint32_t active_state_l1_addr;
   uint32_t l1_a_addr;
   uint32_t l1_b_gate_addr;
@@ -725,11 +756,10 @@ typedef struct __attribute__((packed, aligned(4))) {
   uint32_t A_token_bytes;
   uint32_t indiv_B_expert_stride;
   uint32_t indiv_down_B_expert_stride;
-  uint32_t indiv_B_tile_bytes;
   uint32_t indiv_B_block_stride;
-  uint32_t indiv_down_B_tile_bytes;
   uint32_t indiv_down_B_block_stride;
-  uint32_t indiv_down_D_tile_bytes;
+  uint32_t s1_block_count;
+  uint32_t s3_block_count;
   uint32_t indiv_K1;
   uint32_t indiv_N_per_block;
   uint32_t indiv_down_K1;
@@ -738,13 +768,82 @@ typedef struct __attribute__((packed, aligned(4))) {
   uint32_t rescale_shift;
   uint32_t output_expert_stride_bytes;
   uint32_t max_tokens_per_expert;
-  uint32_t s1_block_count;
-  uint32_t s3_block_count;
+  /* Model- and hardware-static values used by every slot. They are generated
+   * once with the static context instead of being recomputed on Snitch. */
+  uint32_t A_row_stride;
+  uint32_t s3_row_bytes;
+  uint32_t down_half_weight_bytes;
+  uint32_t down_b_k_section;
+  uint32_t down_b_n_stride[3];
+  uint32_t down_a_m_stride[3];
+  uint32_t down_d_m_stride[3];
 } __snax_bingo_moe_dynamic_expert_static_args_t;
+
+#define BINGO_MOE_MAX_BLOCKS 8u
+
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    struct { uint32_t valid; uint32_t output_D0_addr; };
+    uint64_t valid_output_word;
+  };
+  union {
+    struct { uint32_t N; uint32_t array_shape; };
+    uint64_t n_shape_word;
+  };
+} __snax_bingo_moe_dyn_s1_call_args_t;
+
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    /* token_start is task-local and logical, not a physical L1 address. */
+    struct { uint32_t valid; uint32_t token_start; };
+    uint64_t valid_input_word;
+  };
+  union {
+    struct { uint32_t reserved; uint32_t M; };
+    uint64_t output_m_word;
+  };
+  union {
+    struct { uint32_t N; uint32_t array_shape; };
+    uint64_t n_shape_word;
+  };
+} __snax_bingo_moe_dyn_s2_call_args_t;
+
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    struct { uint32_t valid; uint32_t N; };
+    uint64_t valid_n_word;
+  };
+  union {
+    struct { uint32_t array_shape; uint32_t reserved; };
+    uint64_t shape_reserved_word;
+  };
+} __snax_bingo_moe_dyn_s3_call_args_t;
+
+typedef struct __attribute__((packed, aligned(8))) {
+  union {
+    /* token_start is task-local and logical, not a physical L1 address. */
+    struct { uint32_t valid; uint32_t token_start; };
+    uint64_t valid_input_word;
+  };
+  union {
+    struct { uint32_t reserved0; uint32_t reserved1; };
+    uint64_t output_pair_word;
+  };
+  union {
+    struct { uint32_t M; uint32_t N; };
+    uint64_t m_n_word;
+  };
+  union {
+    struct { uint32_t array_shape; uint32_t reserved; };
+    uint64_t shape_reserved_word;
+  };
+} __snax_bingo_moe_dyn_s4_call_args_t;
 
 typedef struct __attribute__((packed, aligned(8)))
     __snax_bingo_kernel_moe_dynamic_expert_args {
-  /* ── ctrl: packed control word (19 bits used, written every round by Phase4) ──────
+  /* Final CVA6-lowered task arguments. MoEPrepare resolves the RTL task word
+   * into complete S1/S2/S3/S4 call records; MoEExecute only flushes active
+   * records into L1. Device compute kernels consume these calls directly.
    * bit  0:      active             (1 = slot valid, Snitch will execute)
    * bit  1:      skip_s1            (1 = S1 load+compute 全跳过, cache hit)
    * bit  2:      skip_s3            (1 = S3 load+compute 全跳过, cache hit)
@@ -766,7 +865,7 @@ typedef struct __attribute__((packed, aligned(8)))
   } __attribute__((aligned(8)));
   union {
     struct {
-      uint32_t token_start_rank;
+      uint32_t token_ref_start;
       uint32_t ntokens;
     };
     uint64_t token_range_word;
@@ -778,25 +877,41 @@ typedef struct __attribute__((packed, aligned(8)))
     };
     uint64_t m_exec_word;
   } __attribute__((aligned(8)));
-  uint32_t wait_for_peer_slots;
   /* ── dma_slot_vd: packed valid + DMA binding for all 4 DMA slots ───────────
    * For slot i (i=0..3), bits at offset i*3:
    *   bit[i*3+0]: valid      (1 = slot carries a DMA operation)
    *   bit[i*3+2:i*3+1]: dma  (0=NONE, 1=IDMA, 2=XDMA, 3=BOTH)
    * Replaces: dma_slot_valid[4] (16B) + dma_slot_dma[4] (16B) → 1 word (4B)
    * ──────────────────────────────────────────────────────────────────────────── */
-  uint32_t dma_slot_vd;
-  int32_t  dma_slot_expert_id[4];   /* prefetch target expert, -1 = none */
-  __snax_bingo_moe_dyn_s1_call_args_t s1_call[2];
+  union {
+    struct {
+      uint32_t dma_slot_vd;
+      /* Four 6-bit expert IDs. Validity lives in dma_slot_vd. */
+      uint32_t dma_slot_eids;
+    };
+    uint64_t dma_slot_word;
+  } __attribute__((aligned(8)));
+  __snax_bingo_moe_dyn_s1_call_args_t s1_call[BINGO_MOE_MAX_BLOCKS];
   __snax_bingo_moe_dyn_s2_call_args_t s2_call;
-  __snax_bingo_moe_dyn_s3_call_args_t s3_call[2];
+  __snax_bingo_moe_dyn_s3_call_args_t s3_call[BINGO_MOE_MAX_BLOCKS];
   __snax_bingo_moe_dyn_s4_call_args_t s4_call;
-  BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_args_t;
+
+_Static_assert(
+  sizeof(__snax_bingo_kernel_moe_dynamic_expert_args_t) == 344u,
+  "CVA6-lowered MoE task ABI size changed unexpectedly");
+
+#define BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES 384u
+#define BINGO_MOE_STATIC_ARG_SLOT_BYTES 192u
+_Static_assert(
+  sizeof(__snax_bingo_moe_dynamic_expert_static_args_t) <=
+      BINGO_MOE_STATIC_ARG_SLOT_BYTES,
+  "MoE static context exceeds its L1 ABI slot");
 
 __SNAX_KERNEL_ARGS_DEFINE __snax_bingo_kernel_moe_dynamic_expert_block_args {
   uint32_t task_arg_addr;
   uint32_t static_arg_addr;
+  uint32_t pipeline_ctrl_addr;
   uint32_t block_idx;
   BINGO_KERNEL_ARGS_TRAILER;
 } __snax_bingo_kernel_moe_dynamic_expert_block_args_t;

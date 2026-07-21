@@ -24,7 +24,7 @@
 // ============================================================
 // Dual VersaCore Accelerator CSR definitions
 // ============================================================
-#define DUAL_VC_CSR_ADDR_BASE         (STREAMER_WRITER1_BUSY_CSR + 1)  // 1034
+#define DUAL_VC_CSR_ADDR_BASE         (STREAMER_WRITER1_BUSY_CSR + 1)
 #define DUAL_VC_OVERWRITE_ACCUM       (DUAL_VC_CSR_ADDR_BASE)          // [0]
 #define DUAL_VC_ACCUM_BOUND           (DUAL_VC_OVERWRITE_ACCUM + 1)    // [1]
 #define DUAL_VC_OUTPUT_BOUND          (DUAL_VC_ACCUM_BOUND + 1)        // [2]
@@ -47,10 +47,12 @@
 #define DUAL_VC_RESCALE_MUL_MULTIPLIER (DUAL_VC_RESCALE_MUL_INPUT_ZP + 1)  // [16]
 #define DUAL_VC_RESCALE_MUL_OUTPUT_ZP (DUAL_VC_RESCALE_MUL_MULTIPLIER + 1) // [17]
 #define DUAL_VC_RESCALE_MUL_SHIFT     (DUAL_VC_RESCALE_MUL_OUTPUT_ZP + 1)  // [18]
-// Control:
-#define DUAL_VC_START                 (DUAL_VC_RESCALE_MUL_SHIFT + 1)  // [19]
-// Read-only:
-#define DUAL_VC_BUSY                  (DUAL_VC_START + 1)
+// The CSR manager has three reserved RW slots [19:21]. Writing bit 0 of the
+// final RW slot [22] launches the accelerator.
+#define DUAL_VC_NUM_RW_CSR            23u
+#define DUAL_VC_START                 (DUAL_VC_CSR_ADDR_BASE + DUAL_VC_NUM_RW_CSR - 1u) // [22]
+// Read-only CSRs follow the complete RW CSR range.
+#define DUAL_VC_BUSY                  (DUAL_VC_CSR_ADDR_BASE + DUAL_VC_NUM_RW_CSR)
 #define DUAL_VC_PERFORMANCE_COUNTER   (DUAL_VC_BUSY + 1)
 
 // Writer-only busy CSRs (for pipeline blocking)

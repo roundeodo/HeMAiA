@@ -32,6 +32,7 @@ void *uartdpi_create(const char *name, const char *log_file_path) {
 
     rv = openpty(&ctx->host, &ctx->device, 0, &tty, 0);
     assert(rv != -1);
+    ctx->pty_write_warned = 0;
 
     rv = ttyname_r(ctx->device, ctx->ptyname, 64);
     assert(rv == 0 && "ttyname_r failed");
@@ -120,7 +121,15 @@ void uartdpi_write(void *ctx_void, char c) {
     struct uartdpi_ctx *ctx = (struct uartdpi_ctx *)ctx_void;
 
     rv = write(ctx->host, &c, 1);
-    assert(rv == 1 && "Write to pseudo-terminal failed.");
+    // The PTY is an optional interactive mirror. Its master is nonblocking, so
+    // a simulation with no reader eventually fills the slave buffer and gets
+    // EAGAIN. Keep the canonical UART log running instead of aborting vsim.
+    if (rv != 1 && errno != EAGAIN && errno != EWOULDBLOCK &&
+        !ctx->pty_write_warned) {
+        fprintf(stderr, "UART: Disabling failed PTY output to %s: %s\n",
+                ctx->ptyname, strerror(errno));
+        ctx->pty_write_warned = 1;
+    }
 
     if (ctx->log_file) {
         rv = fwrite(&c, sizeof(char), 1, ctx->log_file);

@@ -68,7 +68,7 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_router_schedule_args {
     uint64_t global_indices_out_addr;
     uint64_t global_scores_out_addr;
     uint64_t expert_token_counts_out_addr;
-    uint64_t expert_token_ids_addr;
+    uint64_t expert_token_refs_addr;
     uint64_t max_tokens_per_expert;
     uint64_t expert_number_each_layer;
     uint64_t individual_expert_number_k;
@@ -173,22 +173,13 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_prepare_request_args {
     uint64_t c3_l1_d;
     uint64_t c3_l1_down_d;
 #if !defined(MOE_ENABLE_HW_SCHEDULER)
-    uint64_t A_token_bytes;
-    uint64_t indiv_D_tile_bytes;
-    uint64_t indiv_down_D_tile_bytes;
-    uint64_t indiv_N_per_block;
-    uint64_t indiv_down_N_per_block;
-    uint64_t s1_block_count;
-    uint64_t s3_block_count;
     uint64_t max_tokens_per_expert;
     uint64_t request_out_addr;
     uint64_t schedule_out_addr;
-    uint64_t expert_token_ids_addr;
+    uint64_t expert_token_refs_addr;
     uint64_t topk_indices_l3;
     uint64_t M_total;
     uint64_t top_k;
-    uint64_t expert_token_counts_valid;
-    uint64_t dynamic_num_slots;
 #endif
     uint64_t scratchpad_ptr;
 } __host_bingo_kernel_moe_prepare_request_args_t;
@@ -205,10 +196,12 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_execute_args {
     uint64_t c2_stage_base;           // L3 contiguous runtime block base
     uint64_t c3_stage_base;           // L3 contiguous runtime block base
     uint64_t dynamic_arg_slot_bytes;
+    uint64_t expert_token_refs_addr;  // L3 scheduler output
+    uint64_t c2_token_refs_l1_addr;
+    uint64_t c3_token_refs_l1_addr;
+    uint64_t token_refs_bytes;
 #if !defined(MOE_ENABLE_HW_SCHEDULER)
-    uint64_t request_addr;
     uint64_t schedule_addr;
-    uint64_t expert_token_ids_addr;
     uint64_t cam_state_addr;
     uint64_t c2_l1_a;
     uint64_t c2_l1_d;

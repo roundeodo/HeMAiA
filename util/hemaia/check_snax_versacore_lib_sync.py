@@ -26,9 +26,9 @@ will always trip on those intentional differences, so instead we compare the
      *set of CSRs programmed and their order* must be identical.
 
 What we do NOT check:
-  - #define values for CSR addresses. Those come from the generated
-    streamer_csr_addr_map.h (which the snax-sw-gen pipeline already
-    regenerates per $(CFG)).
+  - #define values for CSR addresses. Dual VersaCore addresses are checked
+    separately by check_dual_versacore_csr_layout.py against the generated
+    upstream header for the active Bender checkout.
   - Non-CSR body code (e.g. the checking loops inside
     check_versacore_result_D32). The invariant the user cares about is
     which CSRs the port programs; loop bodies are free to differ.

@@ -46,6 +46,7 @@ enum bingo_moe_runtime_timing_flags {
 #define MOE_SP_PROFILE_RESOURCE_START_IDX 3u
 #define MOE_SP_PROFILE_RESOURCE_END_IDX   4u
 #define MOE_SP_PROFILE_PEER_WAIT_IDX      5u
+// Resource-dependent completed work: DMA bytes or VersaCore hardware-busy cycles.
 #define MOE_SP_PROFILE_UNITS_IDX          6u
 #define MOE_SP_PROFILE_RESULT_IDX         7u
 #define MOE_SP_PROFILE_FLAGS_IDX          8u

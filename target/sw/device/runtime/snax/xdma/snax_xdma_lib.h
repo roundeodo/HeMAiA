@@ -175,9 +175,9 @@ inline int32_t xdma_memcpy_1d_full_addr(uint64_t src, uint64_t dst,
 //
 // Safety: caller must guarantee that xdma_memcpy_nd / xdma_multicast_nd are
 // never called on the same xDMA engine without a subsequent full reconfigure,
-// because dst[1..15] are not cleared here. In the MoE workload (1D single-
-// target transfers only), this invariant always holds.
-__attribute__((always_inline)) inline void xdma_memcpy_1d_fast_set_addresses(
+// because dst[1..15] are not cleared here. The MoE workload uses single-target
+// transfers only, so this invariant always holds.
+__attribute__((always_inline)) inline void xdma_memcpy_fast_set_addresses(
     uint64_t src, uint64_t dst) {
     snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_LSB, (uint32_t)src);
     snax_write_xdma_cfg_reg(XDMA_SRC_ADDR_PTR_MSB, (uint32_t)(src >> 32));
@@ -237,8 +237,58 @@ __attribute__((always_inline)) inline int32_t xdma_memcpy_1d_fast_full_addr(
     uint64_t src, uint64_t dst, uint32_t size) {
     int32_t rc = xdma_memcpy_1d_fast_configure(size);
     if (rc != 0) return rc;
-    xdma_memcpy_1d_fast_set_addresses(src, dst);
+    xdma_memcpy_fast_set_addresses(src, dst);
     return 0;
+}
+
+// Configure a single-target 2D transfer whose useful bytes are contiguous
+// within each row but whose physical rows have independent source/destination
+// strides. The same fast-path rules as the 1D helper apply: no multicast slot
+// clearing and no generic temporary arrays.
+// The caller owns the shape invariant: row_bytes must be xDMA-width aligned
+// and rows must be nonzero. This HW fast path deliberately has no runtime
+// validation or fallback.
+__attribute__((always_inline)) inline void xdma_memcpy_2d_fast_configure(
+    uint32_t row_bytes, uint32_t src_row_stride,
+    uint32_t dst_row_stride, uint32_t rows) {
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLE_PTR, 0);
+
+    const uint32_t sp_stride = XDMA_WIDTH / XDMA_SPATIAL_CHAN;
+    snax_write_xdma_cfg_reg(XDMA_SRC_SPATIAL_STRIDE_PTR, sp_stride);
+    snax_write_xdma_cfg_reg(XDMA_DST_SPATIAL_STRIDE_PTR, sp_stride);
+
+    const uint32_t row_beats = row_bytes / XDMA_WIDTH;
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR, row_beats);
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR, XDMA_WIDTH);
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR + 1u, rows);
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR + 1u, src_row_stride);
+#pragma GCC unroll 3
+    for (uint32_t i = 2; i < XDMA_SRC_TEMP_DIM; i++) {
+        snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR + i, 1);
+        snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR + i, 0);
+    }
+
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR, row_beats);
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR, XDMA_WIDTH);
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR + 1u, rows);
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR + 1u, dst_row_stride);
+#pragma GCC unroll 3
+    for (uint32_t i = 2; i < XDMA_DST_TEMP_DIM; i++) {
+        snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR + i, 1);
+        snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR + i, 0);
+    }
+
+    snax_write_xdma_cfg_reg(XDMA_SRC_ENABLED_CHAN_PTR, 0xFFFFFFFF);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_CHAN_PTR, 0xFFFFFFFF);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_BYTE_PTR, 0xFFFFFFFF);
+}
+
+__attribute__((always_inline)) inline void xdma_memcpy_2d_fast_full_addr(
+    uint64_t src, uint64_t dst, uint32_t row_bytes,
+    uint32_t src_row_stride, uint32_t dst_row_stride, uint32_t rows) {
+    xdma_memcpy_2d_fast_configure(
+        row_bytes, src_row_stride, dst_row_stride, rows);
+    xdma_memcpy_fast_set_addresses(src, dst);
 }
 
 inline int32_t xdma_memcpy_1d(void* src, void* dst, uint32_t size) {
@@ -479,6 +529,19 @@ inline uint32_t xdma_start() {
             return snax_read_xdma_cfg_reg(XDMA_COMMIT_REMOTE_TASK_PTR);
         }
     }
+}
+
+// Start a transfer that is known to use the remote datapath. This avoids
+// reading and polling the unrelated local commit counter on every launch.
+__attribute__((always_inline)) inline uint32_t xdma_start_remote() {
+    uint32_t previous =
+        snax_read_xdma_cfg_reg(XDMA_COMMIT_REMOTE_TASK_PTR);
+    snax_write_xdma_cfg_reg(XDMA_START_PTR, 1);
+    uint32_t committed;
+    do {
+        committed = snax_read_xdma_cfg_reg(XDMA_COMMIT_REMOTE_TASK_PTR);
+    } while (committed == previous);
+    return committed;
 }
 
 // Wait xdma to finished

@@ -42,6 +42,7 @@ FLAG_NAMES = {
     4: "no_prefetch",
     5: "no_store",
 }
+DEFAULT_PARAMS = Path(__file__).with_name("params.hjson")
 
 
 def delta(end: int, start: int) -> int:
@@ -118,7 +119,31 @@ def format_flags(flags: int) -> str:
     return ",".join(names) if names else "none"
 
 
-def print_report(records: list[dict[str, int]], phases: list[tuple[str, int, int, int]], details: bool) -> None:
+def load_model_dimensions(params_path: Path) -> tuple[int, int]:
+    required = ("hidden_size", "intermediate_size")
+    field_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*(\d+)\b")
+    values: dict[str, int] = {}
+    for line in params_path.read_text().splitlines():
+        match = field_re.match(line)
+        if match and match[1] in required:
+            values[match[1]] = int(match[2])
+    missing = [name for name in required if name not in values]
+    if missing:
+        raise SystemExit(
+            f"{params_path} missing compute-efficiency fields: {', '.join(missing)}"
+        )
+    return values["hidden_size"], values["intermediate_size"]
+
+
+def print_report(
+    records: list[dict[str, int]],
+    phases: list[tuple[str, int, int, int]],
+    details: bool,
+    hidden_size: int,
+    intermediate_size: int,
+    peak_mac_per_cluster_cc: float,
+    individual_cluster_count: int,
+) -> None:
     if phases:
         print("HOST PHASE MCYCLE")
         for name, count, last, total in phases:
@@ -150,14 +175,62 @@ def print_report(records: list[dict[str, int]], phases: list[tuple[str, int, int
         start, end = min(r["start"] for r in group), max(r["end"] for r in group)
         dma = sum(r["body"] for r in group if r["resource"] in (1, 2, 3))
         compute = sum(r["body"] for r in group if r["resource"] == 4)
+        vc_hw = sum(r["units"] for r in group if r["resource"] == 4)
         wait = sum(r["peer_wait"] for r in group)
         dma_bytes = sum(r["units"] for r in group if r["resource"] in (1, 2, 3))
         first = group[0]
         print(
             f"  C{key[0]} slot={key[1]:2d} eid={first['expert']:2d} ntok={first['ntokens']:3d} "
             f"window={delta(end, start):9d} dma_api={dma:9d} vc_api={compute:9d} "
-            f"peer_wait={wait:7d} bytes={dma_bytes}"
+            f"vc_hw={vc_hw:9d} peer_wait={wait:7d} bytes={dma_bytes}"
         )
+
+    active_slots = {
+        key: group for key, group in slots.items() if max(r["ntokens"] for r in group) > 0
+    }
+    active_clusters = sorted({key[0] for key in active_slots})
+    if active_slots and active_clusters:
+        first_slot_start = min(
+            min(record["start"] for record in group)
+            for group in active_slots.values()
+        )
+        last_slot_end = max(
+            max(record["end"] for record in group)
+            for group in active_slots.values()
+        )
+        timespan = delta(last_slot_end, first_slot_start)
+        routed_token_expert_pairs = sum(
+            max(record["ntokens"] for record in group)
+            for group in active_slots.values()
+        )
+        mac_per_pair = 3 * hidden_size * intermediate_size
+        useful_mac = routed_token_expert_pairs * mac_per_pair
+        total_peak = individual_cluster_count * peak_mac_per_cluster_cc
+        ideal_cycles = useful_mac / total_peak
+        efficiency = 100.0 * ideal_cycles / timespan if timespan else 0.0
+
+        print("\nINDIVIDUAL EXPERT COMPUTE EFFICIENCY")
+        print(
+            "  definition=ideal_compute_cycles/first_active_slot_to_last_active_slot"
+        )
+        print(
+            f"  active_slots={len(active_slots)} clusters={active_clusters} "
+            f"routed_token_expert_pairs={routed_token_expert_pairs}"
+        )
+        print(
+            f"  useful_mac={useful_mac} "
+            f"({routed_token_expert_pairs} * 3 * {hidden_size} * {intermediate_size})"
+        )
+        print(
+            f"  peak={individual_cluster_count} * {peak_mac_per_cluster_cc:g} "
+            f"= {total_peak:g} MAC/cc ideal={ideal_cycles:.0f} cc"
+        )
+        print(
+            f"  first_slot_start={first_slot_start} last_slot_end={last_slot_end} "
+            f"timespan={timespan} cc"
+        )
+        print(f"  compute_efficiency={efficiency:.2f}%")
+        print("  note=vc_api/vc_hw busy cycles are diagnostics, not the numerator")
 
     cluster_windows: dict[int, tuple[int, int]] = {}
     print("\nCLUSTER WINDOWS")
@@ -172,16 +245,33 @@ def print_report(records: list[dict[str, int]], phases: list[tuple[str, int, int
 
     print("\nRESOURCE UTILIZATION IN CLUSTER WINDOW")
     for (cluster, resource), intervals in sorted(resources.items()):
-        _, busy, _ = union_cycles(intervals)
+        _, api_busy, _ = union_cycles(intervals)
         cluster_start, cluster_end = cluster_windows[cluster]
         window = delta(cluster_end, cluster_start)
-        idle = window - busy
-        utilization = 100.0 * busy / window if window else 0.0
-        print(
-            f"  C{cluster} {resource:10s} records={len(intervals):3d} "
-            f"cluster_window={window:9d} busy={busy:9d} idle={idle:9d} "
-            f"util={utilization:6.2f}%"
-        )
+        if resource == "versacore":
+            hw_busy = sum(
+                r["units"]
+                for r in clusters[cluster]
+                if r["resource"] == 4
+            )
+            busy = hw_busy if hw_busy else api_busy
+            source = "hw" if hw_busy else "api-fallback"
+            idle = max(0, window - busy)
+            utilization = 100.0 * busy / window if window else 0.0
+            print(
+                f"  C{cluster} {resource:10s} records={len(intervals):3d} "
+                f"cluster_window={window:9d} api_busy={api_busy:9d} "
+                f"hw_busy={hw_busy:9d} idle={idle:9d} util={utilization:6.2f}% "
+                f"source={source}"
+            )
+        else:
+            idle = max(0, window - api_busy)
+            utilization = 100.0 * api_busy / window if window else 0.0
+            print(
+                f"  C{cluster} {resource:10s} records={len(intervals):3d} "
+                f"cluster_window={window:9d} busy={api_busy:9d} idle={idle:9d} "
+                f"util={utilization:6.2f}%"
+            )
 
     if details:
         print("\nSLOT NODE TIMELINES")
@@ -204,11 +294,17 @@ def print_report(records: list[dict[str, int]], phases: list[tuple[str, int, int
                     )
                 else:
                     resource_window = "resource_start=- resource_end=-"
+                if r["resource"] in (1, 2, 3):
+                    units = f"bytes={r['units']}"
+                elif r["resource"] == 4:
+                    units = f"vc_hw_cycles={r['units']}"
+                else:
+                    units = f"units={r['units']}"
                 print(
                     f"    {stage:12s} block={r['block']:2d} core={r['core']} "
                     f"start={r['start']} end={r['end']} resource={resource:10s} "
                     f"{resource_window} peer_wait={r['peer_wait']} "
-                    f"units={r['units']} status={format_flags(r['flags'])} "
+                    f"{units} status={format_flags(r['flags'])} "
                     f"rc={r['result']}"
                 )
 
@@ -220,6 +316,24 @@ def main() -> None:
         "--details",
         action="store_true",
         help="print every slot node with node and resource start/end timestamps",
+    )
+    parser.add_argument(
+        "--params",
+        type=Path,
+        default=DEFAULT_PARAMS,
+        help="workload params.hjson used for hidden/intermediate dimensions",
+    )
+    parser.add_argument(
+        "--peak-mac-per-cluster-cc",
+        type=float,
+        default=512.0,
+        help="theoretical peak of one individual dual-VersaCore cluster",
+    )
+    parser.add_argument(
+        "--individual-cluster-count",
+        type=int,
+        default=2,
+        help="number of available individual expert clusters (default: C2 and C3)",
     )
     args = parser.parse_args()
 
@@ -240,7 +354,16 @@ def main() -> None:
     print(f"TIMING RECORDS schema=v{version} parsed={len(records)} expected={expected}")
     if len(records) != expected:
         print("  WARNING: incomplete records detected; the capture likely truncated long UART lines")
-    print_report(records, phases, args.details)
+    hidden_size, intermediate_size = load_model_dimensions(args.params)
+    print_report(
+        records,
+        phases,
+        args.details,
+        hidden_size,
+        intermediate_size,
+        args.peak_mac_per_cluster_cc,
+        args.individual_cluster_count,
+    )
 
 
 if __name__ == "__main__":

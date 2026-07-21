@@ -73,7 +73,8 @@ typedef struct {
     int16_t   cache_eid_c2;   /* expert resident in C2 weight SRAM, -1 = none */
     int16_t   cache_eid_c3;   /* expert resident in C3 weight SRAM, -1 = none */
 } moe_request_t;
-/* ── Output: one scheduled expert run (compact vs old 88-byte record) ───── */
+/* Output of the pure-SW scheduler. The HW path consumes the RTL task word
+ * directly and does not construct this intermediate record. */
 typedef struct {
     moe_cluster_t     cluster;          /* MOE_CLUSTER_C2=0, MOE_CLUSTER_C3=1        */
     uint16_t          expert_id;        /* 0..MOE_MAX_EXPERTS-1                      */
