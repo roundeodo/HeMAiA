@@ -290,6 +290,7 @@ def define_cluster0_production_memory(p):
     mh = {
         "input": BingoMemSymbol("moe_test_input_A"),
         "prod_slot_token_refs": BingoMemSymbol("moe_test_prod_slot_token_refs"),
+        "c0_slot0_golden": BingoMemSymbol("moe_test_c0_slot0_golden"),
     }
     for prefix, cluster, _ in PROD_CLUSTERS:
         mh[f"{prefix}_gate_src"] = BingoMemSymbol(f"moe_test_{prefix}_gate_B")
@@ -592,12 +593,12 @@ def add_production_slot_handoff_test(dfg, p, mh):
         HOST_CORE,
         "__host_bingo_kernel_check_result",
         HostBingoKernelCheckResultArgs(
-            golden_data_addr=mh["input"],
-            output_data_addr=mh["input"],
-            data_size=1,
-            name="PRODUCTION_SLOT_DONE",
+            golden_data_addr=mh["c0_slot0_golden"],
+            output_data_addr=mh["c0_prod_output_l3"],
+            data_size=p["prod_slot_tokens"] * p["token_payload_bytes"],
+            name="PRODUCTION_SLOT_OUTPUT",
         ),
-        "PRODUCTION_SLOT_DONE",
+        "PRODUCTION_SLOT_OUTPUT",
     )
     for store in final_stores:
         dfg.bingo_add_edge(store, done)

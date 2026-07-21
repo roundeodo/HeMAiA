@@ -19,8 +19,10 @@ def find_repo_root(start: pathlib.Path) -> pathlib.Path:
 
 REPO_ROOT = find_repo_root(CURRENT_DIR)
 sys.path.insert(0, str(REPO_ROOT / "deps" / "snitch_cluster" / "util" / "sim"))
+sys.path.insert(0, str(REPO_ROOT / "deps" / "snitch_cluster" / "util" / "silu_pkg"))
 from data_utils import format_vector_definition  # noqa: E402
 from moe_test_layout import derive_params  # noqa: E402
+from silu_out16_balanced_golden import silu_out16_balanced_eval_q  # noqa: E402
 
 
 def pack_int4(values) -> np.ndarray:
@@ -30,6 +32,19 @@ def pack_int4(values) -> np.ndarray:
     lo = flat[0::2].astype(np.uint8) & 0x0F
     hi = flat[1::2].astype(np.uint8) & 0x0F
     return lo | (hi << 4)
+
+
+def rescale_down_32to16(values) -> np.ndarray:
+    return np.clip(values.astype(np.int64), -32768, 32767).astype(np.int16)
+
+
+def apply_silu(values) -> np.ndarray:
+    flat = values.reshape(-1)
+    result = np.asarray(
+        [silu_out16_balanced_eval_q(int(value)) for value in flat],
+        dtype=np.int16,
+    )
+    return result.reshape(values.shape)
 
 
 def generate_swiglu_weights(rng: np.random.Generator, p: dict, prefix: str):
@@ -48,10 +63,13 @@ def generate_swiglu_weights(rng: np.random.Generator, p: dict, prefix: str):
     if gate_stream.size != p["gate_weight_bytes"]:
         raise ValueError("gate weight byte count does not match layout")
 
-    return [
+    gate_matrix = gate.transpose(2, 3, 0, 1, 4).reshape(hidden, intermediate)
+    up_matrix = up.transpose(2, 3, 0, 1, 4).reshape(hidden, intermediate)
+    lines = [
         format_vector_definition("uint8_t", f"{prefix}_gate_B", gate_stream, alignment=128),
         format_vector_definition("uint8_t", f"{prefix}_up_B", up_stream, alignment=128),
     ]
+    return lines, gate_matrix, up_matrix
 
 
 def generate_expert_weights(rng: np.random.Generator, p: dict, prefix: str):
@@ -62,7 +80,7 @@ def generate_expert_weights(rng: np.random.Generator, p: dict, prefix: str):
     down_shape = (2, blocks, down_n1_s0, intermediate // 8, 8, 4)
     down = rng.integers(-7, 8, size=down_shape, dtype=np.int8)
 
-    lines = generate_swiglu_weights(rng, p, prefix)
+    lines, gate_matrix, up_matrix = generate_swiglu_weights(rng, p, prefix)
     # Down keeps left/right VC halves outside the two output blocks.
     down_stream = pack_int4(down.transpose(0, 1, 2, 3, 5, 4))
     if down_stream.size != p["down_weight_bytes"]:
@@ -70,7 +88,28 @@ def generate_expert_weights(rng: np.random.Generator, p: dict, prefix: str):
     lines.append(
         format_vector_definition("uint8_t", f"{prefix}_down_B", down_stream, alignment=128)
     )
-    return lines
+    down_halves = [
+        down[half].transpose(2, 3, 0, 1, 4).reshape(intermediate, hidden // 2)
+        for half in range(2)
+    ]
+    down_matrix = np.concatenate(down_halves, axis=1)
+    return lines, gate_matrix, up_matrix, down_matrix
+
+
+def generate_slot0_golden(
+    tokens: np.ndarray,
+    gate_matrix: np.ndarray,
+    up_matrix: np.ndarray,
+    down_matrix: np.ndarray,
+) -> np.ndarray:
+    gate_acc = tokens.astype(np.int32) @ gate_matrix.astype(np.int32)
+    up_acc = tokens.astype(np.int32) @ up_matrix.astype(np.int32)
+    gate_silu = apply_silu(rescale_down_32to16(gate_acc))
+    mode0 = rescale_down_32to16(
+        gate_silu.astype(np.int64) * rescale_down_32to16(up_acc).astype(np.int64)
+    )
+    down_acc = mode0.astype(np.int32) @ down_matrix.astype(np.int32)
+    return rescale_down_32to16(down_acc)
 
 
 def emit_header(config: dict) -> str:
@@ -106,7 +145,19 @@ def emit_header(config: dict) -> str:
             alignment=128,
         ),
     ]
-    lines += generate_expert_weights(rng, p, "moe_test_c0")
+    weight_lines, gate_matrix, up_matrix, down_matrix = generate_expert_weights(
+        rng, p, "moe_test_c0"
+    )
+    lines += weight_lines
+    slot0_golden = generate_slot0_golden(
+        token_values[slot0_refs], gate_matrix, up_matrix, down_matrix
+    )
+    lines.append(
+        format_vector_definition(
+            "int16_t", "moe_test_c0_slot0_golden", slot0_golden.reshape(-1),
+            alignment=128,
+        )
+    )
     return "\n\n".join(lines)
 
 
