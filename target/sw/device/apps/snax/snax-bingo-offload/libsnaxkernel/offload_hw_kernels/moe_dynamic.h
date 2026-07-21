@@ -2665,7 +2665,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
             __moe_pipeline_publish(&s2->error, rc);
             break;
         }
-        if (s2->sync_enabled != 0u) {
+        if (s2->sync_enabled != 0u && n + 1u < s2->block_count) {
             __moe_pipeline_publish(&s2->prefetch_done, n + 1u);
         }
     }
@@ -2851,7 +2851,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
             moe_wait_dual_vc_and_streamer();
             BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
             if (mt == 0u && s2->sync_enabled != 0u &&
-                n < s2->block_count) {
+                n + 1u < s2->block_count) {
                 __moe_pipeline_publish(&s2->compute_done, n + 1u);
             }
         }
