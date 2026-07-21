@@ -38,8 +38,10 @@ OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
 CONFIG_H = $(MK_DIR)/multi_cluster_MoE_config.h
 BINGO_KERNEL_ARGS_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_kernel_args.py
 BINGO_DFG_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_dfg.py
+MOE_DYNAMIC_SLOT_DFG_PY = $(MK_DIR)/../moe_dynamic_slot_dfg.py
 $(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
-	$(BINGO_DFG_PY) $(BINGO_KERNEL_ARGS_PY) $(DATA_CFG) $(HW_CFG)
+	$(MOE_DYNAMIC_SLOT_DFG_PY) $(BINGO_DFG_PY) $(BINGO_KERNEL_ARGS_PY) \
+	$(DATA_CFG) $(HW_CFG)
 	python3 $< --cfg $(DATA_CFG) --hwcfg $(HW_CFG) --output_dir $(MK_DIR) --output_offload_file_name $(notdir $(OFFLOAD_H))
 	rm -f $(MK_DIR)/*.png $(MK_DIR)/*.csv
 

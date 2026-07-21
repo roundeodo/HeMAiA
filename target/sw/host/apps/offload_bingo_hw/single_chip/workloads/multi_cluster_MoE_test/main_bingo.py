@@ -10,6 +10,7 @@ import hjson
 CURRENT_DIR = pathlib.Path(__file__).resolve().parent
 ROOT_DIR = CURRENT_DIR.parents[7]
 sys.path.insert(0, str(ROOT_DIR / "target/sw/host/runtime/libbingo/mini_compiler"))
+sys.path.insert(0, str(CURRENT_DIR.parent))
 
 from bingo_dfg import BingoDFG  # noqa: E402
 from bingo_kernel_args import (  # noqa: E402
@@ -19,6 +20,7 @@ from bingo_kernel_args import (  # noqa: E402
 )
 from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol  # noqa: E402
 from bingo_node import BingoNode  # noqa: E402
+from moe_dynamic_slot_dfg import build_dynamic_expert_slot_chain  # noqa: E402
 from moe_test_layout import derive_params  # noqa: E402
 
 GEMM_CORE = 0
@@ -449,155 +451,25 @@ def add_production_slot_handoff_test(dfg, p, mh):
         )
         dfg.bingo_add_edge(runtime_to_l1, gather)
 
-        s1_loads = []
-        s1_computes = []
-        for block in range(p["block_count"]):
-            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+        def make_block_args(block):
+            return SnaxBingoKernelMoeDynamicExpertBlockArgs(
                 slot0_addr, static_addr, pipeline_ctrl_addr, block
             )
-            load = add_node(
-                dfg,
-                cluster,
-                DMA_CORE,
-                "__snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block",
-                block_args,
-                f"{prefix.upper()}_PROD_S1_LOAD_BLOCK_{block}",
-            )
-            compute_kernel = (
-                "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_block_pc"
-                if block == 0
-                else "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_block"
-            )
-            compute = add_node(
-                dfg,
-                cluster,
-                GEMM_CORE,
-                compute_kernel,
-                block_args,
-                f"{prefix.upper()}_PROD_S1_COMPUTE_BLOCK_{block}",
-            )
-            if block == 0:
-                config = add_node(
-                    dfg,
-                    cluster,
-                    GEMM_CORE,
-                    "__snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0",
-                    block_args,
-                    f"{prefix.upper()}_PROD_S1_CONFIG_BLOCK0_DURING_LOAD0",
-                )
-                dfg.bingo_add_edge(gather, load)
-                dfg.bingo_add_edge(gather, config)
-                dfg.bingo_add_edge(config, compute)
-            else:
-                dfg.bingo_add_edge(s1_loads[-1], load)
-                if block >= 2:
-                    dfg.bingo_add_edge(s1_computes[-2], load)
-                dfg.bingo_add_edge(s1_computes[-1], compute)
-            dfg.bingo_add_edge(load, compute)
-            s1_loads.append(load)
-            s1_computes.append(compute)
 
-        prefetch = add_node(
-            dfg,
-            cluster,
-            DMA_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down",
-            slot_args,
-            f"{prefix.upper()}_PROD_S2_DOWN_PREFETCH",
+        chain = build_dynamic_expert_slot_chain(
+            add_node=lambda core, kernel, args, label: add_node(
+                dfg, cluster, core, kernel, args, label
+            ),
+            add_edge=dfg.bingo_add_edge,
+            make_block_args=make_block_args,
+            input_ready=gather,
+            s1_block_count=p["s1_block_count"],
+            s3_block_count=p["s3_block_count"],
+            dma_core_id=DMA_CORE,
+            gemm_core_id=GEMM_CORE,
+            label_prefix=f"{prefix.upper()}_PROD",
         )
-        s2 = add_node(
-            dfg,
-            cluster,
-            GEMM_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full",
-            slot_args,
-            f"{prefix.upper()}_PROD_S2_COMPUTE_LAST_2_TOKENS",
-        )
-        dfg.bingo_add_edge(s1_computes[-1], prefetch)
-        dfg.bingo_add_edge(s1_computes[-1], s2)
-
-        s3_loads = []
-        s3_computes = []
-        for block in range(p["block_count"]):
-            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
-                slot0_addr, static_addr, pipeline_ctrl_addr, block
-            )
-            load = add_node(
-                dfg,
-                cluster,
-                DMA_CORE,
-                "__snax_bingo_kernel_moe_dynamic_expert_load_down_block",
-                block_args,
-                f"{prefix.upper()}_PROD_S3_LOAD_BLOCK_{block}",
-            )
-            compute_kernel = (
-                "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block_pc"
-                if block == 0
-                else "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block"
-            )
-            compute = add_node(
-                dfg,
-                cluster,
-                GEMM_CORE,
-                compute_kernel,
-                block_args,
-                f"{prefix.upper()}_PROD_S3_COMPUTE_BLOCK_{block}",
-            )
-            if block == 0:
-                config = add_node(
-                    dfg,
-                    cluster,
-                    GEMM_CORE,
-                    "__snax_bingo_kernel_moe_dynamic_expert_configure_down_block0",
-                    block_args,
-                    f"{prefix.upper()}_PROD_S3_CONFIG_BLOCK0_DURING_LOAD0",
-                )
-                for predecessor in (s2, prefetch):
-                    dfg.bingo_add_edge(predecessor, load)
-                    dfg.bingo_add_edge(predecessor, config)
-                dfg.bingo_add_edge(config, compute)
-            else:
-                dfg.bingo_add_edge(s3_loads[-1], load)
-                if block >= 2:
-                    dfg.bingo_add_edge(s3_computes[-2], load)
-                dfg.bingo_add_edge(s3_computes[-1], compute)
-            dfg.bingo_add_edge(load, compute)
-            s3_loads.append(load)
-            s3_computes.append(compute)
-
-        s4 = add_node(
-            dfg,
-            cluster,
-            GEMM_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_compute_down_full",
-            slot_args,
-            f"{prefix.upper()}_PROD_S4_COMPUTE_REMAINDER",
-        )
-        dfg.bingo_add_edge(s3_computes[-1], s4)
-
-        prepare = add_node(
-            dfg,
-            cluster,
-            DMA_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1",
-            slot_args,
-            f"{prefix.upper()}_PROD_S4_PREFETCH_OR_PREPARE_STORE",
-        )
-        # Match the production DFG exactly. C0 still executes the skipped-S3
-        # control chain before this node; optimizing that chain is a separate
-        # hardware/Bingo change.
-        dfg.bingo_add_edge(s3_loads[-1], prepare)
-        store = add_node(
-            dfg,
-            cluster,
-            DMA_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next",
-            slot_args,
-            f"{prefix.upper()}_PROD_SLOT0_STORE_GATHER_SLOT1_6_TOKENS",
-        )
-        dfg.bingo_add_edge(s4, store)
-        dfg.bingo_add_edge(prepare, store)
-        final_stores.append((prefix, store))
+        final_stores.append((prefix, chain["store"]))
 
     done_checks = []
     for prefix, store in final_stores:

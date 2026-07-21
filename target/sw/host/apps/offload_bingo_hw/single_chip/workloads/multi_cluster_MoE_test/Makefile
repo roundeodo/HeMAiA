@@ -14,6 +14,7 @@ INCL_DEVICE_BINARY ?= 1
 DATA_CFG ?= $(MK_DIR)/params.hjson
 DATA_H = $(MK_DIR)/multi_cluster_MoE_test_data.h
 OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
+MOE_DYNAMIC_SLOT_DFG_PY = $(MK_DIR)/../moe_dynamic_slot_dfg.py
 
 BENDER = bender
 SNITCH_ROOT = $(shell $(BENDER) path snitch_cluster)
@@ -22,7 +23,8 @@ HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_m
 $(DATA_H): $(MK_DIR)/multi_cluster_MoE_test_datagen.py $(MK_DIR)/moe_test_layout.py $(DATA_CFG) $(HW_CFG)
 	python3 $< -c $(DATA_CFG) --hwcfg $(HW_CFG) > $@
 
-$(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_test_layout.py $(DATA_H) $(DATA_CFG) $(HW_CFG)
+$(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_test_layout.py \
+	$(MOE_DYNAMIC_SLOT_DFG_PY) $(DATA_H) $(DATA_CFG) $(HW_CFG)
 	python3 $< --cfg $(DATA_CFG) --hwcfg $(HW_CFG) \
 		--output_dir $(MK_DIR) --output_offload_file_name $(notdir $(OFFLOAD_H))
 	rm -f $(MK_DIR)/*.png $(MK_DIR)/*.csv

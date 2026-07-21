@@ -56,6 +56,7 @@ ROOT_DIR = os.path.normpath(
 
 print(f"ROOT_DIR: {ROOT_DIR}")
 sys.path.append(f"{ROOT_DIR}/target/sw/host/runtime/libbingo/mini_compiler")
+sys.path.append(os.path.dirname(current_dir))
 
 
 def parse_inorder_completion_core_ids() -> set:
@@ -80,6 +81,7 @@ print(
 from bingo_dfg import BingoDFG
 from bingo_node import BingoNode
 from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol
+from moe_dynamic_slot_dfg import build_dynamic_expert_slot_chain
 from bingo_kernel_args import (
     SnaxBingoKernelIdma1dCopyArgs,
     SnaxBingoKernelMoeRouterGemmS0Args,
@@ -1182,137 +1184,24 @@ def create_dfg(params, mh):
         else:
             input_ready = deps[0]
 
-        # S1: N2 个 load+compute 节点对，边搬边算流水线
-        # skip_s1=1(cache hit) 时：所有 load/compute 节点直接跳过，token 由 compute_gate_up_full(S2) 处理
-        s1_loads = []
-        s1_computes = []
-        s1_block0_config = None
-        for block in range(N2):
-            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+        def make_block_args(block):
+            return SnaxBingoKernelMoeDynamicExpertBlockArgs(
                 dyn_arg_addr, static_arg_addr, pipeline_ctrl_addr, block
             )
-            load = add_node(
-                DMA_CORE_ID,
-                "__snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block",
-                block_args,
-            )
-            if block == 0:
-                s1_block0_config = add_node(
-                    GEMM_CORE_ID,
-                    "__snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0",
-                    block_args,
-                )
-            compute_kernel = (
-                "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_block_pc"
-                if block == 0
-                else "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_block"
-            )
-            compute = add_node(
-                GEMM_CORE_ID,
-                compute_kernel,
-                block_args,
-            )
-            bingo_dfg.bingo_add_edge(input_ready, load)
-            if block == 0:
-                bingo_dfg.bingo_add_edge(input_ready, s1_block0_config)
-                bingo_dfg.bingo_add_edge(s1_block0_config, compute)
-            else:
-                bingo_dfg.bingo_add_edge(s1_loads[block - 1], load)
-                if block >= 2:
-                    bingo_dfg.bingo_add_edge(s1_computes[block - 2], load)
-                bingo_dfg.bingo_add_edge(s1_computes[block - 1], compute)
-            bingo_dfg.bingo_add_edge(load, compute)
-            s1_loads.append(load)
-            s1_computes.append(compute)
 
-        prefetch_s2_down = add_node(
-            DMA_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down",
-            slot_args,
+        chain = build_dynamic_expert_slot_chain(
+            add_node=lambda core, kernel, args, _label: add_node(
+                core, kernel, args
+            ),
+            add_edge=bingo_dfg.bingo_add_edge,
+            make_block_args=make_block_args,
+            input_ready=input_ready,
+            s1_block_count=N2,
+            s3_block_count=N2d,
+            dma_core_id=DMA_CORE_ID,
+            gemm_core_id=GEMM_CORE_ID,
         )
-        bingo_dfg.bingo_add_edge(s1_computes[-1], prefetch_s2_down)
-
-        # S2: gate+up 全量 GEMM 节点
-        # cache hit(skip_s1=1)：处理所有 token；否则处理 ntokens-shape_M 尾部 token
-        compute_gate_up_full = add_node(
-            GEMM_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full",
-            slot_args,
-        )
-        bingo_dfg.bingo_add_edge(s1_computes[-1], compute_gate_up_full)
-
-        # S3+S4: N2d 个 load+compute 节点对，边搬边算流水线
-        # skip_s3=1(cache hit) 时：load/compute 节点全部跳过，所有 token 由 compute_down_full 处理
-        s3_loads = []
-        s3_computes = []
-        s3_block0_config = None
-        for block in range(N2d):
-            block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
-                dyn_arg_addr, static_arg_addr, pipeline_ctrl_addr, block
-            )
-            load = add_node(
-                DMA_CORE_ID,
-                "__snax_bingo_kernel_moe_dynamic_expert_load_down_block",
-                block_args,
-            )
-            if block == 0:
-                s3_block0_config = add_node(
-                    GEMM_CORE_ID,
-                    "__snax_bingo_kernel_moe_dynamic_expert_configure_down_block0",
-                    block_args,
-                )
-            compute_kernel = (
-                "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block_pc"
-                if block == 0
-                else "__snax_bingo_kernel_moe_dynamic_expert_compute_down_block"
-            )
-            compute = add_node(
-                GEMM_CORE_ID,
-                compute_kernel,
-                block_args,
-            )
-            bingo_dfg.bingo_add_edge(compute_gate_up_full, load)
-            bingo_dfg.bingo_add_edge(prefetch_s2_down, load)
-            if block == 0:
-                bingo_dfg.bingo_add_edge(compute_gate_up_full, s3_block0_config)
-                bingo_dfg.bingo_add_edge(prefetch_s2_down, s3_block0_config)
-                bingo_dfg.bingo_add_edge(s3_block0_config, compute)
-            else:
-                bingo_dfg.bingo_add_edge(s3_loads[block - 1], load)
-                if block >= 2:
-                    bingo_dfg.bingo_add_edge(s3_computes[block - 2], load)
-                bingo_dfg.bingo_add_edge(s3_computes[block - 1], compute)
-            bingo_dfg.bingo_add_edge(load, compute)
-            s3_loads.append(load)
-            s3_computes.append(compute)
-
-        prefetch_s4_next_s1 = add_node(
-            DMA_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1",
-            slot_args,
-        )
-        # This prefetch is intentionally overlapped with the current slot's
-        # down-full compute. Do not serialize it after compute_down_full just to
-        # make trace node durations look cleaner; that would change the workload.
-        bingo_dfg.bingo_add_edge(s3_loads[-1], prefetch_s4_next_s1)
-
-        # S4: down 全量 GEMM 节点
-        # cache hit(skip_s3=1)：处理所有 token；否则处理 ntokens-shape_M 尾部 token
-        compute_down_full = add_node(
-            GEMM_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_compute_down_full",
-            slot_args,
-        )
-        bingo_dfg.bingo_add_edge(s3_computes[-1], compute_down_full)
-
-        store = add_node(
-            DMA_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next",
-            slot_args,
-        )
-        bingo_dfg.bingo_add_edge(compute_down_full, store)
-        bingo_dfg.bingo_add_edge(prefetch_s4_next_s1, store)
-        return store
+        return chain["store"]
 
     individual_tail_nodes = [node_execute]
     if ENABLE_INDIVIDUAL_SLOTS:
