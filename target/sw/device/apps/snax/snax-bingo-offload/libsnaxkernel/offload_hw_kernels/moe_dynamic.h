@@ -31,6 +31,7 @@ typedef struct __attribute__((aligned(8))) {
     uint32_t binding;
     uint32_t valid;
     volatile uint32_t csr_prepared_stage;
+    volatile uint32_t xdma_prepared_stage;
     uint32_t csr_prepared_reserved;
 } __moe_s1_dma_ctrl_t;
 
@@ -60,6 +61,11 @@ _Static_assert(sizeof(__moe_s2_prefetch_ctrl_t) <= 64u,
 #define MOE_CSR_PREPARED_S2   2u
 #define MOE_CSR_PREPARED_S3   3u
 #define MOE_CSR_PREPARED_S4   4u
+
+#define MOE_XDMA_PREPARED_NONE 0u
+#define MOE_XDMA_PREPARED_S1   1u
+#define MOE_XDMA_PREPARED_S3   3u
+#define MOE_XDMA_PREPARED_S4PF 5u
 
 #define MOE_DUAL_VC_MESH_ROW_0 8u
 #define MOE_DUAL_VC_TILE_SIZE_0 8u
@@ -766,6 +772,68 @@ static inline uint32_t __moe_pipeline_wait(
     }
     asm volatile("fence rw, rw" ::: "memory");
     return (*error == BINGO_RET_SUCC) ? BINGO_RET_SUCC : *error;
+}
+
+static inline uint32_t __moe_dyn_binding_uses_xdma(uint32_t binding)
+{
+    return binding == MOE_DYN_DMA_XDMA || binding == MOE_DYN_DMA_BOTH;
+}
+
+static inline uint32_t __moe_xdma_stage_is_prepared(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    uint32_t stage)
+{
+    asm volatile("fence rw, rw" ::: "memory");
+    return __moe_s1_dma_ctrl(blk)->xdma_prepared_stage == stage;
+}
+
+static inline void __moe_prepare_pair_xdma_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    uint32_t binding, uint32_t bytes, uint32_t stage)
+{
+    if (__moe_dyn_binding_uses_xdma(binding) == 0u) return;
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
+    xdma_memcpy_2d_fast_configure(
+        MOE_BANK_WEIGHT_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES,
+        MOE_BANK_TCDM_ROW_BYTES,
+        bytes / MOE_BANK_WEIGHT_ROW_BYTES);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
+    __moe_pipeline_publish(
+        &__moe_s1_dma_ctrl(blk)->xdma_prepared_stage, stage);
+}
+
+static inline void __moe_prepare_s3_xdma_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u) return;
+    __moe_prepare_pair_xdma_shape(
+        blk, MOE_DYN_CTRL_DMA_S3(cfg->ctrl),
+        st->indiv_down_B_block_stride, MOE_XDMA_PREPARED_S3);
+}
+
+static inline void __moe_prepare_s1_xdma_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    if (MOE_DYN_CTRL_SKIP_S1(cfg->ctrl) != 0u) return;
+    __moe_prepare_pair_xdma_shape(
+        blk, MOE_DYN_CTRL_DMA_S1(cfg->ctrl),
+        st->indiv_B_block_stride, MOE_XDMA_PREPARED_S1);
+}
+
+static inline void __moe_prepare_s4pf_xdma_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
+    if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) return;
+    __moe_prepare_pair_xdma_shape(
+        blk, MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot),
+        st->indiv_B_block_stride, MOE_XDMA_PREPARED_S4PF);
 }
 
 static inline uint32_t __moe_dyn_shape_m(uint32_t shape)
@@ -2094,6 +2162,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *
     if (rc == BINGO_RET_SUCC) {
         rc = __moe_dyn_prepare_pipeline_impl(node, cfg, st);
     }
+    if (rc == BINGO_RET_SUCC) {
+        __moe_prepare_s1_xdma_shape(node, cfg, st);
+    }
     uint32_t wait_rc = __moe_dyn_gather_slot_tokens_wait();
     if (rc == BINGO_RET_SUCC) rc = wait_rc;
     MOE_PROFILE_RESOURCE_END(profile);
@@ -2121,6 +2192,7 @@ static inline uint32_t __moe_dyn_prepare_pipeline_impl(
 
     s1->valid = 0u;
     s1->csr_prepared_stage = MOE_CSR_PREPARED_NONE;
+    s1->xdma_prepared_stage = MOE_XDMA_PREPARED_NONE;
     s1->csr_prepared_reserved = 0u;
     s2->valid = 0u;
     s2->sync_enabled = 0u;
@@ -2196,6 +2268,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prepare_pipeline
         return BINGO_RET_SUCC;
     }
     uint32_t rc = __moe_dyn_prepare_pipeline_impl(blk, cfg, st);
+    if (rc == BINGO_RET_SUCC) {
+        __moe_prepare_s1_xdma_shape(blk, cfg, st);
+    }
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     return rc;
 }
@@ -2227,13 +2302,16 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
         s1->up_dst_base, n, block_bytes);
     uint32_t dma_binding = s1->binding;
     MOE_PROFILE_RESOURCE_BEGIN(profile);
+    uint32_t configure_xdma =
+        n == 0u &&
+        !__moe_xdma_stage_is_prepared(blk, MOE_XDMA_PREPARED_S1);
     uint32_t rc = __moe_dyn_copy_pair_2d(
         dma_binding,
         __moe_dyn_l1_wide(gate_dst),
         s1->gate_src_base + weight_offset,
         __moe_dyn_l1_wide(up_dst),
         s1->up_src_base + weight_offset,
-        block_bytes, n == 0u);
+        block_bytes, configure_xdma);
     MOE_PROFILE_RESOURCE_END(profile);
     MOE_INDIV_PRINT(
         "[INDIV_LOAD_S1_DONE] C%u slot=%u eid=%u block=%u dma=%u "
@@ -2413,21 +2491,16 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
         st->l1_b_down_addr, n, st->indiv_down_B_block_stride);
     uint32_t right_dst = __moe_bank_down_weight_block_addr(
         st->l1_b_down_addr + 64u, n, st->indiv_down_B_block_stride);
+    uint32_t configure_xdma =
+        n == 0u &&
+        !__moe_xdma_stage_is_prepared(blk, MOE_XDMA_PREPARED_S3);
     uint32_t rc = __moe_dyn_copy_pair_2d(
         dma_binding,
         __moe_dyn_l1_wide(left_dst),
         down_src + left_offset,
         __moe_dyn_l1_wide(right_dst),
         down_src + right_offset,
-        st->indiv_down_B_block_stride, n == 0u);
-    if (rc == BINGO_RET_SUCC && n + 1u == st->s3_block_count &&
-        MOE_DYN_VD_VALID(
-            cfg->dma_slot_vd, MOE_DYN_DMA_SLOT_S4_PREFETCH) == 0u &&
-        __moe_dyn_has_output(cfg) != 0u) {
-        __moe_dyn_prepare_store_xdma(cfg, st);
-        __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
-        __moe_pipeline_publish(&s2->store_prepared, 1u);
-    }
+        st->indiv_down_B_block_stride, configure_xdma);
     MOE_PROFILE_RESOURCE_END(profile);
     MOE_INDIV_PRINT(
         "[INDIV_LOAD_S3_DONE] C%u slot=%u eid=%u block=%u dma=%u "
@@ -2603,6 +2676,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
     __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
     MOE_PROFILE_BEGIN(profile);
     if (s2->valid == 0u) {
+        __moe_prepare_s3_xdma_shape(blk, cfg, st);
         MOE_PROFILE_COMMIT(
             arg, cfg, profile, MOE_PROFILE_STAGE_PREFETCH_S2,
             MOE_PROFILE_RESOURCE_NONE, 0u, 0u,
@@ -2616,12 +2690,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
     uint32_t dma_binding = s2->binding;
     MOE_PROFILE_RESOURCE_BEGIN(profile);
     uint32_t rc = BINGO_RET_SUCC;
-    uint32_t prepare_store_during_final_dma =
-        MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u &&
-        MOE_DYN_VD_VALID(
-            cfg->dma_slot_vd, MOE_DYN_DMA_SLOT_S4_PREFETCH) == 0u &&
-        __moe_dyn_has_output(cfg) != 0u;
-    uint32_t store_prepared_early = 0u;
+    uint32_t prepare_s3_during_final_dma =
+        MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) == 0u &&
+        __moe_dyn_binding_uses_xdma(MOE_DYN_CTRL_DMA_S3(cfg->ctrl)) != 0u;
+    uint32_t s3_prepared_early = 0u;
     for (uint32_t n = 0u; n < s2->block_count; n++) {
         if (s2->sync_enabled != 0u && n != 0u) {
             uint32_t target = n < s2->s1_block_count ? n : s2->s1_block_count;
@@ -2634,7 +2706,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
             s2->down_dst_base, n, block_bytes);
         uint32_t right_dst = __moe_bank_down_weight_block_addr(
             s2->down_dst_base + 64u, n, block_bytes);
-        if (prepare_store_during_final_dma != 0u &&
+        if (prepare_s3_during_final_dma != 0u &&
             n + 1u == s2->block_count) {
             __moe_dyn_2d_pair_pending_t pending;
             rc = __moe_dyn_start_pair_2d(
@@ -2645,12 +2717,11 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
                 s2->down_src_base + half_bytes + src_offset,
                 block_bytes, n == 0u, &pending);
             if (rc == BINGO_RET_SUCC) {
-                __moe_dyn_prepare_store_xdma(cfg, st);
+                __moe_prepare_s3_xdma_shape(blk, cfg, st);
                 rc = __moe_dyn_wait_pair_2d(&pending);
             }
             if (rc == BINGO_RET_SUCC) {
-                __moe_pipeline_publish(&s2->store_prepared, 1u);
-                store_prepared_early = 1u;
+                s3_prepared_early = 1u;
             }
         } else {
             rc = __moe_dyn_copy_pair_2d(
@@ -2669,10 +2740,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down
             __moe_pipeline_publish(&s2->prefetch_done, n + 1u);
         }
     }
-    if (rc == BINGO_RET_SUCC && prepare_store_during_final_dma != 0u &&
-        store_prepared_early == 0u) {
-        __moe_dyn_prepare_store_xdma(cfg, st);
-        __moe_pipeline_publish(&s2->store_prepared, 1u);
+    if (rc == BINGO_RET_SUCC && prepare_s3_during_final_dma != 0u &&
+        s3_prepared_early == 0u) {
+        __moe_prepare_s3_xdma_shape(blk, cfg, st);
     }
     MOE_PROFILE_RESOURCE_END(profile);
     MOE_INDIV_PRINT(
@@ -2727,20 +2797,44 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
     uint64_t up_src = st->indiv_up_B_l3 +
         (uint64_t)expert_id * st->indiv_B_expert_stride;
     uint32_t rc = BINGO_RET_SUCC;
+    uint32_t store_prepared_early = 0u;
     for (uint32_t n = 0u; n < st->s1_block_count; n++) {
         uint32_t src_offset = n * st->indiv_B_block_stride;
         uint32_t gate_dst = __moe_bank_weight_block_addr(
             st->l1_b_gate_addr, n, st->indiv_B_block_stride);
         uint32_t up_dst = __moe_bank_weight_block_addr(
             st->l1_b_up_addr, n, st->indiv_B_block_stride);
-        rc = __moe_dyn_copy_pair_2d(
-            dma_binding,
-            __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
-            __moe_dyn_l1_wide(up_dst), up_src + src_offset,
-            st->indiv_B_block_stride, n == 0u);
+        uint32_t configure_xdma =
+            n == 0u &&
+            !__moe_xdma_stage_is_prepared(
+                blk, MOE_XDMA_PREPARED_S4PF);
+        if (n + 1u == st->s1_block_count &&
+            __moe_dyn_has_output(cfg) != 0u) {
+            __moe_dyn_2d_pair_pending_t pending;
+            rc = __moe_dyn_start_pair_2d(
+                dma_binding,
+                __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
+                __moe_dyn_l1_wide(up_dst), up_src + src_offset,
+                st->indiv_B_block_stride, configure_xdma, &pending);
+            if (rc == BINGO_RET_SUCC) {
+                __moe_dyn_prepare_store_xdma(cfg, st);
+                rc = __moe_dyn_wait_pair_2d(&pending);
+            }
+            if (rc == BINGO_RET_SUCC) {
+                __moe_pipeline_publish(&s2->store_prepared, 1u);
+                store_prepared_early = 1u;
+            }
+        } else {
+            rc = __moe_dyn_copy_pair_2d(
+                dma_binding,
+                __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
+                __moe_dyn_l1_wide(up_dst), up_src + src_offset,
+                st->indiv_B_block_stride, configure_xdma);
+        }
         if (rc != BINGO_RET_SUCC) break;
     }
-    if (rc == BINGO_RET_SUCC && __moe_dyn_has_output(cfg) != 0u) {
+    if (rc == BINGO_RET_SUCC && __moe_dyn_has_output(cfg) != 0u &&
+        store_prepared_early == 0u) {
         __moe_dyn_prepare_store_xdma(cfg, st);
         __moe_pipeline_publish(&s2->store_prepared, 1u);
     }
@@ -3072,6 +3166,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
         uint32_t prepare_rc =
             __moe_dyn_prepare_pipeline_impl(&next_blk, next_cfg, st);
         if (result == BINGO_RET_SUCC) result = prepare_rc;
+        if (result == BINGO_RET_SUCC &&
+            (xdma_task0 < 0 || cfg->ntokens <= MOE_BANK_TOKEN_LANES)) {
+            __moe_prepare_s1_xdma_shape(&next_blk, next_cfg, st);
+        }
     }
 
     /* Slot parity keeps the current output and next input in opposite 16-bank
@@ -3108,6 +3206,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
         }
         xdma_task0 = -1;
         xdma_task1 = -1;
+        if (has_next && result == BINGO_RET_SUCC) {
+            __moe_prepare_s1_xdma_shape(&next_blk, next_cfg, st);
+        }
     }
 
     if (has_next) {

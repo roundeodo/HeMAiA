@@ -145,19 +145,22 @@ def emit_header(config: dict) -> str:
             alignment=128,
         ),
     ]
-    weight_lines, gate_matrix, up_matrix, down_matrix = generate_expert_weights(
-        rng, p, "moe_test_c0"
-    )
-    lines += weight_lines
-    slot0_golden = generate_slot0_golden(
-        token_values[slot0_refs], gate_matrix, up_matrix, down_matrix
-    )
-    lines.append(
-        format_vector_definition(
-            "int16_t", "moe_test_c0_slot0_golden", slot0_golden.reshape(-1),
-            alignment=128,
+    for prefix in ("c0", "c1"):
+        weight_lines, gate_matrix, up_matrix, down_matrix = generate_expert_weights(
+            rng, p, f"moe_test_{prefix}"
         )
-    )
+        lines += weight_lines
+        slot0_golden = generate_slot0_golden(
+            token_values[slot0_refs], gate_matrix, up_matrix, down_matrix
+        )
+        lines.append(
+            format_vector_definition(
+                "int16_t",
+                f"moe_test_{prefix}_slot0_golden",
+                slot0_golden.reshape(-1),
+                alignment=128,
+            )
+        )
     return "\n\n".join(lines)
 
 

@@ -6,9 +6,9 @@ large workload.
 
 ## Workload
 
-C0 processes slot0 with six dense INT16 tokens of width 2048 and a
-`2048 -> 1024 -> 2048` expert. Gate, up, and down weights use eight
-128-column blocks and the production 16-bank A/B0/B1/D layout.
+C0 and C1 concurrently process slot0 with six dense INT16 tokens of width 2048
+and independent `2048 -> 1024 -> 2048` experts. Gate, up, and down weights use
+eight 128-column blocks and the production 16-bank A/B0/B1/D layout.
 
 ```text
 gather six slot0 tokens with production 2D iDMA
@@ -22,7 +22,10 @@ stop; slot1 is not computed
 
 C0 uses iDMA for S1. Its S2 boundary prefetches all down weights with the
 production `BOTH` binding, using iDMA and xDMA concurrently. C0 skips S3 and S4
-computes all six tokens.
+computes all six tokens. C1 uses xDMA for S1, performs no S2 prefetch, then uses
+xDMA for the active S3 load/compute pipeline; S4 computes its remaining two
+tokens. Both clusters use the same production device APIs and independently
+check all 24576 output bytes.
 
 The first load of S1/S3 is concurrent with the full block0 streamer/VersaCore
 configuration. Each compute starts before patching the next block's B/D base
