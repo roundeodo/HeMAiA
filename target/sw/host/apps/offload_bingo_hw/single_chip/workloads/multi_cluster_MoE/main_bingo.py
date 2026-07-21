@@ -1182,13 +1182,6 @@ def create_dfg(params, mh):
         else:
             input_ready = deps[0]
 
-        prepare_pipeline = add_node(
-            DMA_CORE_ID,
-            "__snax_bingo_kernel_moe_dynamic_expert_prepare_pipeline",
-            slot_args,
-        )
-        bingo_dfg.bingo_add_edge(input_ready, prepare_pipeline)
-
         # S1: N2 个 load+compute 节点对，边搬边算流水线
         # skip_s1=1(cache hit) 时：所有 load/compute 节点直接跳过，token 由 compute_gate_up_full(S2) 处理
         s1_loads = []
@@ -1219,9 +1212,9 @@ def create_dfg(params, mh):
                 compute_kernel,
                 block_args,
             )
-            bingo_dfg.bingo_add_edge(prepare_pipeline, load)
+            bingo_dfg.bingo_add_edge(input_ready, load)
             if block == 0:
-                bingo_dfg.bingo_add_edge(prepare_pipeline, s1_block0_config)
+                bingo_dfg.bingo_add_edge(input_ready, s1_block0_config)
                 bingo_dfg.bingo_add_edge(s1_block0_config, compute)
             else:
                 bingo_dfg.bingo_add_edge(s1_loads[block - 1], load)

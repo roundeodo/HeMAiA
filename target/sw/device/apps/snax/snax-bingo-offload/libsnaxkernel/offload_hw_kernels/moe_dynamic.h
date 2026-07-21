@@ -3036,9 +3036,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_STORE_START);
     MOE_PROFILE_RESOURCE_BEGIN(profile);
     if (has_next) {
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_START);
-        idma_bytes = next_cfg->ntokens * st->A_token_bytes;
-        result = __moe_dyn_gather_slot_tokens_start(next_cfg, st);
         next_blk = *blk;
         next_blk.task_arg_addr += BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES;
         next_blk.pipeline_ctrl_addr += MOE_PIPELINE_CTRL_SLOT_BYTES;
@@ -3069,6 +3066,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
     }
 
     if (has_next) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_GATHER_S1_START);
+        idma_bytes = next_cfg->ntokens * st->A_token_bytes;
+        result = __moe_dyn_gather_slot_tokens_start(next_cfg, st);
         uint32_t prepare_rc =
             __moe_dyn_prepare_pipeline_impl(&next_blk, next_cfg, st);
         if (result == BINGO_RET_SUCC) result = prepare_rc;

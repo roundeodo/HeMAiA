@@ -446,16 +446,6 @@ def add_production_slot_handoff_test(dfg, p, mh):
         )
         dfg.bingo_add_edge(runtime_to_l1, gather)
 
-        prepare_pipeline = add_node(
-            dfg,
-            cluster,
-            DMA_CORE,
-            "__snax_bingo_kernel_moe_dynamic_expert_prepare_pipeline",
-            slot_args,
-            f"{prefix.upper()}_PROD_PREPARE_S1_S2_PIPELINE",
-        )
-        dfg.bingo_add_edge(gather, prepare_pipeline)
-
         s1_loads = []
         s1_computes = []
         for block in range(p["block_count"]):
@@ -487,8 +477,8 @@ def add_production_slot_handoff_test(dfg, p, mh):
                     block_args,
                     f"{prefix.upper()}_PROD_S1_CONFIG_BLOCK0_DURING_LOAD0",
                 )
-                dfg.bingo_add_edge(prepare_pipeline, load)
-                dfg.bingo_add_edge(prepare_pipeline, config)
+                dfg.bingo_add_edge(gather, load)
+                dfg.bingo_add_edge(gather, config)
                 dfg.bingo_add_edge(config, compute)
             else:
                 dfg.bingo_add_edge(s1_loads[-1], load)
