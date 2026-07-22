@@ -1200,6 +1200,7 @@ def create_dfg(params, mh):
             s3_block_count=N2d,
             dma_core_id=DMA_CORE_ID,
             gemm_core_id=GEMM_CORE_ID,
+            implementation="fused_pipeline",
         )
         return chain["store"]
 

@@ -14,7 +14,7 @@ from moe_layout import derive_bank_workload_params  # noqa: E402
 S1_SHAPE = 1
 S2_SHAPE = 2
 SLOT_COUNT = 2
-SLOT_TOKENS = 6
+SLOT_TOKENS = 7
 GATHER_SOURCE_TOKENS = 32
 
 
