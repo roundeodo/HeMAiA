@@ -126,9 +126,9 @@ def emit_header(config: dict) -> str:
     )
     input_rows_2d = token_bytes
     input_rows = input_rows_2d.reshape(-1)
-    slot0_refs = np.arange(p["prod_slot_tokens"], dtype=np.uint16)
-    slot1_refs = np.asarray([9, 1, 14, 5, 23, 31, 7], dtype=np.uint16)
-    if slot1_refs.size != p["prod_slot_tokens"]:
+    slot0_refs = np.arange(p["prod_slot0_tokens"], dtype=np.uint16)
+    slot1_refs = np.asarray([9, 1, 14, 5, 23, 31], dtype=np.uint16)
+    if slot1_refs.size != p["prod_slot1_tokens"]:
         raise ValueError(
             "slot1 reference pattern must match the benchmark token count"
         )

@@ -13,9 +13,15 @@ from moe_layout import derive_bank_workload_params  # noqa: E402
 
 S1_SHAPE = 1
 S2_SHAPE = 2
+S3_SHAPE = 1
+S4_SHAPE = 2
 SLOT_COUNT = 2
-SLOT_TOKENS = 7
+SLOT0_TOKENS = 7
+SLOT1_TOKENS = 6
 GATHER_SOURCE_TOKENS = 32
+
+SHAPE_ROWS = (8, 4, 2)
+SHAPE_COLS = (4, 8, 16)
 
 
 def derive_params(config: dict) -> dict:
@@ -37,26 +43,30 @@ def derive_params(config: dict) -> dict:
             "app_name": "multi_cluster_MoE_test",
             "gather_source_tokens": GATHER_SOURCE_TOKENS,
             "prod_slot_count": SLOT_COUNT,
-            "prod_slot_tokens": SLOT_TOKENS,
-            "prod_token_refs_bytes": SLOT_COUNT * SLOT_TOKENS * 2,
-            "prod_output_bytes": SLOT_COUNT * SLOT_TOKENS * token_bytes,
+            "prod_slot_tokens": SLOT0_TOKENS,
+            "prod_slot0_tokens": SLOT0_TOKENS,
+            "prod_slot1_tokens": SLOT1_TOKENS,
+            "prod_token_refs_bytes": (SLOT0_TOKENS + SLOT1_TOKENS) * 2,
+            "prod_output_bytes": (SLOT0_TOKENS + SLOT1_TOKENS) * token_bytes,
             "token_payload_bytes": token_bytes,
             "token_row_stride": p["A_token_row_stride_bytes"],
             "token_buffer_bytes": p["total_tokens"] * token_bytes,
             "s1_shape": S1_SHAPE,
             "s2_shape": S2_SHAPE,
+            "s3_shape": S3_SHAPE,
+            "s4_shape": S4_SHAPE,
             "base_mesh_row": p["meshRow"],
             "base_mesh_col": p["meshCol"],
-            "s1_rows": 4,
-            "s1_M": 1,
-            "s2_M": 2,
+            "s1_rows": SHAPE_ROWS[S1_SHAPE],
+            "s2_rows": SHAPE_ROWS[S2_SHAPE],
+            "s3_rows": SHAPE_ROWS[S3_SHAPE],
+            "s4_rows": SHAPE_ROWS[S4_SHAPE],
             "gate_K": p["indiv_K1"],
-            "gate_N_s1": gate_block_output >> (S1_SHAPE + 2),
-            "gate_N_s2": p["intermediate_size"] // 16,
+            "gate_N_s1": gate_block_output // SHAPE_COLS[S1_SHAPE],
+            "gate_N_s2": gate_block_output // SHAPE_COLS[S2_SHAPE],
             "down_K": p["indiv_down_K1"],
-            "down_N_s3_full": (p["hidden_size"] // 2) // 8,
-            "down_N_s3_block": down_block_per_vc >> (S1_SHAPE + 2),
-            "down_N_s4": (p["hidden_size"] // 2) // 16,
+            "down_N_s3_block": down_block_per_vc // SHAPE_COLS[S3_SHAPE],
+            "down_N_s4": down_block_per_vc // SHAPE_COLS[S4_SHAPE],
             "indiv_N_per_block": gate_block_output,
             "indiv_down_N_per_block": down_block_per_vc,
             "block_count": p["s1_block_count"],

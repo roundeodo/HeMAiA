@@ -33,6 +33,10 @@ PROD_CLUSTERS = (("c0", 0), ("c1", 1))
 SLOT_IMPLEMENTATION = "optimized"
 BENCHMARK_CLUSTER_CONFIG = {
     "c0": {
+        "s1_shape": 1,
+        "s2_shape": 2,
+        "s3_shape": 1,
+        "s4_shape": 2,
         "s1_dma": 1,
         "skip_s3": 1,
         "s3_dma": 0,
@@ -41,12 +45,16 @@ BENCHMARK_CLUSTER_CONFIG = {
         "s4_token_start": 0,
     },
     "c1": {
+        "s1_shape": 1,
+        "s2_shape": 2,
+        "s3_shape": 1,
+        "s4_shape": 2,
         "s1_dma": 2,
         "skip_s3": 0,
         "s3_dma": 2,
         "s2_prefetch_dma": 0,
         "s4_prefetch_dma": 3,
-        "s4_token_start": "after_s1",
+        "s4_token_start": "after_s3",
     },
 }
 MOE_PIPELINE_CTRL_SLOT_BYTES = 1024
@@ -62,7 +70,7 @@ def offset(handle, byte_offset: int):
 
 
 class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
-    """Initialize the fixed seven-token C0/C1 benchmark slots."""
+    """Initialize the seven-token slot0 and six-token slot1 descriptors."""
 
     SLOT_BYTES = 384
     HEADER_BYTES = 64
@@ -129,13 +137,33 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             '"test and production static slot ABI diverged");',
         ]
 
-        token_count = p["prod_slot_tokens"]
-        s4_tile_rows = p["base_mesh_row"] >> p["s2_shape"]
-        s2_tokens = max(token_count - p["s1_rows"], 0)
-        s2_m_exec = (s2_tokens + s4_tile_rows - 1) // s4_tile_rows
+        token_count = p["prod_slot0_tokens"]
+        next_token_count = p["prod_slot1_tokens"]
 
         for prefix, _ in PROD_CLUSTERS:
             bench = BENCHMARK_CLUSTER_CONFIG[prefix]
+            s1_shape = bench["s1_shape"]
+            s2_shape = bench["s2_shape"]
+            s3_shape = bench["s3_shape"]
+            s4_shape = bench["s4_shape"]
+            s1_rows = p["base_mesh_row"] >> s1_shape
+            s2_rows = p["base_mesh_row"] >> s2_shape
+            s3_rows = p["base_mesh_row"] >> s3_shape
+            s4_rows = p["base_mesh_row"] >> s4_shape
+            s2_tokens = max(token_count - s1_rows, 0)
+            s2_m_exec = (s2_tokens + s2_rows - 1) // s2_rows
+            s1_n = p["indiv_N_per_block"] // (
+                p["base_mesh_col"] << s1_shape
+            )
+            s2_n = p["indiv_N_per_block"] // (
+                p["base_mesh_col"] << s2_shape
+            )
+            s3_n = p["indiv_down_N_per_block"] // (
+                p["base_mesh_col"] << s3_shape
+            )
+            s4_n = p["indiv_down_N_per_block"] // (
+                p["base_mesh_col"] << s4_shape
+            )
             s1_dma = bench["s1_dma"]
             runtime_cluster = 0 if prefix == "c0" else 1
             static_l3 = self._addr(mh[f"{prefix}_prod_static_l3"], handle_name_map)
@@ -182,8 +210,8 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             ctrl0 = (
                 1
                 | (skip_s3 << 2)
-                | (p["s1_shape"] << 5)
-                | (p["s1_shape"] << 7)
+                | (s1_shape << 5)
+                | (s3_shape << 7)
                 | (s1_dma << 9)
                 | (s3_dma << 11)
                 | (runtime_cluster << 13)
@@ -202,12 +230,12 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 ((1 | (s4_dma << 1)) << (3 * 3)) if s4_dma else 0
             )
             s4_token_start = (
-                p["s1_rows"]
-                if bench["s4_token_start"] == "after_s1"
+                s3_rows
+                if bench["s4_token_start"] == "after_s3"
                 else bench["s4_token_start"]
             )
             s4_tokens = max(token_count - s4_token_start, 0)
-            s4_m_exec = (s4_tokens + s4_tile_rows - 1) // s4_tile_rows
+            s4_m_exec = (s4_tokens + s4_rows - 1) // s4_rows
 
             lines += [
                 f"__snax_bingo_moe_dynamic_expert_static_args_t *{static_name} = "
@@ -244,7 +272,8 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"{static_name}->rescale_mult = 1u;",
                 f"{static_name}->rescale_shift = 0u;",
                 f"{static_name}->output_expert_stride_bytes = {p['prod_output_bytes']}u;",
-                f"{static_name}->max_tokens_per_expert = {2 * token_count}u;",
+                f"{static_name}->max_tokens_per_expert = "
+                f"{token_count + next_token_count}u;",
                 f"{static_name}->A_row_stride = {row_stride}u;",
                 f"{static_name}->s3_row_bytes = {s3_row_bytes}u;",
                 f"{static_name}->down_half_weight_bytes = {down_half_bytes}u;",
@@ -277,7 +306,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"{slot1_name}->ctrl = {ctrl1}u;",
                 f"{slot1_name}->expert_id = 0u;",
                 f"{slot1_name}->token_ref_start = {token_count}u;",
-                f"{slot1_name}->ntokens = {token_count}u;",
+                f"{slot1_name}->ntokens = {next_token_count}u;",
             ]
             for block in range(p["block_count"]):
                 output_offset = block * p["bank_mode0_output_block_span"]
@@ -285,27 +314,27 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                     f"{slot0_name}->s1_call[{block}].valid = 1u;",
                     f"{slot0_name}->s1_call[{block}].output_D0_addr = "
                     f"{l1_d} + {output_offset}u;",
-                    f"{slot0_name}->s1_call[{block}].N = {p['gate_N_s1']}u;",
-                    f"{slot0_name}->s1_call[{block}].array_shape = {p['s1_shape']}u;",
+                    f"{slot0_name}->s1_call[{block}].N = {s1_n}u;",
+                    f"{slot0_name}->s1_call[{block}].array_shape = {s1_shape}u;",
                     f"{slot0_name}->s3_call[{block}].valid = {1 - skip_s3}u;",
-                    f"{slot0_name}->s3_call[{block}].N = {p['down_N_s3_block']}u;",
-                    f"{slot0_name}->s3_call[{block}].array_shape = {p['s1_shape']}u;",
+                    f"{slot0_name}->s3_call[{block}].N = {s3_n}u;",
+                    f"{slot0_name}->s3_call[{block}].array_shape = {s3_shape}u;",
                     f"{slot0_name}->s3_call[{block}].reserved = 0u;",
                 ]
             lines += [
                 f"{slot0_name}->s2_call.valid = 1u;",
-                f"{slot0_name}->s2_call.token_start = {p['s1_rows']}u;",
+                f"{slot0_name}->s2_call.token_start = {s1_rows}u;",
                 f"{slot0_name}->s2_call.reserved = 0u;",
                 f"{slot0_name}->s2_call.M = {s2_m_exec}u;",
-                f"{slot0_name}->s2_call.N = {p['gate_N_s2']}u;",
-                f"{slot0_name}->s2_call.array_shape = {p['s2_shape']}u;",
+                f"{slot0_name}->s2_call.N = {s2_n}u;",
+                f"{slot0_name}->s2_call.array_shape = {s2_shape}u;",
                 f"{slot0_name}->s4_call.valid = 1u;",
                 f"{slot0_name}->s4_call.token_start = {s4_token_start}u;",
                 f"{slot0_name}->s4_call.reserved0 = 0u;",
                 f"{slot0_name}->s4_call.reserved1 = 0u;",
                 f"{slot0_name}->s4_call.M = {s4_m_exec}u;",
-                f"{slot0_name}->s4_call.N = {p['down_N_s4']}u;",
-                f"{slot0_name}->s4_call.array_shape = {p['s2_shape']}u;",
+                f"{slot0_name}->s4_call.N = {s4_n}u;",
+                f"{slot0_name}->s4_call.array_shape = {s4_shape}u;",
             ]
         return lines
 
@@ -433,7 +462,7 @@ def add_copy(dfg, cluster, src, dst, size, node_name=""):
 
 
 def add_production_slot_handoff_test(dfg, p, mh):
-    """Execute the fixed seven-token slot0 and gather-only slot1 benchmark."""
+    """Execute seven-token slot0 and gather the six-token slot1."""
     setup = add_node(
         dfg,
         0,
@@ -546,7 +575,7 @@ def create_dfg(p, mh):
     )
     print(
         "Execute concurrent C0/C1 slot0 paths, then store slot0 while gathering "
-        "seven tokens for slot1; slot1 compute is intentionally absent"
+        "six tokens for slot1; slot1 compute is intentionally absent"
     )
     add_production_slot_handoff_test(dfg, p, mh)
     return dfg
