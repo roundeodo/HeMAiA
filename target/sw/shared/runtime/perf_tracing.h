@@ -217,16 +217,6 @@
 #define BINGO_TRACE_DEV_MOE_STORE_START                 0x394
 #define BINGO_TRACE_DEV_MOE_STORE_END                   0x395
 
-// S4 compute/prefetch bank-phase work windows (0x3A0 - 0x3A7).
-#define BINGO_TRACE_DEV_MOE_S4PF_PHASE0_START           0x3A0
-#define BINGO_TRACE_DEV_MOE_S4PF_PHASE0_END             0x3A1
-#define BINGO_TRACE_DEV_MOE_S4PF_PHASE1_START           0x3A2
-#define BINGO_TRACE_DEV_MOE_S4PF_PHASE1_END             0x3A3
-#define BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_START         0x3A4
-#define BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_END           0x3A5
-#define BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_START         0x3A6
-#define BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_END           0x3A7
-
 // DMA 子阶段计时 marker (0x396 - 0x39B)
 // 由 __moe_dyn_xdma_start_copy / __moe_dyn_wait_xdma / copy_one / copy_pair 内部发出。
 // 这些是 gather_s1 / load_gate_up / load_down / prefetch_s2/s4 / store 的子事件。

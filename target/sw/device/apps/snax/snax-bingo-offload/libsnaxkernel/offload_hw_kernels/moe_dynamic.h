@@ -798,18 +798,6 @@ static inline uint32_t __moe_dyn_binding_uses_xdma(uint32_t binding)
     return binding == MOE_DYN_DMA_XDMA || binding == MOE_DYN_DMA_BOTH;
 }
 
-static inline uint32_t __moe_s4_phase_sync_enabled(
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
-    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
-{
-    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    uint32_t binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
-    return cfg->s4_call.valid != 0u &&
-        st->s1_block_count > 1u && st->s3_block_count > 1u &&
-        MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) != 0u &&
-        binding >= MOE_DYN_DMA_IDMA && binding <= MOE_DYN_DMA_BOTH;
-}
-
 static inline uint32_t __moe_xdma_stage_is_prepared(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     uint32_t stage)
@@ -2694,7 +2682,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_configure_down_b
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
         blk->task_arg_addr;
     if (blk->block_idx != 0u ||
-        !__moe_dyn_slot_active_this_round(cfg, st)) {
+        !__moe_dyn_slot_active_this_round(cfg, st) ||
+        cfg->s3_call[0].valid == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
         return BINGO_RET_SUCC;
     }
@@ -2707,11 +2696,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_configure_down_b
     __moe_pipeline_publish(
         &__moe_s1_dma_ctrl(blk)->csr_prepared_reserved,
         MOE_PIPELINE_S3_SYNC_COOKIE);
-
-    if (cfg->s3_call[0].valid == 0u) {
-        BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
-        return BINGO_RET_SUCC;
-    }
 
     if (__moe_csr_stage_is_prepared(blk, MOE_CSR_PREPARED_S3)) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
@@ -3054,10 +3038,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
     MOE_PROFILE_BEGIN(profile);
     uint32_t next_prepare_rc =
         __moe_dyn_prepare_next_slot_pipeline(blk, cfg, st);
-    if (next_prepare_rc != BINGO_RET_SUCC) {
-        __moe_pipeline_publish(&s2->error, next_prepare_rc);
-        return next_prepare_rc;
-    }
+    if (next_prepare_rc != BINGO_RET_SUCC) return next_prepare_rc;
     if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
         if (__moe_dyn_has_output(cfg) != 0u &&
             s2->store_prepared == 0u) {
@@ -3082,72 +3063,40 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
         (uint64_t)expert_id * st->indiv_B_expert_stride;
     uint32_t rc = BINGO_RET_SUCC;
     uint32_t store_prepared_early = 0u;
-    uint32_t phase_sync = __moe_s4_phase_sync_enabled(cfg, st);
-    uint32_t phase_count = phase_sync != 0u ? 2u : 1u;
-    uint32_t block_step = phase_sync != 0u ? 2u : 1u;
-    for (uint32_t phase = 0u;
-         phase < phase_count && rc == BINGO_RET_SUCC; phase++) {
-        if (phase == 0u) {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4PF_PHASE0_START);
+    for (uint32_t n = 0u; n < st->s1_block_count; n++) {
+        uint32_t src_offset = n * st->indiv_B_block_stride;
+        uint32_t gate_dst = __moe_bank_weight_block_addr(
+            st->l1_b_gate_addr, n, st->indiv_B_block_stride);
+        uint32_t up_dst = __moe_bank_weight_block_addr(
+            st->l1_b_up_addr, n, st->indiv_B_block_stride);
+        uint32_t configure_xdma =
+            n == 0u &&
+            !__moe_xdma_stage_is_prepared(
+                blk, MOE_XDMA_PREPARED_S4PF);
+        if (n + 1u == st->s1_block_count &&
+            __moe_dyn_has_output(cfg) != 0u) {
+            __moe_dyn_2d_pair_pending_t pending;
+            rc = __moe_dyn_start_pair_2d(
+                dma_binding,
+                __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
+                __moe_dyn_l1_wide(up_dst), up_src + src_offset,
+                st->indiv_B_block_stride, configure_xdma, &pending);
+            if (rc == BINGO_RET_SUCC) {
+                __moe_dyn_prepare_store_xdma(cfg, st);
+                rc = __moe_dyn_wait_pair_2d(&pending);
+            }
+            if (rc == BINGO_RET_SUCC) {
+                __moe_pipeline_publish(&s2->store_prepared, 1u);
+                store_prepared_early = 1u;
+            }
         } else {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4PF_PHASE1_START);
+            rc = __moe_dyn_copy_pair_2d(
+                dma_binding,
+                __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
+                __moe_dyn_l1_wide(up_dst), up_src + src_offset,
+                st->indiv_B_block_stride, configure_xdma);
         }
-        uint32_t first_block = phase_sync != 0u ? phase : 0u;
-        for (uint32_t n = first_block; n < st->s1_block_count;
-             n += block_step) {
-            uint32_t src_offset = n * st->indiv_B_block_stride;
-            uint32_t gate_dst = __moe_bank_weight_block_addr(
-                st->l1_b_gate_addr, n, st->indiv_B_block_stride);
-            uint32_t up_dst = __moe_bank_weight_block_addr(
-                st->l1_b_up_addr, n, st->indiv_B_block_stride);
-            uint32_t configure_xdma =
-                n == 0u &&
-                !__moe_xdma_stage_is_prepared(
-                    blk, MOE_XDMA_PREPARED_S4PF);
-            uint32_t final_transfer =
-                phase + 1u == phase_count &&
-                n + block_step >= st->s1_block_count;
-            if (final_transfer != 0u &&
-                __moe_dyn_has_output(cfg) != 0u) {
-                __moe_dyn_2d_pair_pending_t pending;
-                rc = __moe_dyn_start_pair_2d(
-                    dma_binding,
-                    __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
-                    __moe_dyn_l1_wide(up_dst), up_src + src_offset,
-                    st->indiv_B_block_stride, configure_xdma, &pending);
-                if (rc == BINGO_RET_SUCC) {
-                    __moe_dyn_prepare_store_xdma(cfg, st);
-                    rc = __moe_dyn_wait_pair_2d(&pending);
-                }
-                if (rc == BINGO_RET_SUCC) {
-                    __moe_pipeline_publish(&s2->store_prepared, 1u);
-                    store_prepared_early = 1u;
-                }
-            } else {
-                rc = __moe_dyn_copy_pair_2d(
-                    dma_binding,
-                    __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
-                    __moe_dyn_l1_wide(up_dst), up_src + src_offset,
-                    st->indiv_B_block_stride, configure_xdma);
-            }
-            if (rc != BINGO_RET_SUCC) break;
-        }
-        if (phase == 0u) {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4PF_PHASE0_END);
-        } else {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4PF_PHASE1_END);
-        }
-        if (phase_sync != 0u) {
-            if (rc != BINGO_RET_SUCC) {
-                __moe_pipeline_publish(&s2->error, rc);
-                break;
-            }
-            __moe_pipeline_publish(&s2->prefetch_done, phase + 1u);
-            if (phase + 1u < phase_count) {
-                rc = __moe_pipeline_wait(
-                    &s2->compute_done, phase + 1u, &s2->error);
-            }
-        }
+        if (rc != BINGO_RET_SUCC) break;
     }
     if (rc == BINGO_RET_SUCC && __moe_dyn_has_output(cfg) != 0u &&
         store_prepared_early == 0u) {
@@ -3316,102 +3265,64 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
         st->indiv_down_N_per_block / MOE_DUAL_VC_MESH_COL_2;
     uint32_t intermediate_base = __moe_dyn_intermediate_base(cfg, st);
     uint32_t output_base = __moe_dyn_output_base(cfg, st);
-    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
-    uint32_t phase_sync = __moe_s4_phase_sync_enabled(cfg, st);
-    uint32_t phase_count = phase_sync != 0u ? 2u : 1u;
-    uint32_t block_step = phase_sync != 0u ? 2u : 1u;
-    for (uint32_t phase = 0u;
-         phase < phase_count && result == BINGO_RET_SUCC; phase++) {
-        if (phase == 0u) {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_START);
-        } else {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_START);
-        }
-        uint32_t first_block = phase_sync != 0u ? phase : 0u;
-        for (uint32_t mt = 0u;
-             mt < call->M && result == BINGO_RET_SUCC; mt++) {
-            uint32_t token = token_start +
-                mt * MOE_DUAL_VC_MESH_ROW_2;
-            for (uint32_t n = first_block; n < st->s3_block_count;
-                 n += block_step) {
-                if (mt == 0u && n == 0u &&
-                    !__moe_csr_stage_is_prepared(
-                        blk, MOE_CSR_PREPARED_S4)) {
-                    __moe_bank_configure_mode1(
-                        __moe_bank_mode0_output_addr(
-                            intermediate_base, token, 0u,
-                            st->indiv_N_per_block,
-                            st->s1_block_count),
-                        __moe_bank_down_weight_block_addr(
-                            st->l1_b_down_addr, n,
-                            st->indiv_down_B_block_stride),
-                        __moe_bank_down_weight_block_addr(
-                            st->l1_b_down_addr + 64u, n,
-                            st->indiv_down_B_block_stride),
-                        __moe_bank_mode1_output_addr(
-                            output_base, token, n,
-                            st->indiv_down_N_per_block,
-                            st->s3_block_count),
-                        __moe_bank_mode1_output_addr(
-                            output_base + 64u, token, n,
-                            st->indiv_down_N_per_block,
-                            st->s3_block_count),
-                        st->indiv_down_K1, n_tiles, 2u,
-                        st->rescale_mult, st->rescale_shift);
-                    __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S4);
-                }
-                BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_START);
-                moe_start_dual_vc_and_streamer();
+    for (uint32_t mt = 0u; mt < call->M; mt++) {
+        uint32_t token = token_start + mt * MOE_DUAL_VC_MESH_ROW_2;
+        for (uint32_t n = 0u; n < st->s3_block_count; n++) {
+            if (mt == 0u && n == 0u &&
+                !__moe_csr_stage_is_prepared(
+                    blk, MOE_CSR_PREPARED_S4)) {
+                __moe_bank_configure_mode1(
+                    __moe_bank_mode0_output_addr(
+                        intermediate_base, token, 0u,
+                        st->indiv_N_per_block,
+                        st->s1_block_count),
+                    __moe_bank_down_weight_block_addr(
+                        st->l1_b_down_addr, n,
+                        st->indiv_down_B_block_stride),
+                    __moe_bank_down_weight_block_addr(
+                        st->l1_b_down_addr + 64u, n,
+                        st->indiv_down_B_block_stride),
+                    __moe_bank_mode1_output_addr(
+                        output_base, token, n,
+                        st->indiv_down_N_per_block, st->s3_block_count),
+                    __moe_bank_mode1_output_addr(
+                        output_base + 64u, token, n,
+                        st->indiv_down_N_per_block, st->s3_block_count),
+                    st->indiv_down_K1, n_tiles, 2u,
+                    st->rescale_mult, st->rescale_shift);
+                __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S4);
+            }
+            BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_START);
+            moe_start_dual_vc_and_streamer();
 
-                uint32_t next_phase = phase;
-                uint32_t next_n = n + block_step;
-                uint32_t next_mt = mt;
-                if (next_n >= st->s3_block_count) {
-                    next_n = first_block;
-                    next_mt++;
-                }
-                if (next_mt >= call->M) {
-                    next_phase++;
-                    next_mt = 0u;
-                    next_n = phase_sync != 0u ? next_phase : 0u;
-                }
-                if (next_phase < phase_count) {
-                    uint32_t next_token = token_start +
-                        next_mt * MOE_DUAL_VC_MESH_ROW_2;
-                    __moe_bank_patch_mode1_run_bases(
-                        __moe_bank_mode0_output_addr(
-                            intermediate_base, next_token, 0u,
-                            st->indiv_N_per_block, st->s1_block_count),
-                        __moe_bank_down_weight_block_addr(
-                            st->l1_b_down_addr, next_n,
-                            st->indiv_down_B_block_stride),
-                        __moe_bank_down_weight_block_addr(
-                            st->l1_b_down_addr + 64u, next_n,
-                            st->indiv_down_B_block_stride),
-                        __moe_bank_mode1_output_addr(
-                            output_base, next_token, next_n,
-                            st->indiv_down_N_per_block,
-                            st->s3_block_count),
-                        __moe_bank_mode1_output_addr(
-                            output_base + 64u, next_token, next_n,
-                            st->indiv_down_N_per_block,
-                            st->s3_block_count));
-                }
-                moe_wait_dual_vc_and_streamer();
-                BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
+            uint32_t next_n = n + 1u;
+            uint32_t next_mt = mt;
+            if (next_n == st->s3_block_count) {
+                next_n = 0u;
+                next_mt++;
             }
-        }
-        if (phase == 0u) {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_END);
-        } else {
-            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_END);
-        }
-        if (phase_sync != 0u) {
-            __moe_pipeline_publish(&s2->compute_done, phase + 1u);
-            if (phase + 1u < phase_count) {
-                result = __moe_pipeline_wait(
-                    &s2->prefetch_done, phase + 1u, &s2->error);
+            if (next_mt < call->M) {
+                uint32_t next_token = token_start +
+                    next_mt * MOE_DUAL_VC_MESH_ROW_2;
+                __moe_bank_patch_mode1_run_bases(
+                    __moe_bank_mode0_output_addr(
+                        intermediate_base, next_token, 0u,
+                        st->indiv_N_per_block, st->s1_block_count),
+                    __moe_bank_down_weight_block_addr(
+                        st->l1_b_down_addr, next_n,
+                        st->indiv_down_B_block_stride),
+                    __moe_bank_down_weight_block_addr(
+                        st->l1_b_down_addr + 64u, next_n,
+                        st->indiv_down_B_block_stride),
+                    __moe_bank_mode1_output_addr(
+                        output_base, next_token, next_n,
+                        st->indiv_down_N_per_block, st->s3_block_count),
+                    __moe_bank_mode1_output_addr(
+                        output_base + 64u, next_token, next_n,
+                        st->indiv_down_N_per_block, st->s3_block_count));
             }
+            moe_wait_dual_vc_and_streamer();
+            BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
         }
     }
     MOE_PROFILE_CAPTURE_VC_COUNTER(profile);

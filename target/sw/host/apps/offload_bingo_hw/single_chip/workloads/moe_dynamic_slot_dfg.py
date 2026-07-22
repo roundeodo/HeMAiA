@@ -93,9 +93,9 @@ def build_dynamic_expert_slot_chain(
         slot_args,
         label("S4_PREFETCH_OR_PREPARE_STORE"),
     )
-    # Start after S3 has released the phase counters, but keep this independent
-    # from S4 compute so the two S4 paths can overlap.
-    add_edge(s3_compute, prefetch_s4_next_s1)
+    # Keep this independent from S4 compute so next-slot prefetch/store setup
+    # can overlap the current slot's down-full work.
+    add_edge(s3_load, prefetch_s4_next_s1)
 
     compute_down_full = add_node(
         gemm_core_id,
