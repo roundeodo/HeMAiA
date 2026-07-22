@@ -23,9 +23,12 @@ stop; slot1 is not computed
 C0 uses iDMA for S1. Its S2 boundary prefetches all down weights with the
 production `BOTH` binding, using iDMA and xDMA concurrently. C0 skips S3 and S4
 computes all six tokens. C1 uses xDMA for S1, performs no S2 prefetch, then uses
-xDMA for the active S3 load/compute pipeline; S4 computes its remaining two
-tokens. Both clusters use the same production device APIs and independently
-check all 24576 output bytes.
+xDMA for the active S3 load/compute pipeline. While S4 computes its remaining
+two tokens, C1 exercises the production xDMA S4-prefetch path for the next S1
+weights. The focused test reuses expert 0 as the valid synthetic next-expert
+source; the runtime descriptor still carries the scheduler-facing valid,
+binding, and expert-ID fields. Both clusters use the same production device
+APIs and independently check all 24576 output bytes.
 
 The first load of S1/S3 is concurrent with the full block0 streamer/VersaCore
 configuration. Each compute starts before patching the next block's B/D base

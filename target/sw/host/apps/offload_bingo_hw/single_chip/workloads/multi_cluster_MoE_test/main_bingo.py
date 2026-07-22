@@ -166,6 +166,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 | (1 << 14)
             )
             s2_prefetch_vd = ((1 | (3 << 1)) << (2 * 3)) if prefix == "c0" else 0
+            s4_prefetch_vd = ((1 | (2 << 1)) << (3 * 3)) if prefix == "c1" else 0
             s4_token_start = 0 if prefix == "c0" else p["s1_rows"]
             s4_m_exec = 3 if prefix == "c0" else 1
 
@@ -232,7 +233,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"{slot0_name}->ntokens = {self.NTOKENS}u;",
                 f"{slot0_name}->m_s2_exec = 1u;",
                 f"{slot0_name}->m_s4_exec = {s4_m_exec}u;",
-                f"{slot0_name}->dma_slot_vd = {s2_prefetch_vd}u;",
+                f"{slot0_name}->dma_slot_vd = {s2_prefetch_vd | s4_prefetch_vd}u;",
                 f"{slot0_name}->dma_slot_eids = 0u;",
                 f"{slot1_name}->ctrl = {ctrl1}u;",
                 f"{slot1_name}->expert_id = 0u;",
