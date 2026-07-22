@@ -155,13 +155,15 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             s1_n = p["indiv_N_per_block"] // (
                 p["base_mesh_col"] << s1_shape
             )
-            s2_n = p["indiv_N_per_block"] // (
+            s2_n = (p["s1_block_count"] * p["indiv_N_per_block"]) // (
                 p["base_mesh_col"] << s2_shape
             )
             s3_n = p["indiv_down_N_per_block"] // (
                 p["base_mesh_col"] << s3_shape
             )
-            s4_n = p["indiv_down_N_per_block"] // (
+            s4_n = (
+                p["s3_block_count"] * p["indiv_down_N_per_block"]
+            ) // (
                 p["base_mesh_col"] << s4_shape
             )
             s1_dma = bench["s1_dma"]

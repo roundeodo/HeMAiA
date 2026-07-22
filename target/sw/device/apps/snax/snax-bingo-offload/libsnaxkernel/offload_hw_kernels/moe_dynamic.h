@@ -798,6 +798,21 @@ static inline uint32_t __moe_dyn_binding_uses_xdma(uint32_t binding)
     return binding == MOE_DYN_DMA_XDMA || binding == MOE_DYN_DMA_BOTH;
 }
 
+static inline uint32_t __moe_dyn_shape_valid(uint32_t shape)
+{
+    return shape <= 2u;
+}
+
+static inline uint32_t __moe_dyn_stage_block_n(
+    uint32_t stage_n, uint32_t block_count)
+{
+    if (block_count == 0u || stage_n == 0u ||
+        stage_n % block_count != 0u) {
+        return 0u;
+    }
+    return stage_n / block_count;
+}
+
 static inline uint32_t __moe_s4_phase_prefetch_layout_valid(
     const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
@@ -809,7 +824,10 @@ static inline uint32_t __moe_s4_phase_compute_layout_valid(
     const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
     return cfg->s4_call.valid != 0u && cfg->s4_call.M != 0u &&
-        st->s3_block_count >= 2u;
+        __moe_dyn_shape_valid(cfg->s4_call.array_shape) != 0u &&
+        st->s3_block_count >= 2u &&
+        __moe_dyn_stage_block_n(
+            cfg->s4_call.N, st->s3_block_count) != 0u;
 }
 
 static inline uint32_t __moe_xdma_stage_is_prepared(
@@ -1236,11 +1254,15 @@ static inline uint32_t __moe_prepare_s2_csr(
     const __snax_bingo_moe_dynamic_expert_static_args_t *st)
 {
     const __snax_bingo_moe_dyn_s2_call_args_t *call = &cfg->s2_call;
-    if (call->valid == 0u) return 0u;
+    if (call->valid == 0u || call->M == 0u ||
+        __moe_dyn_shape_valid(call->array_shape) == 0u) {
+        return 0u;
+    }
 
     uint32_t token = call->token_start;
     uint32_t n_tiles =
-        st->indiv_N_per_block / MOE_DUAL_VC_MESH_COL_2;
+        __moe_dyn_stage_block_n(call->N, st->s1_block_count);
+    if (n_tiles == 0u) return 0u;
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
     __moe_bank_configure_mode0(
         __moe_bank_a_addr(
@@ -1253,7 +1275,7 @@ static inline uint32_t __moe_prepare_s2_csr(
             __moe_dyn_intermediate_base(cfg, st), token, 0u,
             st->indiv_N_per_block,
             st->s1_block_count),
-        st->indiv_K1, n_tiles, 2u,
+        st->indiv_K1, n_tiles, call->array_shape,
         st->rescale_mult, st->rescale_shift);
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
     __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S2);
@@ -1296,8 +1318,8 @@ static inline void __moe_configure_s4_phase(
     uint32_t token, uint32_t phase)
 {
     const __snax_bingo_moe_dyn_s4_call_args_t *call = &cfg->s4_call;
-    uint32_t n_tiles = st->indiv_down_N_per_block /
-        __moe_dyn_meshcol(call->array_shape);
+    uint32_t n_tiles =
+        __moe_dyn_stage_block_n(call->N, st->s3_block_count);
     uint32_t phase_blocks =
         (st->s3_block_count + (phase == 0u ? 1u : 0u)) / 2u;
     uint32_t b_phase_stride = st->indiv_down_B_block_stride *
@@ -1333,11 +1355,15 @@ static inline uint32_t __moe_prepare_s4_csr(
     uint32_t phase_batched)
 {
     const __snax_bingo_moe_dyn_s4_call_args_t *call = &cfg->s4_call;
-    if (call->valid == 0u) return 0u;
+    if (call->valid == 0u || call->M == 0u ||
+        __moe_dyn_shape_valid(call->array_shape) == 0u) {
+        return 0u;
+    }
 
     uint32_t token = call->token_start;
     uint32_t n_tiles =
-        st->indiv_down_N_per_block / MOE_DUAL_VC_MESH_COL_2;
+        __moe_dyn_stage_block_n(call->N, st->s3_block_count);
+    if (n_tiles == 0u) return 0u;
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
     if (phase_batched != 0u) {
         __moe_configure_s4_phase(cfg, st, token, 1u);
@@ -1358,7 +1384,7 @@ static inline uint32_t __moe_prepare_s4_csr(
             __moe_bank_mode1_output_addr(
                 __moe_dyn_output_base(cfg, st) + 64u, token, 0u,
                 st->indiv_down_N_per_block, st->s3_block_count),
-            st->indiv_down_K1, n_tiles, 2u,
+            st->indiv_down_K1, n_tiles, call->array_shape,
             st->rescale_mult, st->rescale_shift);
     }
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
@@ -3564,16 +3590,28 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
             BINGO_RET_SUCC);
         return BINGO_RET_SUCC;
     }
+    uint32_t n_tiles =
+        __moe_dyn_stage_block_n(call->N, st->s1_block_count);
+    if (call->M == 0u ||
+        __moe_dyn_shape_valid(call->array_shape) == 0u ||
+        n_tiles == 0u) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
+        __moe_pipeline_publish(&s2->error, BINGO_RET_FAIL);
+        MOE_PROFILE_COMMIT(
+            arg, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S2,
+            MOE_PROFILE_RESOURCE_NONE, 0u, 0u, 0u, BINGO_RET_FAIL);
+        return BINGO_RET_FAIL;
+    }
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_START);
     MOE_PROFILE_RESOURCE_BEGIN(profile);
     uint32_t result = BINGO_RET_SUCC;
     uint32_t token_start = call->token_start;
-    uint32_t n_tiles = st->indiv_N_per_block / MOE_DUAL_VC_MESH_COL_2;
+    uint32_t token_step = __moe_dyn_shape_m(call->array_shape);
     uint32_t input_base = __moe_dyn_input_base(cfg, st);
     uint32_t intermediate_base = __moe_dyn_intermediate_base(cfg, st);
     for (uint32_t mt = 0u; mt < call->M && result == BINGO_RET_SUCC; mt++) {
-        uint32_t token = token_start + mt * MOE_DUAL_VC_MESH_ROW_2;
+        uint32_t token = token_start + mt * token_step;
         for (uint32_t n = 0u; n < st->s1_block_count; n++) {
             if (mt == 0u && s2->sync_enabled != 0u && n != 0u &&
                 n <= s2->block_count) {
@@ -3595,7 +3633,7 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
                         intermediate_base, token, n,
                         st->indiv_N_per_block,
                         st->s1_block_count),
-                    st->indiv_K1, n_tiles, 2u,
+                    st->indiv_K1, n_tiles, call->array_shape,
                     st->rescale_mult, st->rescale_shift);
                 __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S2);
             }
@@ -3610,7 +3648,7 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
             }
             if (next_mt < call->M) {
                 uint32_t next_token = token_start +
-                    next_mt * MOE_DUAL_VC_MESH_ROW_2;
+                    next_mt * token_step;
                 __moe_bank_patch_mode0_run_bases(
                     __moe_bank_a_addr(
                         input_base, next_token, st->A_token_bytes),
@@ -3681,17 +3719,27 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
             BINGO_RET_SUCC);
         return BINGO_RET_SUCC;
     }
+    uint32_t n_tiles =
+        __moe_dyn_stage_block_n(call->N, st->s3_block_count);
+    if (call->M == 0u ||
+        __moe_dyn_shape_valid(call->array_shape) == 0u ||
+        n_tiles == 0u) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
+        MOE_PROFILE_COMMIT(
+            arg, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S4,
+            MOE_PROFILE_RESOURCE_NONE, 0u, 0u, 0u, BINGO_RET_FAIL);
+        return BINGO_RET_FAIL;
+    }
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_START);
     MOE_PROFILE_RESOURCE_BEGIN(profile);
     uint32_t result = BINGO_RET_SUCC;
     uint32_t token_start = call->token_start;
-    uint32_t n_tiles =
-        st->indiv_down_N_per_block / MOE_DUAL_VC_MESH_COL_2;
+    uint32_t token_step = __moe_dyn_shape_m(call->array_shape);
     uint32_t intermediate_base = __moe_dyn_intermediate_base(cfg, st);
     uint32_t output_base = __moe_dyn_output_base(cfg, st);
     for (uint32_t mt = 0u; mt < call->M; mt++) {
-        uint32_t token = token_start + mt * MOE_DUAL_VC_MESH_ROW_2;
+        uint32_t token = token_start + mt * token_step;
         for (uint32_t n = 0u; n < st->s3_block_count; n++) {
             if (mt == 0u && n == 0u &&
                 !__moe_csr_stage_is_prepared(
@@ -3713,7 +3761,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
                     __moe_bank_mode1_output_addr(
                         output_base + 64u, token, n,
                         st->indiv_down_N_per_block, st->s3_block_count),
-                    st->indiv_down_K1, n_tiles, 2u,
+                    st->indiv_down_K1, n_tiles, call->array_shape,
                     st->rescale_mult, st->rescale_shift);
                 __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S4);
             }
@@ -3728,7 +3776,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
             }
             if (next_mt < call->M) {
                 uint32_t next_token = token_start +
-                    next_mt * MOE_DUAL_VC_MESH_ROW_2;
+                    next_mt * token_step;
                 __moe_bank_patch_mode1_run_bases(
                     __moe_bank_mode0_output_addr(
                         intermediate_base, next_token, 0u,

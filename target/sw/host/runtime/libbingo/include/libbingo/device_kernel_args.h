@@ -872,8 +872,8 @@ typedef struct __attribute__((packed, aligned(8)))
   } __attribute__((aligned(8)));
   union {
     struct {
-      uint32_t m_s2_exec; /* S2 M-tile 数 = ⌈tail_tokens / 2⌉; 0 when skip_s2=1 */
-      uint32_t m_s4_exec; /* S4 M-tile 数 = ⌈tail_tokens / 2⌉; 0 when skip_s4=1 */
+      uint32_t m_s2_exec; /* S2 M-tile count for s2_call.array_shape. */
+      uint32_t m_s4_exec; /* S4 M-tile count for s4_call.array_shape. */
     };
     uint64_t m_exec_word;
   } __attribute__((aligned(8)));

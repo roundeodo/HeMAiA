@@ -49,7 +49,7 @@ Set `SLOT_IMPLEMENTATION` in `main_bingo.py` to select one complete path:
 
 The resulting S4 calls are `M=4` on C0 (all seven tokens) and `M=2` on C1
 (tokens 4 through 6). These values are derived from the token count and the
-shape-2 row count; they are not hard-coded into the device APIs. The
+runtime shape row count; they are not hard-coded into the device APIs. The
 phase-batched compute API executes two bank phases for every runtime `M`, so
 its RUN count is `2*M` rather than `block_count*M`.
 
