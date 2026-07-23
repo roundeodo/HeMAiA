@@ -3596,9 +3596,11 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
             BINGO_RET_SUCC);
         return BINGO_RET_SUCC;
     }
+    uint32_t m_tiles = call->M;
+    uint32_t block_count = st->s1_block_count;
     uint32_t n_tiles =
-        __moe_dyn_stage_block_n(call->N, st->s1_block_count);
-    if (call->M == 0u ||
+        __moe_dyn_stage_block_n(call->N, block_count);
+    if (m_tiles == 0u ||
         __moe_dyn_shape_valid(call->array_shape) == 0u ||
         n_tiles == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
@@ -3616,9 +3618,9 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
     uint32_t token_step = __moe_dyn_shape_m(call->array_shape);
     uint32_t input_base = __moe_dyn_input_base(cfg, st);
     uint32_t intermediate_base = __moe_dyn_intermediate_base(cfg, st);
-    for (uint32_t mt = 0u; mt < call->M && result == BINGO_RET_SUCC; mt++) {
+    for (uint32_t mt = 0u; mt < m_tiles && result == BINGO_RET_SUCC; mt++) {
         uint32_t token = token_start + mt * token_step;
-        for (uint32_t n = 0u; n < st->s1_block_count; n++) {
+        for (uint32_t n = 0u; n < block_count; n++) {
             if (mt == 0u && s2->sync_enabled != 0u && n != 0u &&
                 n <= s2->block_count) {
                 result = __moe_pipeline_wait(
@@ -3638,7 +3640,7 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
                     __moe_bank_mode0_output_addr(
                         intermediate_base, token, n,
                         st->indiv_N_per_block,
-                        st->s1_block_count),
+                        block_count),
                     st->indiv_K1, n_tiles, call->array_shape,
                     st->rescale_mult, st->rescale_shift);
                 __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S2);
@@ -3648,11 +3650,11 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
 
             uint32_t next_n = n + 1u;
             uint32_t next_mt = mt;
-            if (next_n == st->s1_block_count) {
+            if (next_n == block_count) {
                 next_n = 0u;
                 next_mt++;
             }
-            if (next_mt < call->M) {
+            if (next_mt < m_tiles) {
                 uint32_t next_token = token_start +
                     next_mt * token_step;
                 __moe_bank_patch_mode0_run_bases(
@@ -3666,7 +3668,7 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
                         st->indiv_B_block_stride),
                     __moe_bank_mode0_output_addr(
                         intermediate_base, next_token, next_n,
-                        st->indiv_N_per_block, st->s1_block_count));
+                        st->indiv_N_per_block, block_count));
             } else {
                 __moe_prepare_after_s2(
                     blk, cfg, st, phase_batched_s4);
@@ -3684,7 +3686,7 @@ static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
     MOE_INDIV_PRINT(
         "[INDIV_S2_DONE] C%u slot=%u eid=%u M=%u N=%u rc=%u\r\n",
         snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
-        call->M, call->N, result);
+        m_tiles, call->N, result);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_END);
     MOE_PROFILE_COMMIT(
         arg, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S2,
