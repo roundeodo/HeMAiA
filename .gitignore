@@ -24,6 +24,10 @@ build/
 **/*.zip
 **/*.str
 
+# Local simulation captures and dated performance-analysis notes
+/debug_artifacts/
+/target/sw/host/apps/offload_bingo_hw/single_chip/workloads/multi_cluster_MoE_test/*_20??????.md
+
 target/tapeout/tcl/*
 
 .claude
