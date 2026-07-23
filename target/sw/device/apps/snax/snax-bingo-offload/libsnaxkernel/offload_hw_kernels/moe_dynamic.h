@@ -1945,10 +1945,16 @@ static inline void __moe_bank_configure_store(
     snax_write_xdma_cfg_reg(XDMA_DST_SPATIAL_STRIDE_PTR, token_bytes);
     snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR, token_bytes / 16u);
     snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR, MOE_BANK_TCDM_ROW_BYTES);
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR + 1u, 2u);
+    snax_write_xdma_cfg_reg(
+        XDMA_SRC_TEMP_STRIDE_PTR + 1u, MOE_BANK_MODE1_D1_OFFSET);
     snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR, token_bytes / 16u);
     snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR, 8u);
-#pragma GCC unroll 4
-    for (uint32_t i = 1u; i < XDMA_SRC_TEMP_DIM; i++) {
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR + 1u, 2u);
+    snax_write_xdma_cfg_reg(
+        XDMA_DST_TEMP_STRIDE_PTR + 1u, token_bytes / 2u);
+#pragma GCC unroll 3
+    for (uint32_t i = 2u; i < XDMA_SRC_TEMP_DIM; i++) {
         snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR + i, 1u);
         snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR + i, 0u);
         snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR + i, 1u);
@@ -3988,7 +3994,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
     uint32_t store_bytes = 0u;
     uint32_t idma_bytes = 0u;
     int32_t xdma_task0 = -1;
-    int32_t xdma_task1 = -1;
     uint32_t result = BINGO_RET_SUCC;
     __snax_bingo_kernel_moe_dynamic_expert_block_args_t next_blk;
 
@@ -4018,10 +4023,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
             (uint32_t)(dst >> 32u), (uint32_t)dst,
             st->A_token_bytes, row_stride, store_bytes);
         xdma_task0 = (int32_t)xdma_start_remote();
-        xdma_memcpy_fast_set_addresses(
-            __moe_dyn_l1_wide(output_base + 64u),
-            dst + st->A_token_bytes / 2u);
-        xdma_task1 = (int32_t)xdma_start_remote();
     }
 
     if (has_next) {
@@ -4042,7 +4043,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
     if (xdma_task0 >= 0 && cfg->ntokens > MOE_BANK_TOKEN_LANES) {
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
         xdma_remote_wait((uint32_t)xdma_task0);
-        xdma_remote_wait((uint32_t)xdma_task1);
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END);
 
         uint32_t page_span = __moe_bank_token_page_span(st->A_token_bytes);
@@ -4056,21 +4056,14 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
             uint32_t page = token_start / MOE_BANK_TOKEN_LANES;
             uint64_t src0 = __moe_dyn_l1_wide(
                 output_base + page * page_span);
-            uint64_t src1 = __moe_dyn_l1_wide(
-                output_base + 64u + page * page_span);
             uint64_t dst = expert_out_base +
                 (uint64_t)(cfg->token_ref_start + token_start) *
                     (uint64_t)row_stride;
             __moe_bank_patch_store_page(src0, dst, count);
             int32_t page_task0 = (int32_t)xdma_start_remote();
-            xdma_memcpy_fast_set_addresses(
-                src1, dst + st->A_token_bytes / 2u);
-            int32_t page_task1 = (int32_t)xdma_start_remote();
             xdma_remote_wait((uint32_t)page_task0);
-            xdma_remote_wait((uint32_t)page_task1);
         }
         xdma_task0 = -1;
-        xdma_task1 = -1;
         if (has_next && result == BINGO_RET_SUCC) {
             __moe_prepare_s1_xdma_shape(&next_blk, next_cfg, st);
         }
@@ -4085,7 +4078,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
     if (xdma_task0 >= 0) {
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
         xdma_remote_wait((uint32_t)xdma_task0);
-        xdma_remote_wait((uint32_t)xdma_task1);
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END);
     }
     MOE_PROFILE_RESOURCE_END(profile);
