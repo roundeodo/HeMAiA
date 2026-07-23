@@ -3102,6 +3102,70 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s3_stage(void *arg
     return BINGO_RET_SUCC;
 }
 
+__attribute__((always_inline)) static inline uint32_t
+__moe_dyn_opt_run_s3_block(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    uint32_t n)
+{
+    const __snax_bingo_moe_dyn_s3_call_args_t *call = &cfg->s3_call[n];
+    MOE_PROFILE_BEGIN(profile);
+    if (call->valid == 0u) {
+        MOE_PROFILE_COMMIT(
+            (void *)blk, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S3,
+            MOE_PROFILE_RESOURCE_NONE, n, 0u,
+            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_CTRL_SKIP,
+            BINGO_RET_SUCC);
+        return BINGO_RET_SUCC;
+    }
+
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_START);
+    MOE_PROFILE_RESOURCE_BEGIN(profile);
+    BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_START);
+    moe_start_dual_vc_and_streamer();
+
+    if (n + 1u < st->s3_block_count) {
+        uint32_t next_block = n + 1u;
+        BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
+        csrw_ss(BASE_PTR_READER_1_LOW,
+            __moe_bank_down_weight_block_addr(
+                st->l1_b_down_addr, next_block,
+                st->indiv_down_B_block_stride));
+        csrw_ss(BASE_PTR_READER_2_LOW,
+            __moe_bank_down_weight_block_addr(
+                st->l1_b_down_addr + 64u, next_block,
+                st->indiv_down_B_block_stride));
+        csrw_ss(BASE_PTR_WRITER_0_LOW,
+            __moe_bank_mode1_output_addr(
+                __moe_dyn_output_base(cfg, st), 0u, next_block,
+                st->indiv_down_N_per_block, st->s3_block_count));
+        csrw_ss(BASE_PTR_WRITER_1_LOW,
+            __moe_bank_mode1_output_addr(
+                __moe_dyn_output_base(cfg, st) + 64u, 0u, next_block,
+                st->indiv_down_N_per_block, st->s3_block_count));
+        BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
+    } else {
+        (void)__moe_prepare_s4_csr(blk, cfg, st, 1u);
+    }
+
+    moe_wait_dual_vc_and_streamer();
+    MOE_PROFILE_CAPTURE_VC_COUNTER(profile);
+    BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
+    MOE_PROFILE_RESOURCE_END(profile);
+    MOE_INDIV_PRINT(
+        "[INDIV_S3_DONE] C%u slot=%u eid=%u block=%u shape=%u N=%u "
+        "rc=%u\r\n",
+        snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
+        n, call->array_shape, call->N, BINGO_RET_SUCC);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_END);
+    MOE_PROFILE_COMMIT(
+        (void *)blk, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S3,
+        MOE_PROFILE_RESOURCE_VERSACORE, n,
+        MOE_PROFILE_RESOURCE_UNITS(profile), 0u, BINGO_RET_SUCC);
+    return BINGO_RET_SUCC;
+}
+
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s3_stage(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
@@ -3133,15 +3197,12 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s3_stage(void *
         &s1->csr_prepared_reserved,
         MOE_PIPELINE_S3_SYNC_COOKIE | MOE_PIPELINE_COMPUTE_READY_BIT);
 
-    __snax_bingo_kernel_moe_dynamic_expert_block_args_t block_args = *blk;
     uint32_t result = BINGO_RET_SUCC;
     for (uint32_t n = 0u; n < st->s3_block_count; n++) {
         result = __moe_pipeline_wait(
             &sync->prefetch_done, n + 1u, &sync->error);
         if (result != BINGO_RET_SUCC) break;
-        block_args.block_idx = n;
-        result = __moe_dynamic_expert_compute_down_block_impl(
-            &block_args, 0u, 1u);
+        result = __moe_dyn_opt_run_s3_block(blk, cfg, st, n);
         if (result != BINGO_RET_SUCC) {
             __moe_pipeline_publish(&sync->error, result);
             break;
