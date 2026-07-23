@@ -518,7 +518,7 @@ def add_production_slot_handoff_test(dfg, p, mh):
             DMA_CORE,
             dynamic_expert_gather_kernel(SLOT_IMPLEMENTATION),
             slot_args,
-            f"{prefix.upper()}_PROD_SLOT0_GATHER_7_TOKENS",
+            f"{prefix.upper()}_PROD_SLOT0_GATHER_{p['prod_slot0_tokens']}_TOKENS",
         )
         dfg.bingo_add_edge(runtime_to_l1, gather)
 
