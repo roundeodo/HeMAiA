@@ -81,7 +81,13 @@ print(
 from bingo_dfg import BingoDFG
 from bingo_node import BingoNode
 from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol
-from moe_dynamic_slot_dfg import build_dynamic_expert_slot_chain
+from moe_dynamic_slot_dfg import (
+    DEFAULT_SLOT_IMPLEMENTATION,
+    build_dynamic_expert_slot_chain,
+    dynamic_expert_gather_kernel,
+)
+
+SLOT_IMPLEMENTATION = DEFAULT_SLOT_IMPLEMENTATION
 from bingo_kernel_args import (
     SnaxBingoKernelIdma1dCopyArgs,
     SnaxBingoKernelMoeRouterGemmS0Args,
@@ -1176,7 +1182,7 @@ def create_dfg(params, mh):
         if slot == 0:
             input_ready = add_node(
                 DMA_CORE_ID,
-                "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
+                dynamic_expert_gather_kernel(SLOT_IMPLEMENTATION),
                 slot_args,
             )
             for dep in deps:
@@ -1200,7 +1206,7 @@ def create_dfg(params, mh):
             s3_block_count=N2d,
             dma_core_id=DMA_CORE_ID,
             gemm_core_id=GEMM_CORE_ID,
-            implementation="fused_pipeline",
+            implementation=SLOT_IMPLEMENTATION,
         )
         return chain["store"]
 

@@ -2263,6 +2263,17 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_dual_vc_bank_moe_full(void *arg)
     return BINGO_RET_SUCC;
 }
 
+// Dynamic individual-expert slot API
+//
+// Production DFGs use exactly one optimized entry per worker and stage:
+//   DM core: opt_gather, opt_load_s1, opt_prefetch_s2, opt_load_s3,
+//            opt_prefetch_s4, opt_store_gather
+//   VC core: opt_config_s1, opt_compute_s1, opt_compute_s2, opt_config_s3,
+//            opt_compute_s3, opt_compute_s4
+// The per-block dynamic_expert_* entries below are retained only for the
+// discrete comparison DFG. There is no run-time dispatch or fallback between
+// those two API families.
+//
 // main_bingo.py fixes each kernel to either GEMM core 0 or DM core 1. These
 // workload-private entry points therefore do not repeat core-id checks at run time.
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_init_output_gaps(void *arg)
@@ -2382,7 +2393,7 @@ static inline uint32_t __moe_dyn_gather_slot_tokens_wait(void)
     return __moe_gather_rows_idma_wait();
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_gather_s1(void *arg)
 {
     __snax_bingo_kernel_moe_dynamic_expert_block_args_t *node =
         (__snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -2576,7 +2587,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
     return rc;
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_config_s1_block0(void *arg)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
@@ -2610,7 +2621,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_configure_gate_u
     return BINGO_RET_SUCC;
 }
 
-static uint32_t __moe_dynamic_expert_compute_gate_up_block_impl(
+__attribute__((always_inline)) static inline uint32_t
+__moe_dynamic_expert_compute_gate_up_block_impl(
     void *arg, uint32_t configure_block0, uint32_t phase_batched_s4)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
@@ -2704,8 +2716,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_
     return __moe_dynamic_expert_compute_gate_up_block_impl(arg, 0u, 0u);
 }
 
-static uint32_t __moe_dyn_load_s1_stage_impl(
-    void *arg, uint32_t phase_batched_s4)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s1_stage(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -2744,17 +2755,11 @@ static uint32_t __moe_dyn_load_s1_stage_impl(
         }
         __moe_pipeline_publish(&sync->prefetch_done, n + 1u);
     }
-    __moe_prepare_s4pf_xdma_shape(blk, cfg, st, phase_batched_s4);
+    __moe_prepare_s4pf_xdma_shape(blk, cfg, st, 1u);
     return BINGO_RET_SUCC;
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_load_s1_stage(void *arg)
-{
-    return __moe_dyn_load_s1_stage_impl(arg, 0u);
-}
-
-static uint32_t __moe_dyn_compute_s1_stage_pc_impl(
-    void *arg, uint32_t phase_batched_s4)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s1_stage(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -2793,7 +2798,7 @@ static uint32_t __moe_dyn_compute_s1_stage_pc_impl(
         if (result != BINGO_RET_SUCC) break;
         block_args.block_idx = n;
         result = __moe_dynamic_expert_compute_gate_up_block_impl(
-            &block_args, 0u, phase_batched_s4);
+            &block_args, 0u, 1u);
         if (result != BINGO_RET_SUCC) {
             __moe_pipeline_publish(&sync->error, result);
             break;
@@ -2811,11 +2816,6 @@ static uint32_t __moe_dyn_compute_s1_stage_pc_impl(
         asm volatile("fence rw, rw" ::: "memory");
     }
     return result;
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_compute_s1_stage_pc(void *arg)
-{
-    return __moe_dyn_compute_s1_stage_pc_impl(arg, 0u);
 }
 
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(void *arg)
@@ -2879,7 +2879,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
     return rc;
 }
 
-static uint32_t __moe_dynamic_expert_configure_down_block0_impl(
+__attribute__((always_inline)) static inline uint32_t
+__moe_dynamic_expert_configure_down_block0_impl(
     void *arg, uint32_t phase_batched_s4)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
@@ -2946,7 +2947,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_configure_down_b
     return __moe_dynamic_expert_configure_down_block0_impl(arg, 0u);
 }
 
-static uint32_t __moe_dynamic_expert_compute_down_block_impl(
+__attribute__((always_inline)) static inline uint32_t
+__moe_dynamic_expert_compute_down_block_impl(
     void *arg, uint32_t configure_block0, uint32_t phase_batched_s4)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
@@ -3051,7 +3053,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_blo
     return __moe_dynamic_expert_compute_down_block_impl(arg, 0u, 0u);
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_load_s3_stage(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s3_stage(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -3100,8 +3102,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_load_s3_stage(void *arg)
     return BINGO_RET_SUCC;
 }
 
-static uint32_t __moe_dyn_compute_s3_stage_pc_impl(
-    void *arg, uint32_t phase_batched_s4)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s3_stage(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -3140,7 +3141,7 @@ static uint32_t __moe_dyn_compute_s3_stage_pc_impl(
         if (result != BINGO_RET_SUCC) break;
         block_args.block_idx = n;
         result = __moe_dynamic_expert_compute_down_block_impl(
-            &block_args, 0u, phase_batched_s4);
+            &block_args, 0u, 1u);
         if (result != BINGO_RET_SUCC) {
             __moe_pipeline_publish(&sync->error, result);
             break;
@@ -3150,12 +3151,7 @@ static uint32_t __moe_dyn_compute_s3_stage_pc_impl(
     return result;
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_compute_s3_stage_pc(void *arg)
-{
-    return __moe_dyn_compute_s3_stage_pc_impl(arg, 0u);
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -3471,7 +3467,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
  * This is a separate ABI-visible kernel so the discrete implementation remains
  * available for controlled comparisons.
  */
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_prefetch_s4_phase_batched(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -3568,7 +3564,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_prefetch_s4_phase_batched(v
 }
 
 /* S2 consumes the final call record lowered by CVA6 in MoEPrepare. */
-static uint32_t __moe_dynamic_expert_compute_gate_up_full_impl(
+__attribute__((always_inline)) static inline uint32_t
+__moe_dynamic_expert_compute_gate_up_full_impl(
     void *arg, uint32_t phase_batched_s4)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
@@ -3824,7 +3821,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_compute_down_ful
  * Optimized S4 compute: process all blocks of one bank phase per RUN and
  * repeat that two-phase sequence for every runtime M tile.
  */
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_compute_s4_phase_batched(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
@@ -3969,7 +3966,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prepare_store_xd
     return BINGO_RET_SUCC;
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_store_gather(void *arg)
 {
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -4106,48 +4103,11 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather
     return result;
 }
 
-/*
- * ABI-visible optimized slot API.
- *
- * Keep these names separate from the original per-block and legacy fused
- * entry points. This lets a DFG select one implementation consistently and
- * gives later optimizations a stable place to evolve without changing the
- * discrete comparison path. The common implementations below are shared only
- * where the optimized path has not yet changed the operation itself.
- */
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_gather_s1(void *arg)
-{
-    return __snax_bingo_kernel_moe_dynamic_expert_gather_s1(arg);
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s1_stage(void *arg)
-{
-    return __moe_dyn_load_s1_stage_impl(arg, 1u);
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_config_s1_block0(void *arg)
-{
-    return __snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0(arg);
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s1_stage(void *arg)
-{
-    return __moe_dyn_compute_s1_stage_pc_impl(arg, 1u);
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(void *arg)
-{
-    return __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down(arg);
-}
-
+/* Remaining optimized entry points specialize bodies shared with the
+ * per-block comparison API. */
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s2(void *arg)
 {
     return __moe_dynamic_expert_compute_gate_up_full_impl(arg, 1u);
-}
-
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s3_stage(void *arg)
-{
-    return __snax_bingo_kernel_moe_dyn_load_s3_stage(arg);
 }
 
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_config_s3_block0(void *arg)
@@ -4155,24 +4115,26 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_config_s3_block0(void *
     return __moe_dynamic_expert_configure_down_block0_impl(arg, 1u);
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s3_stage(void *arg)
+/* Legacy ABI adapters are retained only for the discrete comparison DFG. The
+ * production optimized DFG enters each implementation directly. */
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_gather_s1(void *arg)
 {
-    return __moe_dyn_compute_s3_stage_pc_impl(arg, 1u);
+    return __snax_bingo_kernel_moe_dyn_opt_gather_s1(arg);
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0(void *arg)
 {
-    return __snax_bingo_kernel_moe_dyn_prefetch_s4_phase_batched(arg);
+    return __snax_bingo_kernel_moe_dyn_opt_config_s1_block0(arg);
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down(void *arg)
 {
-    return __snax_bingo_kernel_moe_dyn_compute_s4_phase_batched(arg);
+    return __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(arg);
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_store_gather(void *arg)
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next(void *arg)
 {
-    return __snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next(arg);
+    return __snax_bingo_kernel_moe_dyn_opt_store_gather(arg);
 }
 
 // ============================================================

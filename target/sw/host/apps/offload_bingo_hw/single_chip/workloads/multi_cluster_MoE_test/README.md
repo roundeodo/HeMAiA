@@ -2,20 +2,20 @@
 
 This workload reproduces one complete individual-expert slot from the production
 `multi_cluster_MoE` graph. It uses the production ABI and device library. The
-benchmark explicitly selects the separate `optimized` slot API family; the
-original per-block `discrete` APIs and current production `fused_pipeline`
-APIs remain independently selectable for controlled comparisons.
+benchmark and production workload both select the `optimized` slot API family.
+The original per-block `discrete` APIs remain selectable for controlled
+comparisons; the redundant intermediate fused API family has been removed.
 
 ## Workload
 
-C0 and C1 concurrently process slot0 with seven dense INT16 tokens of width 2048
+C0 and C1 concurrently process slot0 with eleven dense INT16 tokens of width 2048
 and independent `2048 -> 1024 -> 2048` experts. Gate, up, and down weights use
 eight 128-column blocks and the production 16-bank A/B0/B1/D layout.
 
 ```text
-gather seven slot0 tokens with production 2D iDMA
+gather eleven slot0 tokens with production 2D iDMA
 S1: load0 || configure0, then compute(i) || load(i+1)
-S2: compute the remaining three tokens as two shapeC M tiles
+S2: compute the remaining seven tokens as four shapeC M tiles
 S3/S4: cluster-specific down path
 prepare the production xDMA 2D store while compute is still running
 store slot0 with xDMA while gathering six slot1 tokens with iDMA
@@ -24,15 +24,15 @@ stop; slot1 is not computed
 
 C0 uses shapeB and iDMA for S1. Its shapeC S2 boundary prefetches all down
 weights with the production `BOTH` binding, using iDMA and xDMA concurrently.
-C0 skips S3 and shapeC S4 computes all seven tokens without a prefetch. C1 uses
+C0 skips S3 and shapeC S4 computes all eleven tokens without a prefetch. C1 uses
 shapeB and xDMA for S1, shapeC S2 without a prefetch, then shapeB and xDMA for
 the active S3 load/compute pipeline. While shapeC S4 computes its remaining
-three tokens, C1 uses BOTH for the gate and up weights of the next S1 so the
+seven tokens, C1 uses BOTH for the gate and up weights of the next S1 so the
 full prefetch fits the short compute window. The focused test reuses expert 0
 as the valid synthetic next-expert
 source; the runtime descriptor still carries the scheduler-facing valid,
 binding, and expert-ID fields. Both clusters use the same production device
-ABI and independently check all 28672 output bytes.
+ABI and independently check all 22528 output bytes.
 
 The benchmark protocol binds every 64-byte/cycle C0 transfer to iDMA, every
 64-byte/cycle C1 transfer to xDMA, and every 128-byte/cycle transfer to BOTH.
@@ -43,12 +43,11 @@ or DMA engine.
 Set `SLOT_IMPLEMENTATION` in `main_bingo.py` to select one complete path:
 
 - `discrete`: one DFG node per S1/S3 block and the original S2/S4 APIs.
-- `fused_pipeline`: the current production stage-fused API family.
 - `optimized`: separate optimized APIs for gather/handoff, S1, S2, S3, and
   phase-batched S4, including the existing intra-stage and cross-stage preload.
 
-The resulting S4 calls are `M=4` on C0 (all seven tokens) and `M=2` on C1
-(tokens 4 through 6). These values are derived from the token count and the
+The resulting S4 calls are `M=6` on C0 (all eleven tokens) and `M=4` on C1
+(tokens 4 through 10). These values are derived from the token count and the
 runtime shape row count; they are not hard-coded into the device APIs. The
 phase-batched compute API executes two bank phases for every runtime `M`, so
 its RUN count is `2*M` rather than `block_count*M`.

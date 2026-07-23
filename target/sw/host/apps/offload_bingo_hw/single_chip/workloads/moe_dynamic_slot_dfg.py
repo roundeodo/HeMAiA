@@ -1,55 +1,26 @@
 """Shared production DFG builders for one dynamic individual-expert slot."""
 
 
-SLOT_IMPLEMENTATIONS = ("discrete", "fused_pipeline", "optimized")
+SLOT_IMPLEMENTATIONS = ("discrete", "optimized")
+DEFAULT_SLOT_IMPLEMENTATION = "optimized"
 
 GATHER_KERNELS = {
     "discrete": "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
-    "fused_pipeline": "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
     "optimized": "__snax_bingo_kernel_moe_dyn_opt_gather_s1",
 }
 
-FUSED_KERNELS = {
-    "fused_pipeline": {
-        "s1_load": "__snax_bingo_kernel_moe_dyn_load_s1_stage",
-        "s1_config": (
-            "__snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0"
-        ),
-        "s1_compute": "__snax_bingo_kernel_moe_dyn_compute_s1_stage_pc",
-        "s2_prefetch": (
-            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down"
-        ),
-        "s2_compute": (
-            "__snax_bingo_kernel_moe_dynamic_expert_compute_gate_up_full"
-        ),
-        "s3_load": "__snax_bingo_kernel_moe_dyn_load_s3_stage",
-        "s3_config": (
-            "__snax_bingo_kernel_moe_dynamic_expert_configure_down_block0"
-        ),
-        "s3_compute": "__snax_bingo_kernel_moe_dyn_compute_s3_stage_pc",
-        "s4_prefetch": (
-            "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next_s1"
-        ),
-        "s4_compute": (
-            "__snax_bingo_kernel_moe_dynamic_expert_compute_down_full"
-        ),
-        "store": (
-            "__snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next"
-        ),
-    },
-    "optimized": {
-        "s1_load": "__snax_bingo_kernel_moe_dyn_opt_load_s1_stage",
-        "s1_config": "__snax_bingo_kernel_moe_dyn_opt_config_s1_block0",
-        "s1_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s1_stage",
-        "s2_prefetch": "__snax_bingo_kernel_moe_dyn_opt_prefetch_s2",
-        "s2_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s2",
-        "s3_load": "__snax_bingo_kernel_moe_dyn_opt_load_s3_stage",
-        "s3_config": "__snax_bingo_kernel_moe_dyn_opt_config_s3_block0",
-        "s3_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s3_stage",
-        "s4_prefetch": "__snax_bingo_kernel_moe_dyn_opt_prefetch_s4",
-        "s4_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s4",
-        "store": "__snax_bingo_kernel_moe_dyn_opt_store_gather",
-    },
+OPTIMIZED_STAGE_KERNELS = {
+    "s1_load": "__snax_bingo_kernel_moe_dyn_opt_load_s1_stage",
+    "s1_config": "__snax_bingo_kernel_moe_dyn_opt_config_s1_block0",
+    "s1_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s1_stage",
+    "s2_prefetch": "__snax_bingo_kernel_moe_dyn_opt_prefetch_s2",
+    "s2_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s2",
+    "s3_load": "__snax_bingo_kernel_moe_dyn_opt_load_s3_stage",
+    "s3_config": "__snax_bingo_kernel_moe_dyn_opt_config_s3_block0",
+    "s3_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s3_stage",
+    "s4_prefetch": "__snax_bingo_kernel_moe_dyn_opt_prefetch_s4",
+    "s4_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s4",
+    "store": "__snax_bingo_kernel_moe_dyn_opt_store_gather",
 }
 
 
@@ -214,7 +185,7 @@ def _build_discrete_slot_chain(
     }
 
 
-def _build_fused_slot_chain(
+def _build_optimized_slot_chain(
     *,
     kernels,
     add_node,
@@ -224,9 +195,8 @@ def _build_fused_slot_chain(
     dma_core_id,
     gemm_core_id,
     label,
-    optimized,
 ):
-    """Build one-node-per-stage fused and pipelined slot chains."""
+    """Build the production one-node-per-stage pipelined slot chain."""
     slot_args = make_block_args(0)
     block0_args = make_block_args(0)
     s1_load = add_node(
@@ -291,9 +261,8 @@ def _build_fused_slot_chain(
         label("S4_PREFETCH_OR_PREPARE_STORE"),
     )
     add_edge(s3_load, s4_prepare)
-    if optimized:
-        # The optimized S4 workers share the S3 synchronization control words.
-        add_edge(s3_config, s4_prepare)
+    # The optimized S4 workers share the S3 synchronization control words.
+    add_edge(s3_config, s4_prepare)
 
     s4_compute = add_node(
         gemm_core_id,
@@ -331,10 +300,10 @@ def build_dynamic_expert_slot_chain(
     s3_block_count,
     dma_core_id,
     gemm_core_id,
-    implementation="fused_pipeline",
+    implementation=DEFAULT_SLOT_IMPLEMENTATION,
     label_prefix="",
 ):
-    """Build a selectable discrete, fused, or fully optimized slot chain."""
+    """Build either the comparison chain or the production optimized chain."""
     if s1_block_count <= 0 or s3_block_count <= 0:
         raise ValueError("dynamic MoE slot requires non-zero S1/S3 block counts")
     _validate_implementation(implementation)
@@ -357,8 +326,7 @@ def build_dynamic_expert_slot_chain(
             s1_block_count=s1_block_count,
             s3_block_count=s3_block_count,
         )
-    return _build_fused_slot_chain(
+    return _build_optimized_slot_chain(
         **common,
-        kernels=FUSED_KERNELS[implementation],
-        optimized=implementation == "optimized",
+        kernels=OPTIMIZED_STAGE_KERNELS,
     )

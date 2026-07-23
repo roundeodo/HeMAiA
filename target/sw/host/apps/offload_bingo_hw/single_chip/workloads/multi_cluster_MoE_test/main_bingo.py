@@ -21,6 +21,7 @@ from bingo_kernel_args import (  # noqa: E402
 from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol  # noqa: E402
 from bingo_node import BingoNode  # noqa: E402
 from moe_dynamic_slot_dfg import (  # noqa: E402
+    DEFAULT_SLOT_IMPLEMENTATION,
     build_dynamic_expert_slot_chain,
     dynamic_expert_gather_kernel,
 )
@@ -30,7 +31,7 @@ GEMM_CORE = 0
 DMA_CORE = 1
 HOST_CORE = 2
 PROD_CLUSTERS = (("c0", 0), ("c1", 1))
-SLOT_IMPLEMENTATION = "optimized"
+SLOT_IMPLEMENTATION = DEFAULT_SLOT_IMPLEMENTATION
 BENCHMARK_CLUSTER_CONFIG = {
     "c0": {
         "s1_shape": 1,
@@ -464,7 +465,7 @@ def add_copy(dfg, cluster, src, dst, size, node_name=""):
 
 
 def add_production_slot_handoff_test(dfg, p, mh):
-    """Execute seven-token slot0 and gather the six-token slot1."""
+    """Execute eleven-token slot0 and gather the six-token slot1."""
     setup = add_node(
         dfg,
         0,
