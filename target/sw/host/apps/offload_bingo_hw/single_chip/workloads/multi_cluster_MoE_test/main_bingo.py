@@ -70,7 +70,7 @@ def offset(handle, byte_offset: int):
 
 
 class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
-    """Initialize the seven-token slot0 and six-token slot1 descriptors."""
+    """Initialize the eleven-token slot0 and six-token slot1 descriptors."""
 
     SLOT_BYTES = 384
     HEADER_BYTES = 64
