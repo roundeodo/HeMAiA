@@ -3868,6 +3868,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_compute_s4_phase_batched(vo
     uint32_t result = BINGO_RET_SUCC;
     uint32_t token_start = call->token_start;
     uint32_t token_step = __moe_dyn_shape_m(call->array_shape);
+    uint32_t m_tiles = call->M;
     uint32_t intermediate_base = __moe_dyn_intermediate_base(cfg, st);
     uint32_t output_base = __moe_dyn_output_base(cfg, st);
 
@@ -3886,11 +3887,11 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_compute_s4_phase_batched(vo
             BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_START);
         }
 
-        for (uint32_t mt = 0u; mt < call->M; mt++) {
+        for (uint32_t mt = 0u; mt < m_tiles; mt++) {
             BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_START);
             moe_start_dual_vc_and_streamer();
 
-            if (mt + 1u < call->M) {
+            if (mt + 1u < m_tiles) {
                 uint32_t next_token = token_start + (mt + 1u) * token_step;
                 __moe_bank_patch_mode1_run_bases(
                     __moe_bank_mode0_output_addr(
@@ -3936,7 +3937,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_compute_s4_phase_batched(vo
     MOE_INDIV_PRINT(
         "[INDIV_S4_PHASE_DONE] C%u slot=%u eid=%u M=%u N=%u rc=%u\r\n",
         snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
-        call->M, call->N, result);
+        m_tiles, call->N, result);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_END);
     MOE_PROFILE_COMMIT(
         arg, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S4,
