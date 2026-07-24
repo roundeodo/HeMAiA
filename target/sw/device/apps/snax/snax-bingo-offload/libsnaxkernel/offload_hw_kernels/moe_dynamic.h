@@ -3387,22 +3387,8 @@ static inline uint32_t __moe_dyn_prefetch_s4_phase(
         if (current_xdma_address_preloaded == 0u) {
             xdma_memcpy_fast_set_addresses(up_src_phase, up_dst_phase);
         }
-        xdma_task0 = (int32_t)xdma_start();
     } else if (dma_binding != MOE_DYN_DMA_IDMA) {
         return BINGO_RET_FAIL;
-    }
-
-    if (preload_next_phase != 0u && uses_xdma != 0u) {
-        uint32_t next_phase = phase ^ 1u;
-        uint32_t next_is_gate = dma_binding == MOE_DYN_DMA_XDMA;
-        uint64_t next_src = (next_is_gate != 0u ? gate_src : up_src) +
-            next_phase * block_bytes;
-        uint32_t next_dst_base = next_is_gate != 0u ?
-            st->l1_b_gate_addr : st->l1_b_up_addr;
-        xdma_memcpy_fast_set_addresses(
-            next_src,
-            __moe_dyn_l1_wide(__moe_bank_weight_block_addr(
-                next_dst_base, next_phase, block_bytes)));
     }
 
     uint32_t repeats = block_bytes / MOE_BANK_WEIGHT_ROW_BYTES;
@@ -3426,6 +3412,23 @@ static inline uint32_t __moe_dyn_prefetch_s4_phase(
         }
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
         wait_idma = 1u;
+    }
+
+    if (dma_binding == MOE_DYN_DMA_BOTH) {
+        xdma_task0 = (int32_t)xdma_start();
+    }
+
+    if (preload_next_phase != 0u && uses_xdma != 0u) {
+        uint32_t next_phase = phase ^ 1u;
+        uint32_t next_is_gate = dma_binding == MOE_DYN_DMA_XDMA;
+        uint64_t next_src = (next_is_gate != 0u ? gate_src : up_src) +
+            next_phase * block_bytes;
+        uint32_t next_dst_base = next_is_gate != 0u ?
+            st->l1_b_gate_addr : st->l1_b_up_addr;
+        xdma_memcpy_fast_set_addresses(
+            next_src,
+            __moe_dyn_l1_wide(__moe_bank_weight_block_addr(
+                next_dst_base, next_phase, block_bytes)));
     }
 
     if (prepare_store != 0u && __moe_dyn_has_output(cfg) != 0u) {
