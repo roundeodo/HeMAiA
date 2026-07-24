@@ -2536,24 +2536,13 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prepare_pipeline
     return rc;
 }
 
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block(void *arg)
+__attribute__((always_inline)) static inline uint32_t
+__moe_dynamic_expert_load_gate_up_block_impl(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __moe_s1_dma_ctrl_t *s1, uint32_t n)
 {
-    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
-        (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
-    uint32_t n = blk->block_idx;
-    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-        blk->task_arg_addr;
-    const __moe_s1_dma_ctrl_t *s1 = __moe_s1_dma_ctrl(blk);
     MOE_PROFILE_BEGIN(profile);
-    if (s1->valid == 0u || n >= s1->block_count) {
-        MOE_PROFILE_COMMIT(
-            arg, cfg, profile, MOE_PROFILE_STAGE_LOAD_S1,
-            MOE_PROFILE_RESOURCE_NONE, n, 0u,
-            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_CTRL_SKIP,
-            BINGO_RET_SUCC);
-        return BINGO_RET_SUCC;
-    }
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_START);
     uint32_t block_bytes = s1->block_bytes;
     uint32_t weight_offset = n * block_bytes;
@@ -2581,10 +2570,32 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_blo
         n, dma_binding, block_bytes, rc);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_LOAD_GATE_UP_END);
     MOE_PROFILE_COMMIT(
-        arg, cfg, profile, MOE_PROFILE_STAGE_LOAD_S1,
+        (void *)blk, cfg, profile, MOE_PROFILE_STAGE_LOAD_S1,
         __moe_profile_dma_resource(dma_binding), n,
         2u * block_bytes, 0u, rc);
     return rc;
+}
+
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block(void *arg)
+{
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
+        (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
+    uint32_t n = blk->block_idx;
+    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
+        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
+        blk->task_arg_addr;
+    const __moe_s1_dma_ctrl_t *s1 = __moe_s1_dma_ctrl(blk);
+    if (s1->valid == 0u || n >= s1->block_count) {
+        MOE_PROFILE_BEGIN(profile);
+        MOE_PROFILE_COMMIT(
+            arg, cfg, profile, MOE_PROFILE_STAGE_LOAD_S1,
+            MOE_PROFILE_RESOURCE_NONE, n, 0u,
+            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_CTRL_SKIP,
+            BINGO_RET_SUCC);
+        return BINGO_RET_SUCC;
+    }
+    return __moe_dynamic_expert_load_gate_up_block_impl(
+        blk, cfg, s1, n);
 }
 
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_config_s1_block0(void *arg)
@@ -2733,8 +2744,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s1_stage(void *arg
     }
     if (s1->block_count > BINGO_MOE_MAX_BLOCKS) return BINGO_RET_FAIL;
 
-    __snax_bingo_kernel_moe_dynamic_expert_block_args_t block_args = *blk;
-    for (uint32_t n = 0u; n < s1->block_count; n++) {
+    uint32_t block_count = s1->block_count;
+    for (uint32_t n = 0u; n < block_count; n++) {
         uint32_t rc = BINGO_RET_SUCC;
         if (n == 1u) {
             rc = __moe_pipeline_wait_cookie(
@@ -2746,9 +2757,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s1_stage(void *arg
         }
         if (rc != BINGO_RET_SUCC) return rc;
 
-        block_args.block_idx = n;
-        rc = __snax_bingo_kernel_moe_dynamic_expert_load_gate_up_block(
-            &block_args);
+        rc = __moe_dynamic_expert_load_gate_up_block_impl(
+            blk, cfg, s1, n);
         if (rc != BINGO_RET_SUCC) {
             __moe_pipeline_publish(&sync->error, rc);
             return rc;
