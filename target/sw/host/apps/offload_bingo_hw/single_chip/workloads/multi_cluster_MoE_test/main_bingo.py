@@ -71,7 +71,7 @@ def offset(handle, byte_offset: int):
 
 
 class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
-    """Initialize the eleven-token slot0 and six-token slot1 descriptors."""
+    """Initialize the seven-token slot0 and six-token slot1 descriptors."""
 
     SLOT_BYTES = 384
     HEADER_BYTES = 64
@@ -465,7 +465,7 @@ def add_copy(dfg, cluster, src, dst, size, node_name=""):
 
 
 def add_production_slot_handoff_test(dfg, p, mh):
-    """Execute eleven-token slot0 and gather the six-token slot1."""
+    """Execute seven-token slot0 and gather the six-token slot1."""
     setup = add_node(
         dfg,
         0,
