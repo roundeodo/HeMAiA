@@ -2813,7 +2813,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s1_stage(void *
             __moe_pipeline_publish(&sync->error, result);
             break;
         }
-        __moe_pipeline_publish(&sync->compute_done, n + 1u);
+        if (n + 2u < s1->block_count) {
+            __moe_pipeline_publish(&sync->compute_done, n + 1u);
+        }
     }
 
     /* The compute consumer cannot finish before the final producer transfer,
@@ -3233,7 +3235,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s3_stage(void *
             __moe_pipeline_publish(&sync->error, result);
             break;
         }
-        __moe_pipeline_publish(&sync->compute_done, n + 1u);
+        if (n + 2u < st->s3_block_count) {
+            __moe_pipeline_publish(&sync->compute_done, n + 1u);
+        }
     }
     return result;
 }
