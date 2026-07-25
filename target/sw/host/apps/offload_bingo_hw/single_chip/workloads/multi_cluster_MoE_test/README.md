@@ -44,13 +44,18 @@ Set `SLOT_IMPLEMENTATION` in `main_bingo.py` to select one complete path:
 
 - `discrete`: one DFG node per S1/S3 block and the original S2/S4 APIs.
 - `optimized`: separate optimized APIs for gather/handoff, S1, S2, S3, and
-  phase-batched S4, including the existing intra-stage and cross-stage preload.
+  block-synchronized S4, including the existing intra-stage and cross-stage
+  preload.
 
 The resulting S4 calls are `M=4` on C0 (all seven tokens) and `M=2` on C1
 (tokens 4 through 6). These values are derived from the token count and the
-runtime shape row count; they are not hard-coded into the device APIs. The
-phase-batched compute API executes two bank phases for every runtime `M`, so
-its RUN count is `2*M` rather than `block_count*M`.
+runtime shape row count; they are not hard-coded into the device APIs. The S4
+workers remain one Bingo node per core, but synchronize their bank ownership
+after every logical block. The compute worker executes `block_count*M` RUNs and
+preloads the next block or token bases during the current RUN. With `BOTH`,
+every block starts xDMA before submitting one iDMA 2D descriptor, so the two
+engines begin the same block without batching all iDMA descriptors ahead of
+xDMA.
 
 The optimized APIs consume the runtime shape and DMA binding from the normal
 production descriptor. S1/S2/S3/S4 accept any hardware shape supported by the
@@ -59,9 +64,10 @@ S4-prefetch does not infer its binding from the S4 compute shape. The focused
 test supplies BOTH
 explicitly because the current hardware-lite S4PF descriptor does not yet
 encode this dynamic choice. These paths are implemented directly inside the
-optimized API family; they do not dispatch to the discrete kernels.
-Runtime token counts and `M` remain dynamic, and odd block counts use different
-phase bounds rather than a fallback implementation.
+optimized API family; they do not dispatch to the discrete kernels. Runtime
+token counts, `M`, stage block counts, shapes, and DMA bindings remain dynamic;
+unequal or odd S1/S3 block counts insert idle synchronization steps instead of
+falling back to the discrete implementation.
 
 The first load of S1/S3 is concurrent with the full block0 streamer/VersaCore
 configuration. Each compute starts before patching the next block's B/D base
