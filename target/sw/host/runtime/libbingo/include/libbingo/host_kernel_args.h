@@ -172,8 +172,8 @@ __HOST_BINGO_KERNEL_ARGS_DEFINE __host_bingo_kernel_moe_prepare_request_args {
     uint64_t c3_l1_a;
     uint64_t c3_l1_d;
     uint64_t c3_l1_down_d;
-#if !defined(MOE_ENABLE_HW_SCHEDULER)
     uint64_t max_tokens_per_expert;
+#if !defined(MOE_ENABLE_HW_SCHEDULER)
     uint64_t request_out_addr;
     uint64_t schedule_out_addr;
     uint64_t expert_token_refs_addr;

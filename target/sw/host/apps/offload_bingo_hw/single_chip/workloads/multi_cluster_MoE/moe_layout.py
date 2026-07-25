@@ -384,19 +384,28 @@ def derive_bank_workload_params(config: dict) -> dict:
     params.hjson, while all DMA and streamer spans are recomputed here.
     """
     p = derive_common_workload_params(config)
-    chunk_cols = int(config["weight_chunk_cols"])
-    if chunk_cols <= 0 or chunk_cols % 16 != 0:
-        raise ValueError("weight_chunk_cols must be a positive multiple of 16")
-
     mode0_chunk_cols = p["intermediate_size"] // p["s1_block_count"]
     mode1_chunk_cols = (p["hidden_size"] // 2) // p["s3_block_count"]
-    if mode0_chunk_cols != chunk_cols:
+    requested_mode0_chunk_cols = int(
+        config.get("s1_weight_chunk_cols", config["weight_chunk_cols"])
+    )
+    requested_mode1_chunk_cols = int(
+        config.get("s3_weight_chunk_cols", config["weight_chunk_cols"])
+    )
+    if (
+        requested_mode0_chunk_cols <= 0
+        or requested_mode0_chunk_cols % 16 != 0
+        or requested_mode1_chunk_cols <= 0
+        or requested_mode1_chunk_cols % 16 != 0
+    ):
+        raise ValueError("S1/S3 weight chunks must be positive multiples of 16")
+    if mode0_chunk_cols != requested_mode0_chunk_cols:
         raise ValueError(
-            "intermediate_size / s1_block_count must equal weight_chunk_cols"
+            "intermediate_size / s1_block_count must equal s1_weight_chunk_cols"
         )
-    if mode1_chunk_cols != chunk_cols:
+    if mode1_chunk_cols != requested_mode1_chunk_cols:
         raise ValueError(
-            "hidden_size / 2 / s3_block_count must equal weight_chunk_cols"
+            "hidden_size / 2 / s3_block_count must equal s3_weight_chunk_cols"
         )
 
     # L3 token rows are dense.  The 2D gather maps each 16-byte K tile to the
@@ -427,9 +436,10 @@ def derive_bank_workload_params(config: dict) -> dict:
     mode1_panel_span = (
         mode1_panel_payload // BANK_WEIGHT_ROW_BYTES * BANK_TCDM_ROW_BYTES
     )
-    panels_per_chunk = chunk_cols // 4
-    mode0_chunk_span = panels_per_chunk * mode0_panel_span
-    mode1_chunk_span = panels_per_chunk * mode1_panel_span
+    mode0_panels_per_chunk = mode0_chunk_cols // 4
+    mode1_panels_per_chunk = mode1_chunk_cols // 4
+    mode0_chunk_span = mode0_panels_per_chunk * mode0_panel_span
+    mode1_chunk_span = mode1_panels_per_chunk * mode1_panel_span
     mode0_slots = (p["s1_block_count"] + 1) // 2
     mode1_slots = (p["s3_block_count"] + 1) // 2
     mode0_region_span = mode0_slots * mode0_chunk_span
@@ -446,10 +456,12 @@ def derive_bank_workload_params(config: dict) -> dict:
         p["A_token_bytes"] // (2 * token_lanes) * BANK_TCDM_ROW_BYTES
     )
     mode0_output_page_span = (
-        p["s1_block_count"] * (chunk_cols // token_lanes) * BANK_TCDM_ROW_BYTES
+        p["s1_block_count"]
+        * (mode0_chunk_cols // token_lanes)
+        * BANK_TCDM_ROW_BYTES
     )
     mode1_output_page_span = (
-        p["s3_block_count"] * (chunk_cols // 4) * BANK_TCDM_ROW_BYTES
+        p["s3_block_count"] * (mode1_chunk_cols // 4) * BANK_TCDM_ROW_BYTES
     )
     if token_page_span != mode1_output_page_span:
         raise ValueError("A and Mode1 output page spans must match")
@@ -473,7 +485,9 @@ def derive_bank_workload_params(config: dict) -> dict:
 
     p.update(
         {
-            "weight_chunk_cols": chunk_cols,
+            "weight_chunk_cols": mode0_chunk_cols,
+            "s1_weight_chunk_cols": mode0_chunk_cols,
+            "s3_weight_chunk_cols": mode1_chunk_cols,
             "bank_tcdm_row_bytes": BANK_TCDM_ROW_BYTES,
             "bank_tcdm_capacity_bytes": BANK_TCDM_CAPACITY_BYTES,
             "bank_weight_row_bytes": BANK_WEIGHT_ROW_BYTES,
@@ -501,10 +515,10 @@ def derive_bank_workload_params(config: dict) -> dict:
             "bank_token_page_span": token_page_span,
             "bank_token_dma_row_bytes": 16,
             "bank_token_dma_repeats": p["hidden_size"] // 8,
-            "bank_mode0_output_block_span": (chunk_cols // 8)
+            "bank_mode0_output_block_span": (mode0_chunk_cols // 8)
             * BANK_TCDM_ROW_BYTES,
             "bank_mode0_output_page_span": mode0_output_page_span,
-            "bank_mode1_output_block_span": (chunk_cols // 4)
+            "bank_mode1_output_block_span": (mode1_chunk_cols // 4)
             * BANK_TCDM_ROW_BYTES,
             "bank_mode1_output_page_span": mode1_output_page_span,
             "bank_mode1_half_output_bytes": p["hidden_size"],
@@ -519,4 +533,18 @@ def derive_bank_workload_params(config: dict) -> dict:
         != mode1_chunk_span
     ):
         raise ValueError("Mode1 logical block and physical chunk spans disagree")
+    return p
+
+
+def derive_mixed_workload_params(config: dict) -> dict:
+    """Derive bank-aware individual and legacy L1.5 shared layouts together.
+
+    The bank derivation remains authoritative for common/runtime fields and the
+    individual-expert ABI. Only the ``l15_*`` placement fields are imported
+    from the legacy derivation, so its padded token stride cannot leak into the
+    dense individual path.
+    """
+    p = derive_bank_workload_params(config)
+    l15 = derive_l15_workload_params(config)
+    p.update({key: value for key, value in l15.items() if key.startswith("l15_")})
     return p

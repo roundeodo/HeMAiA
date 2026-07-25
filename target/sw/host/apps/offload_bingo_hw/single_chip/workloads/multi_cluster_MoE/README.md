@@ -5,8 +5,8 @@
 - `params.hjson`: the only model/workload parameter input.
 - `moe_layout.py`: separates common dimensions, the legacy L1.5 comparison
   layout, and the current bank-partition addresses and strides.
-- `multi_cluster_MoE_datagen.py`: emits dense token input and canonical packed
-  weight panels. L1 bank placement is performed by 2D DMA at runtime.
+- `multi_cluster_MoE_datagen.py`: emits dense individual tokens, padded shared
+  L1.5 tokens, canonical packed weights and the shared L1.5 config.
 - `main_bingo.py`: emits the static Bingo DFG and all generated kernel args.
 - `multi_cluster_MoE_config.h`: generated compile-time HW-path dimensions;
   included before `host.h` so the host kernels compile directly against the
@@ -27,14 +27,15 @@ ignored by Git and removed by the workload clean target.
 ## Parameter flow
 
 Edit only `params.hjson`. A rebuild passes it, together with the selected SNAX
-hardware configuration, to `derive_bank_workload_params()`. This updates
+hardware configuration, to `derive_mixed_workload_params()`. This updates
 datagen, L3/L1 allocations, DMA sizes, GEMM dimensions, streamer configuration
 and DFG args in one step.
 
 With the checked-in parameters the model is `A=[8,2048]`,
 `W/V=[2048,1024]` and logical `W2=[1024,2048]`. `total_tokens` is
-parameterized and need not be a multiple of eight. L3 token rows are dense, so
-row stride equals `hidden_size*sizeof(INT16)` and contains no 32-byte padding.
+parameterized; the current legacy shared L1.5 kernel requires it to be a
+multiple of eight. Individual L3 token rows are dense; shared experts receive a
+separate compatibility copy with a 32-byte gap.
 
 Token staging issues one 2D descriptor per valid token with `size=16`,
 `src_stride=16`, `dst_stride=512`, and `repeat=hidden_size/8`. For local token
@@ -55,7 +56,8 @@ Mode-0 W/V use banks 16..47 in the first 4 MiB; Mode-1 W2L/W2R use the same
 bank groups in the next 2 MiB. Mode-0 output uses banks 48..63 and Mode-1
 output uses banks 0..15. Every arena base is explicitly aligned to 512 bytes.
 
-`weight_chunk_cols` is the only block-granularity input. The generator derives
+The bank-aware individual path uses `weight_chunk_cols` as its block-granularity
+input. The generator derives
 `s1_block_count=intermediate_size/weight_chunk_cols` and
 `s3_block_count=(hidden_size/2)/weight_chunk_cols`. The dynamic ABI reserves
 eight S1 and eight S3 call entries, so supported configurations change only
@@ -65,8 +67,8 @@ S1 and S3 keep separate generated counts because they partition different
 matrix axes: S1 covers the full intermediate dimension, while each S3 VC
 covers one half of the hidden output dimension. They are both eight for the
 checked-in `2048 -> 1024 -> 2048` model, but that equality is not an ABI
-requirement. The fused shared kernel reads both precomputed counts directly;
-it performs no block-count division at run time. Within one stage it programs
+requirement. The optimized individual stage APIs read both precomputed counts
+directly; they perform no block-count division at run time. Within one stage they program
 the complete streamer and VersaCore state only for block 0. Later S1 blocks
 patch three base CSRs and later S3 blocks patch four base CSRs before launch.
 
@@ -101,11 +103,10 @@ call record and configure SwiGLU/down directly. There is no intermediate
 pre-args structure or one-use forwarding helper between the slot record and the
 actual DMA/GEMM call.
 
-The final shared static record is generated once per cluster during host
+The final individual static record is generated once per cluster during host
 initialization and copied to L1 separately from the dynamic slot records. This
-avoids duplicating invariant addresses and dimensions in every slot. Streamer
-CSRs are generated directly from the parameterized bank layout; no L15
-configuration record is copied to TCDM.
+avoids duplicating invariant addresses and dimensions in every slot. Shared
+experts separately copy their generated legacy L1.5 configuration to TCDM.
 
 ## Post-routing metadata status
 
@@ -126,12 +127,11 @@ path without changing the RTL scheduler descriptor, `MoEPrepare`, or
 - Router: `__snax_bingo_kernel_moe_router_gemm_s0` consumes one typed router
   arg record and directly invokes the inlined dual-VC Mode-1 implementation.
   It temporarily uses a private `router_input_A` compatibility copy because
-  this legacy kernel still encodes the historical 32-byte row gap; expert
-  paths use dense `input_A` exclusively.
-- Shared experts: `__snax_bingo_kernel_dual_vc_bank_moe_full` consumes the
-  512-byte-aligned bank arena, completes Mode-0 SwiGLU, then configures and runs
-  Mode-1 down projection. `__snax_bingo_kernel_moe_store_tokens_2d` gathers the
-  two output halves into one dense L3 token-major matrix using local xDMA.
+  this legacy kernel still encodes the historical 32-byte row gap. Shared uses
+  its own padded `shared_input_A`; individual uses dense `input_A` exclusively.
+- Shared experts: `__snax_bingo_kernel_dual_vc_l15_moe_full` consumes the
+  original contiguous padded L1.5 layout. Its gate input uses iDMA 1D, up/down
+  weights use xDMA 1D, and the padded output span is written back by host iDMA.
 - Individual experts: static Bingo nodes point at one final dynamic slot plus
   one cluster-shared static context. DMA nodes derive weight/token addresses
   from those two records; compute nodes directly program the relevant S1/S2/

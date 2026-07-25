@@ -29,10 +29,10 @@ def derive_params(config: dict) -> dict:
     p = derive_bank_workload_params(config)
     if p["hidden_size"] != 2048 or p["intermediate_size"] != 1024:
         raise ValueError("production path test requires the 2048x1024 MoE dimensions")
-    if p["weight_chunk_cols"] != 128:
-        raise ValueError("production path test requires 128-column weight chunks")
-    if p["s1_block_count"] != 8 or p["s3_block_count"] != 8:
-        raise ValueError("production path test requires eight S1 and S3 blocks")
+    if p["s1_weight_chunk_cols"] != 128 or p["s1_block_count"] != 8:
+        raise ValueError("S4 test requires eight 128-column gate/up blocks")
+    if p["s3_weight_chunk_cols"] != 256 or p["s3_block_count"] != 4:
+        raise ValueError("S4 test requires four 256-column down blocks per VC")
 
     gate_block_output = p["intermediate_size"] // p["s1_block_count"]
     down_block_per_vc = (p["hidden_size"] // 2) // p["s3_block_count"]
@@ -69,7 +69,6 @@ def derive_params(config: dict) -> dict:
             "down_N_s4": (p["hidden_size"] // 2) // SHAPE_COLS[S4_SHAPE],
             "indiv_N_per_block": gate_block_output,
             "indiv_down_N_per_block": down_block_per_vc,
-            "block_count": p["s1_block_count"],
             "gate_block_bytes": p["indiv_B_block_stride"],
             "gate_weight_bytes": p["indiv_B_expert_stride"],
             "down_block_bytes": p["indiv_down_B_block_stride"],

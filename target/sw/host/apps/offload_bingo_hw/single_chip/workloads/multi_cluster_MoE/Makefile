@@ -21,7 +21,7 @@ SRCS = ../../src/offload_bingo_hw.c
 BINGO_HOST ?= 1 # True to include the bingo runtime
 INCL_DEVICE_BINARY ?= 1 # True to include the device binary
 
-# DATA: 由 datagen 生成 dense token 输入和 canonical packed weights。
+# DATA: 生成 dense individual、padded shared token 输入和 packed weights/config。
 DATA_CFG ?= $(MK_DIR)/params.hjson
 DATA_H = $(MK_DIR)/multi_cluster_MoE_data.h
 DATAGEN_FLAGS ?=

@@ -1562,8 +1562,8 @@ class HostBingoKernelMoEPrepareRequestArgs(BingoKernelArgs):
                 value, field, assignments, handle_name_map,
                 split_64bit=False, as_64bit=True,
             )
-        assignments[_MOE_SW_SCHED_ABI_IF] = ""
         assignments["max_tokens_per_expert"] = str(self.max_tokens_per_expert)
+        assignments[_MOE_SW_SCHED_ABI_IF] = ""
         self._process_addr(
             self.request_out_addr,
             "request_out_addr",

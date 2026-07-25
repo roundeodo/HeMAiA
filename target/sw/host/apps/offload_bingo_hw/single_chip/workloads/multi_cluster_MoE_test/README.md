@@ -8,9 +8,10 @@ comparisons; the redundant intermediate fused API family has been removed.
 
 ## Workload
 
-C0 and C1 concurrently process slot0 with seven dense INT16 tokens of width 2048
-and independent `2048 -> 1024 -> 2048` experts. Gate, up, and down weights use
-eight 128-column blocks and the production 16-bank A/B0/B1/D layout.
+The focused configuration runs C1 on seven dense INT16 tokens of width 2048
+with one `2048 -> 1024 -> 2048` expert. Gate and up use eight 128-column
+blocks; down uses four 256-column blocks per VC half. Every logical load is
+256 KiB in the production 16-bank A/B0/B1/D layout.
 
 ```text
 gather seven slot0 tokens with production 2D iDMA

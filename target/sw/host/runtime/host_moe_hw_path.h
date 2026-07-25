@@ -2,19 +2,17 @@
 
 // Pure-HW scheduler state used while CVA6 drains dense RTL task words and
 // materializes complete device call records in per-cluster L3 slots. This
-// header has no SW schedule ABI, validation path, or fallback path.
+// header has no SW schedule ABI or fallback path.
 
 #ifndef MOE_ENABLE_HW_SCHEDULER
 #error "host_moe_hw_path.h is only valid in a pure-HW scheduler build"
 #endif
 
 typedef struct {
-    uint32_t slot_bytes;
     uint32_t slot_count[2];
     uintptr_t stage_base[2];
     uint32_t l1_a_addr[2];
     uint32_t l1_d_addr[2];
-    uint32_t l1_down_d_addr[2];
     int32_t final_cam[2];
 } __host_moe_lower_state_t;
 
@@ -77,10 +75,12 @@ __host_moe_lower_task_word_to_slot(
         (uint32_t)MOE_SCHED_S4PF_DESC_TARGET_EID_MASK;
     uint32_t skip_s2 = (m_s2_exec == 0u) ? 1u : 0u;
     uint32_t skip_s4 = (m_s4_exec == 0u) ? 1u : 0u;
+    uint32_t single_dma = (ci == 0u) ?
+        (uint32_t)MOE_DMA_IDMA : (uint32_t)MOE_DMA_XDMA;
     uint32_t dma_s1 = skip_s1 ? (uint32_t)MOE_DMA_NONE :
-        ((shape_s1 >= 2u) ? (uint32_t)MOE_DMA_BOTH : (uint32_t)MOE_DMA_IDMA);
+        ((shape_s1 == 2u) ? (uint32_t)MOE_DMA_BOTH : single_dma);
     uint32_t dma_s3 = skip_s3 ? (uint32_t)MOE_DMA_NONE :
-        ((shape_s3 >= 2u) ? (uint32_t)MOE_DMA_BOTH : (uint32_t)MOE_DMA_XDMA);
+        ((shape_s3 == 2u) ? (uint32_t)MOE_DMA_BOTH : single_dma);
     uint32_t arg_ctrl =
         1u |
         (skip_s1 << 1u) |
@@ -95,6 +95,9 @@ __host_moe_lower_task_word_to_slot(
         ((local_slot & 0x3fu) << 14u);
     __snax_bingo_kernel_moe_dynamic_expert_args_t *dst_arg;
 
+    uint32_t s4pf_valid =
+        (s4pf_desc >> MOE_SCHED_S4PF_DESC_VALID_LSB) & 1u;
+
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_start(MOE_HOST_TIMING_HW_LOWER);
 #endif
@@ -105,7 +108,7 @@ __host_moe_lower_task_word_to_slot(
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_SLOT_SELECT_START);
     dst_arg = (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(
         state->stage_base[ci] +
-        (uintptr_t)local_slot * (uintptr_t)state->slot_bytes);
+        (uintptr_t)local_slot * (uintptr_t)BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES);
     state->slot_count[ci] = local_slot + 1u;
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_SLOT_SELECT_END);
 #if MOE_MCYCLE_DETAIL
@@ -190,7 +193,7 @@ __host_moe_lower_task_word_to_slot(
         uint32_t slot = (has_s2pf != 0u) ?
             MOE_TASK_DMA_SLOT_S2_PREFETCH : MOE_TASK_DMA_SLOT_S3;
         uint32_t dma_s3_for_slot = (has_s2pf != 0u) ?
-            ((shape_s3 >= 2u) ? (uint32_t)MOE_DMA_BOTH : (uint32_t)MOE_DMA_XDMA) :
+            ((shape_s3 == 2u) ? (uint32_t)MOE_DMA_BOTH : single_dma) :
             dma_s3;
         dma_slot_vd |=
             ((uint32_t)1u | (dma_s3_for_slot << 1u)) << (slot * 3u);
@@ -202,7 +205,7 @@ __host_moe_lower_task_word_to_slot(
     if ((s4pf_desc & (1u << MOE_SCHED_S4PF_DESC_VALID_LSB)) != 0u &&
         (s4pf_desc & (1u << MOE_SCHED_S4PF_DESC_NO_COPY_LSB)) == 0u) {
         dma_slot_vd |=
-            ((uint32_t)1u | ((uint32_t)MOE_DMA_IDMA << 1u)) <<
+            ((uint32_t)1u | (single_dma << 1u)) <<
             ((uint32_t)MOE_TASK_DMA_SLOT_S4_PREFETCH * 3u);
         dma_slot_eids |=
             (s4pf_target_eid & 0x3fu) <<
@@ -217,7 +220,8 @@ __host_moe_lower_task_word_to_slot(
     __moe_host_timing_end(MOE_HOST_TIMING_LOWER_DMA);
 #endif
 
-    state->final_cam[ci] = (int32_t)expert_id;
+    state->final_cam[ci] = (s4pf_valid != 0u) ?
+        (int32_t)s4pf_target_eid : (int32_t)expert_id;
 #if defined(MOE_INDIV_BRINGUP) && MOE_INDIV_BRINGUP
     printf_safe(
         "[INDIV_PLAN] C%u slot=%u eid=%u start=%u ntok=%u "
@@ -237,6 +241,15 @@ __host_moe_lower_task_word_to_slot(
 #endif
 }
 
+static inline __attribute__((always_inline)) uint32_t
+__host_moe_quad_count(uint32_t total, uint32_t start)
+{
+    if (start >= total) return 0u;
+    uint32_t remaining = total - start;
+    return (remaining > MOE_SCHED_QUAD_ENTRIES) ?
+        MOE_SCHED_QUAD_ENTRIES : remaining;
+}
+
 static inline void __host_moe_run_scheduler_and_lower(
     const uint32_t *expert_token_counts,
     uint32_t n_experts,
@@ -245,9 +258,12 @@ static inline void __host_moe_run_scheduler_and_lower(
     __host_moe_lower_state_t *state)
 {
     uint16_t rem_head[MOE_MAX_EXPERTS];
-    uint16_t total_conc = 0u;
-    uint16_t next_rem_pos = 0u;
-    uint16_t rem_count = 0u;
+    uint64_t task_words[MOE_MAX_TASKS];
+    uint32_t total_parallel_work = 0u;
+    uint32_t total_serial_work = 0u;
+    uint32_t next_rem_pos = 0u;
+    uint32_t rem_count = 0u;
+    uint32_t task_word_count = 0u;
     uintptr_t sched_base = moe_sched_base();
 
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
@@ -259,19 +275,16 @@ static inline void __host_moe_run_scheduler_and_lower(
         if (cur_ntokens == 0u) {
             continue;
         }
-        uint16_t pos = rem_count;
+        uint32_t pos = rem_count;
         while (pos > 0u &&
                (rem_head[pos - 1u] & 0x1ffu) < cur_ntokens) {
             rem_head[pos] = rem_head[pos - 1u];
             pos--;
         }
-        rem_head[pos] = (uint16_t)(
-            (cur_ntokens & 0x1ffu) |
-            ((e & 0x3fu) << MOE_SCHED_NTOK_W) |
-            (1u << (MOE_SCHED_NTOK_W + MOE_SCHED_EID_RAW_W)));
+        rem_head[pos] = moe_sched_pack_descriptor(e, cur_ntokens);
         rem_count++;
-        total_conc = (uint16_t)(total_conc +
-                                (uint16_t)(((cur_ntokens + 3u) >> 2) * 6u));
+        total_parallel_work += ((cur_ntokens + 3u) >> 2u) * 6u;
+        total_serial_work += ((cur_ntokens + 1u) >> 1u) * 3u;
     }
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_SORT_END);
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
@@ -283,94 +296,71 @@ static inline void __host_moe_run_scheduler_and_lower(
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_INIT_WRITE_START);
 
-    uint64_t init_head_word = 0u;
-    uint64_t reserve_head_word = 0u;
-    for (uint8_t s = 0; s < 4u; s++) {
-        if (next_rem_pos < rem_count) {
-            init_head_word |= (uint64_t)rem_head[next_rem_pos] << (s * 16u);
-            next_rem_pos++;
-        }
-    }
-    for (uint8_t s = 0; s < 4u; s++) {
-        if (next_rem_pos < rem_count) {
-            reserve_head_word |= (uint64_t)rem_head[next_rem_pos] << (s * 16u);
-            next_rem_pos++;
-        }
-    }
-    writed(((uint64_t)((cache_eid_c2 < 0) ? 0x80u : (uint8_t)cache_eid_c2)) |
-           ((uint64_t)((cache_eid_c3 < 0) ? 0x80u : (uint8_t)cache_eid_c3) << 8) |
-           ((uint64_t)(rem_count & 0x7fu) << 16) |
-           ((uint64_t)total_conc << 32),
+    uint32_t window0_count = __host_moe_quad_count(rem_count, 0u);
+    uint32_t window1_count = __host_moe_quad_count(rem_count, 4u);
+    uint32_t window2_count = __host_moe_quad_count(rem_count, 8u);
+    writed(moe_sched_pack_config(
+               cache_eid_c2, cache_eid_c3, rem_count,
+               total_parallel_work, total_serial_work),
            sched_base + (uintptr_t)MOE_SCHED_CONFIG);
-    writed(init_head_word, sched_base + (uintptr_t)MOE_SCHED_HEAD_QUAD);
-    writed(reserve_head_word, sched_base + (uintptr_t)MOE_SCHED_RESERVE_QUAD);
+    writed(moe_sched_pack_descriptor_quad(
+               rem_head, 0u, window0_count),
+           sched_base + (uintptr_t)MOE_SCHED_WINDOW0);
+    writed(moe_sched_pack_descriptor_quad(
+               rem_head, 4u, window1_count),
+           sched_base + (uintptr_t)MOE_SCHED_WINDOW1);
     moe_sched_fence();
-    writed(MOE_SCHED_CTRL_INIT | MOE_SCHED_CTRL_START,
-           sched_base + (uintptr_t)MOE_SCHED_CTRL);
+    writed(moe_sched_pack_descriptor_quad(
+               rem_head, 8u, window2_count),
+           sched_base + (uintptr_t)MOE_SCHED_WINDOW2_START);
     moe_sched_fence();
+    next_rem_pos = (rem_count < MOE_SCHED_INITIAL_WINDOW_ENTRIES) ?
+        rem_count : MOE_SCHED_INITIAL_WINDOW_ENTRIES;
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
     __moe_host_timing_end(MOE_HOST_TIMING_HW_INIT);
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_INIT_WRITE_END);
 
     while (1) {
-        uint64_t status;
-        uint32_t status_fifo_count;
-        uint32_t status_refill_req;
-        uint32_t status_refill_count;
-        uint32_t status_active_empty;
-        uint32_t event_seen;
+        uint64_t event;
 
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
         __moe_host_timing_start(MOE_HOST_TIMING_HW_WAIT);
 #endif
         BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_WAIT_START);
-        event_seen = 0u;
-        while (event_seen == 0u) {
-            status = readd(sched_base + (uintptr_t)MOE_SCHED_STATUS);
-            uint32_t wait_fifo_count =
-                (uint32_t)((status >> MOE_SCHED_STATUS_TASK_COUNT_LSB) & 0xfu);
-            if ((status & (MOE_SCHED_STATUS_REFILL_REQ |
-                           MOE_SCHED_STATUS_ACTIVE_EMPTY)) != 0u ||
-                ((status & MOE_SCHED_STATUS_TASK_VALID) != 0u &&
-                 wait_fifo_count >= MOE_SCHED_TASK_FIFO_DEPTH)) {
-                event_seen = 1u;
-                moe_sched_fence();
-                break;
-            }
-        }
+        event = readd(sched_base + (uintptr_t)MOE_SCHED_EVENT_WAIT);
+        moe_sched_fence();
         BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_WAIT_END);
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
         __moe_host_timing_end(MOE_HOST_TIMING_HW_WAIT);
 #endif
 
+        uint32_t batch_done;
+        uint32_t refill_req;
+        uint32_t refill_count;
+        uint32_t task_count;
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
         __moe_host_timing_start(MOE_HOST_TIMING_HW_STATUS);
 #endif
         BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_STATUS_DECODE_START);
-        status_fifo_count =
-            (uint32_t)((status >> MOE_SCHED_STATUS_TASK_COUNT_LSB) & 0xfu);
-        status_refill_req = ((status & MOE_SCHED_STATUS_REFILL_REQ) != 0u) ? 1u : 0u;
-        status_refill_count = (uint32_t)((status >> 28) & 0xfu);
-        status_active_empty = ((status & MOE_SCHED_STATUS_ACTIVE_EMPTY) != 0u) ? 1u : 0u;
+        batch_done = moe_sched_event_batch_done(event);
+        refill_req = moe_sched_event_refill_requested(event);
+        refill_count = moe_sched_event_refill_count(event);
+        task_count = moe_sched_event_task_count(event);
         BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_STATUS_DECODE_END);
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
         __moe_host_timing_end(MOE_HOST_TIMING_HW_STATUS);
 #endif
 
-        if (status_refill_req != 0u && status_refill_count != 0u) {
+        if (refill_req != 0u) {
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
             __moe_host_timing_start(MOE_HOST_TIMING_HW_CONTROL);
 #endif
             BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_CONTROL_WRITE_START);
-            uint64_t push_head_word = 0u;
-            for (uint32_t ph = 0u; ph < status_refill_count; ph++) {
-                push_head_word |=
-                    (uint64_t)rem_head[next_rem_pos] << (ph * 16u);
-                next_rem_pos++;
-            }
-            writed(push_head_word,
-                   sched_base + (uintptr_t)MOE_SCHED_HEAD_PUSH_QUAD);
+            writed(moe_sched_pack_descriptor_quad(
+                       rem_head, next_rem_pos, refill_count),
+                   sched_base + (uintptr_t)MOE_SCHED_REFILL_QUAD);
+            next_rem_pos += refill_count;
             moe_sched_fence();
             BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_CONTROL_WRITE_END);
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
@@ -378,55 +368,29 @@ static inline void __host_moe_run_scheduler_and_lower(
 #endif
         }
 
-        /* Refill only feeds the scheduler input stream. Keep a partial dense
-         * task FIFO resident so later rounds can fill the remaining entries;
-         * drain only when the FIFO is full or the batch has completed. */
-        if ((status & MOE_SCHED_STATUS_TASK_VALID) != 0u &&
-            (status_fifo_count >= MOE_SCHED_TASK_FIFO_DEPTH ||
-             status_active_empty != 0u)) {
+        if (task_count != 0u) {
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
             __moe_host_timing_start(MOE_HOST_TIMING_HW_DRAIN);
 #endif
             BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_DRAIN_TASKS_START);
-            uint32_t drain_tasks = status_fifo_count;
-
-            for (uint32_t task = 0u; task < drain_tasks; task++) {
-                uint64_t task_word = readd(
-                    sched_base + (uintptr_t)(
-                        MOE_SCHED_TASK_DATA_BASE +
-                        task * MOE_SCHED_TASK_DATA_STRIDE));
-                __host_moe_lower_task_word_to_slot(task_word, state);
+            for (uint32_t task = 0u; task < task_count; task++) {
+                task_words[task_word_count++] = readd(
+                    sched_base + (uintptr_t)MOE_SCHED_TASK_STREAM);
             }
             BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_DRAIN_TASKS_END);
 #if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
             __moe_host_timing_end(MOE_HOST_TIMING_HW_DRAIN);
 #endif
-
-#if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
-            __moe_host_timing_start(MOE_HOST_TIMING_HW_CONTROL);
-#endif
-            BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_CONTROL_WRITE_START);
-            writed((uint64_t)(drain_tasks & 0xfu),
-                   sched_base + (uintptr_t)MOE_SCHED_TASK_POP);
-            moe_sched_fence();
-            BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_CONTROL_WRITE_END);
-#if defined(MOE_ENABLE_HW_SCHEDULER) && MOE_MCYCLE_DETAIL
-            __moe_host_timing_end(MOE_HOST_TIMING_HW_CONTROL);
-#endif
-
-            continue;
         }
 
-        if (status_refill_req != 0u && status_refill_count != 0u) {
-            continue;
-        }
-
-        if (status_active_empty != 0u &&
-            (status & MOE_SCHED_STATUS_TASK_VALID) == 0u) {
+        if (batch_done != 0u) {
             break;
         }
     }
 
+    for (uint32_t task = 0u; task < task_word_count; task++) {
+        __host_moe_lower_task_word_to_slot(task_words[task], state);
+    }
 }
 
 static inline uint64_t __host_bingo_kernel_moe_prepare_request(void *arg)
@@ -447,9 +411,7 @@ static inline uint64_t __host_bingo_kernel_moe_prepare_request(void *arg)
     uint32_t n_experts = (uint32_t)cfg->n_experts;
     int32_t c2_resident = cam_state[0];
     int32_t c3_resident = cam_state[1];
-    uint32_t slot_bytes = (uint32_t)cfg->dynamic_arg_slot_bytes;
     __host_moe_lower_state_t lower_state = {
-        .slot_bytes = slot_bytes,
         .slot_count = {0u, 0u},
         .stage_base = {
             (uintptr_t)cfg->c2_stage_base,
@@ -457,11 +419,7 @@ static inline uint64_t __host_bingo_kernel_moe_prepare_request(void *arg)
         },
         .l1_a_addr = {(uint32_t)cfg->c2_l1_a, (uint32_t)cfg->c3_l1_a},
         .l1_d_addr = {(uint32_t)cfg->c2_l1_d, (uint32_t)cfg->c3_l1_d},
-        .l1_down_d_addr = {
-            (uint32_t)cfg->c2_l1_down_d,
-            (uint32_t)cfg->c3_l1_down_d,
-        },
-        .final_cam = {-1, -1},
+        .final_cam = {c2_resident, c3_resident},
     };
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_PREPARE_INIT_END);
 
@@ -513,7 +471,7 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
         (volatile uint32_t *)(uintptr_t)cfg->runtime_state_addr;
     uint32_t c2_slots = runtime_state[2];
     uint32_t c3_slots = runtime_state[3];
-    uint32_t slot_bytes = (uint32_t)cfg->dynamic_arg_slot_bytes;
+    const uint32_t slot_bytes = BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES;
     uint32_t *c2_stage_header = (uint32_t *)(uintptr_t)cfg->c2_stage_base;
     uint32_t *c3_stage_header = (uint32_t *)(uintptr_t)cfg->c3_stage_base;
     uint64_t active_slot_word = MOE_PACK_U32_PAIR(c2_slots, c3_slots);

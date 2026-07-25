@@ -30,21 +30,9 @@ from moe_test_layout import derive_params  # noqa: E402
 GEMM_CORE = 0
 DMA_CORE = 1
 HOST_CORE = 2
-PROD_CLUSTERS = (("c0", 0), ("c1", 1))
+PROD_CLUSTERS = (("c1", 1),)
 SLOT_IMPLEMENTATION = DEFAULT_SLOT_IMPLEMENTATION
 BENCHMARK_CLUSTER_CONFIG = {
-    "c0": {
-        "s1_shape": 1,
-        "s2_shape": 2,
-        "s3_shape": 1,
-        "s4_shape": 2,
-        "s1_dma": 1,
-        "skip_s3": 1,
-        "s3_dma": 0,
-        "s2_prefetch_dma": 3,
-        "s4_prefetch_dma": 0,
-        "s4_token_start": 0,
-    },
     "c1": {
         "s1_shape": 1,
         "s2_shape": 2,
@@ -70,8 +58,8 @@ def offset(handle, byte_offset: int):
     return f"{handle.get_c_var_name()} + {byte_offset}"
 
 
-class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
-    """Initialize the seven-token slot0 and six-token slot1 descriptors."""
+class ProductionMoeC1SetupArgs(HostBingoKernelCheckResultArgs):
+    """Initialize the seven-token C1 slot and its next-expert prefetch."""
 
     SLOT_BYTES = 384
     HEADER_BYTES = 64
@@ -117,7 +105,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
         p = self.p
         mh = self.mh
         row_stride = p["token_row_stride"]
-        s3_row_bytes = p["token_payload_bytes"] // (2 * p["block_count"])
+        s3_row_bytes = p["token_payload_bytes"] // (2 * p["s3_block_count"])
         down_half_bytes = p["down_weight_bytes"] // 2
         down_b_n_stride = [p["down_K"] * (16 << shape) for shape in range(3)]
         down_a_m_stride = [
@@ -168,7 +156,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 p["base_mesh_col"] << s4_shape
             )
             s1_dma = bench["s1_dma"]
-            runtime_cluster = 0 if prefix == "c0" else 1
+            runtime_cluster = 1
             static_l3 = self._addr(mh[f"{prefix}_prod_static_l3"], handle_name_map)
             runtime_l3 = self._addr(mh[f"{prefix}_prod_runtime_l3"], handle_name_map)
             runtime_l1 = self._addr(
@@ -266,8 +254,8 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"{static_name}->indiv_down_B_expert_stride = {p['down_weight_bytes']}u;",
                 f"{static_name}->indiv_B_block_stride = {p['gate_block_bytes']}u;",
                 f"{static_name}->indiv_down_B_block_stride = {p['down_block_bytes']}u;",
-                f"{static_name}->s1_block_count = {p['block_count']}u;",
-                f"{static_name}->s3_block_count = {p['block_count']}u;",
+                f"{static_name}->s1_block_count = {p['s1_block_count']}u;",
+                f"{static_name}->s3_block_count = {p['s3_block_count']}u;",
                 f"{static_name}->indiv_K1 = {p['gate_K']}u;",
                 f"{static_name}->indiv_N_per_block = {p['indiv_N_per_block']}u;",
                 f"{static_name}->indiv_down_K1 = {p['down_K']}u;",
@@ -311,7 +299,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"{slot1_name}->token_ref_start = {token_count}u;",
                 f"{slot1_name}->ntokens = {next_token_count}u;",
             ]
-            for block in range(p["block_count"]):
+            for block in range(p["s1_block_count"]):
                 output_offset = block * p["bank_mode0_output_block_span"]
                 lines += [
                     f"{slot0_name}->s1_call[{block}].valid = 1u;",
@@ -319,6 +307,9 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                     f"{l1_d} + {output_offset}u;",
                     f"{slot0_name}->s1_call[{block}].N = {s1_n}u;",
                     f"{slot0_name}->s1_call[{block}].array_shape = {s1_shape}u;",
+                ]
+            for block in range(p["s3_block_count"]):
+                lines += [
                     f"{slot0_name}->s3_call[{block}].valid = {1 - skip_s3}u;",
                     f"{slot0_name}->s3_call[{block}].N = {s3_n}u;",
                     f"{slot0_name}->s3_call[{block}].array_shape = {s3_shape}u;",
@@ -404,7 +395,7 @@ def define_production_memory(p):
         )
         mh[f"{prefix}_prod_runtime_l3"] = BingoMemAlloc(
             f"moe_test_{prefix}_prod_runtime_l3",
-            size=64 + 2 * ProductionMoeDualClusterSetupArgs.SLOT_BYTES,
+            size=64 + 2 * ProductionMoeC1SetupArgs.SLOT_BYTES,
             mem_level="L3",
         )
         mh[f"{prefix}_prod_static_l1"] = BingoMemAlloc(
@@ -417,7 +408,7 @@ def define_production_memory(p):
         )
         mh[f"{prefix}_prod_runtime_l1"] = BingoMemAlloc(
             f"moe_test_{prefix}_prod_runtime_l1",
-            size=64 + 2 * ProductionMoeDualClusterSetupArgs.SLOT_BYTES,
+            size=64 + 2 * ProductionMoeC1SetupArgs.SLOT_BYTES,
             mem_level="L1",
             chip_id=0,
             cluster_id=cluster,
@@ -471,7 +462,7 @@ def add_production_slot_handoff_test(dfg, p, mh):
         0,
         HOST_CORE,
         "__host_bingo_kernel_check_result",
-        ProductionMoeDualClusterSetupArgs(p, mh),
+        ProductionMoeC1SetupArgs(p, mh),
         "SETUP_PRODUCTION_SLOT",
     )
     final_stores = []
@@ -498,7 +489,7 @@ def add_production_slot_handoff_test(dfg, p, mh):
             cluster,
             mh[f"{prefix}_prod_runtime_l3"],
             mh[f"{prefix}_prod_runtime_l1"],
-            64 + 2 * ProductionMoeDualClusterSetupArgs.SLOT_BYTES,
+            64 + 2 * ProductionMoeC1SetupArgs.SLOT_BYTES,
             f"{prefix.upper()}_PROD_LOAD_DYNAMIC_ABI",
         )
         dfg.bingo_add_edge(setup, refs_to_l1)
@@ -577,8 +568,8 @@ def create_dfg(p, mh):
         chiplet_ids=[0x00],
     )
     print(
-        "Execute concurrent C0/C1 slot0 paths, then store slot0 while gathering "
-        "six tokens for slot1; slot1 compute is intentionally absent"
+        "Execute only C1 and measure eight shapeC S4 compute phases against "
+        "eight 256-KiB gate/up prefetch phases"
     )
     add_production_slot_handoff_test(dfg, p, mh)
     return dfg

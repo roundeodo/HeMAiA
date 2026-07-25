@@ -4,9 +4,12 @@
     total_tokens: 7
     hidden_size: 2048
     intermediate_size: 1024
+    // Equal 256 KiB aggregate payloads for one DMA/VC pipeline phase.
     weight_chunk_cols: 128
+    s1_weight_chunk_cols: 128
+    s3_weight_chunk_cols: 256
     s1_block_count: 8
-    s3_block_count: 8
+    s3_block_count: 4
     num_indiv_experts: 8
     num_shared_experts: 2
     top_k: 2

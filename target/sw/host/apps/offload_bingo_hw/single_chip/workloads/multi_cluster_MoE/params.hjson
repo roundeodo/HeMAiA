@@ -7,9 +7,8 @@
 # 这是模型和 workload 尺寸的唯一编辑入口。不要修改生成的
 # multi_cluster_MoE_data.h 或 offload_bingo_hw.h。
 #
-# moe_layout.py::derive_bank_workload_params() 只派生一次所有维度、字节数、
-# stride 和 bank/row offset；datagen 与 main_bingo.py 都调用该函数。因此修改本
-# 文件后，两份生成物会联动更新，不再各自维护尺寸公式。
+# moe_layout.py::derive_mixed_workload_params() 同时派生 shared 的旧 L1.5
+# layout 和 individual 的 bank layout；datagen 与 main_bingo.py 都调用该函数。
 #
 # 注意：这里会联动更新数据、DFG、DMA/GEMM 参数和内存布局；RTL scheduler
 # 内部的归一化代价常数不由本文件生成。改变模型维度后功能 ABI 仍同步，但若
@@ -28,7 +27,8 @@
     // 全部由 moe_layout.py 根据所选硬件 S0 形状自动推导。
     //
     // 约束：
-    //   total_tokens      必须为正数；Router 尾行自动补零到 meshRow(8)
+    //   total_tokens      必须为正数且为 meshRow(8) 的整数倍；这是旧 shared
+    //                     L1.5 kernel 的约束（Router 本身仍支持尾行补零）
     //   hidden_size/2 和 intermediate_size 必须能被 weight_chunk_cols 整除
     //   num_indiv_experts 必须能被 2*meshCol(8) 整除
     // ------------------------------------------------------------------
@@ -54,7 +54,8 @@
     // 固定硬件形状由 --hwcfg 读取。当前 workload 要求
     // S0=(meshRow=8,tileSize=8,meshCol=4)，down_meshCol 自动取 2*meshCol。
     //
-    // L3 token row 是连续的 hidden_size*2 bytes，不再带 32B padding。
+    // Individual 的 L3 token row 是连续的 hidden_size*2 bytes，不带 padding；
+    // shared 另有一份旧 L1.5 输入，每行仍保留 32B padding。
     // L3->L1 gather 对每个有效 token 发一个 16B x hidden_size/8 的 2D
     // descriptor，目的 row stride 固定为 512B。local token t 的 lane=t%8，
     // 因而使用 banks 2*lane..2*lane+1；page=t/8 选择更深的 TCDM row 区域。

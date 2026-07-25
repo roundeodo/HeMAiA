@@ -50,7 +50,7 @@ def apply_silu(values) -> np.ndarray:
 def generate_swiglu_weights(rng: np.random.Generator, p: dict, prefix: str):
     hidden = p["hidden_size"]
     intermediate = p["intermediate_size"]
-    blocks = p["block_count"]
+    blocks = p["s1_block_count"]
     gate_n1_s0 = (intermediate // blocks) // 4
 
     gate_shape = (blocks, gate_n1_s0, hidden // 8, 8, 4)
@@ -75,7 +75,7 @@ def generate_swiglu_weights(rng: np.random.Generator, p: dict, prefix: str):
 def generate_expert_weights(rng: np.random.Generator, p: dict, prefix: str):
     hidden = p["hidden_size"]
     intermediate = p["intermediate_size"]
-    blocks = p["block_count"]
+    blocks = p["s3_block_count"]
     down_n1_s0 = ((hidden // 2) // blocks) // 4
     down_shape = (2, blocks, down_n1_s0, intermediate // 8, 8, 4)
     down = rng.integers(-7, 8, size=down_shape, dtype=np.int8)
@@ -147,7 +147,7 @@ def emit_header(config: dict) -> str:
             alignment=128,
         ),
     ]
-    for prefix in ("c0", "c1"):
+    for prefix in ("c1",):
         weight_lines, gate_matrix, up_matrix, down_matrix = generate_expert_weights(
             rng, p, f"moe_test_{prefix}"
         )

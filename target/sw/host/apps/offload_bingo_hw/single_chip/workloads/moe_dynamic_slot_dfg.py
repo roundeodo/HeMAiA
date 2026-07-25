@@ -4,12 +4,8 @@
 SLOT_IMPLEMENTATIONS = ("discrete", "optimized")
 DEFAULT_SLOT_IMPLEMENTATION = "optimized"
 
-GATHER_KERNELS = {
-    "discrete": "__snax_bingo_kernel_moe_dynamic_expert_gather_s1",
-    "optimized": "__snax_bingo_kernel_moe_dyn_opt_gather_s1",
-}
-
 OPTIMIZED_STAGE_KERNELS = {
+    "gather": "__snax_bingo_kernel_moe_dyn_opt_gather_s1",
     "s1_load": "__snax_bingo_kernel_moe_dyn_opt_load_s1_stage",
     "s1_config": "__snax_bingo_kernel_moe_dyn_opt_config_s1_block0",
     "s1_compute": "__snax_bingo_kernel_moe_dyn_opt_compute_s1_stage",
@@ -26,7 +22,7 @@ OPTIMIZED_STAGE_KERNELS = {
 
 def dynamic_expert_gather_kernel(implementation):
     _validate_implementation(implementation)
-    return GATHER_KERNELS[implementation]
+    return OPTIMIZED_STAGE_KERNELS["gather"]
 
 
 def _validate_implementation(implementation):
@@ -63,7 +59,7 @@ def _build_discrete_slot_chain(
         if block == 0:
             config = add_node(
                 gemm_core_id,
-                "__snax_bingo_kernel_moe_dynamic_expert_configure_gate_up_block0",
+                OPTIMIZED_STAGE_KERNELS["s1_config"],
                 block_args,
                 label("S1_CONFIG_BLOCK0_DURING_LOAD0"),
             )
@@ -94,7 +90,7 @@ def _build_discrete_slot_chain(
     slot_args = make_block_args(0)
     s2_prefetch = add_node(
         dma_core_id,
-        "__snax_bingo_kernel_moe_dynamic_expert_prefetch_s2_down",
+        OPTIMIZED_STAGE_KERNELS["s2_prefetch"],
         slot_args,
         label("S2_DOWN_PREFETCH"),
     )
@@ -166,7 +162,7 @@ def _build_discrete_slot_chain(
     add_edge(s3_computes[-1], s4_compute)
     store = add_node(
         dma_core_id,
-        "__snax_bingo_kernel_moe_dynamic_expert_store_and_gather_next",
+        OPTIMIZED_STAGE_KERNELS["store"],
         slot_args,
         label("STORE_GATHER_NEXT"),
     )

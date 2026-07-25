@@ -14,27 +14,42 @@
 #define MOE_SCHED_LOCAL_BASE 0x05010000ull
 #endif
 
-#define MOE_SCHED_CTRL      0x00u
-#define MOE_SCHED_STATUS    0x08u
-#define MOE_SCHED_CONFIG    0x10u
-#define MOE_SCHED_TASK_POP 0x68u
-#define MOE_SCHED_HEAD_QUAD        0xa8u
-#define MOE_SCHED_RESERVE_QUAD     0xb0u
-#define MOE_SCHED_HEAD_PUSH_QUAD   0xb8u
-#define MOE_SCHED_TASK_DATA_BASE   0x100u
-#define MOE_SCHED_TASK_DATA_STRIDE 0x08u
+// top6 + reserve6 protocol. Writing WINDOW2_START atomically initializes and
+// starts a batch. EVENT_WAIT and TASK_STREAM are blocking reads.
+#define MOE_SCHED_CONFIG        0x00u
+#define MOE_SCHED_WINDOW0       0x08u
+#define MOE_SCHED_WINDOW1       0x10u
+#define MOE_SCHED_WINDOW2_START 0x18u
+#define MOE_SCHED_REFILL_QUAD   0x20u
+#define MOE_SCHED_EVENT_WAIT    0x28u
+#define MOE_SCHED_TASK_STREAM   0x30u
 
-#define MOE_SCHED_CTRL_INIT         (1ull << 0)
-#define MOE_SCHED_CTRL_START        (1ull << 1)
+#define MOE_SCHED_INITIAL_WINDOW_ENTRIES 12u
+#define MOE_SCHED_QUAD_ENTRIES            4u
+#define MOE_SCHED_TASK_FIFO_DEPTH          8u
 
-#define MOE_SCHED_STATUS_TASK_VALID   (1ull << 3)
-#define MOE_SCHED_STATUS_ACTIVE_EMPTY (1ull << 5)
-#define MOE_SCHED_STATUS_REFILL_REQ   (1ull << 6)
-#define MOE_SCHED_STATUS_TASK_COUNT_LSB 36u
-#define MOE_SCHED_TASK_FIFO_DEPTH 8u
+#define MOE_SCHED_EVENT_BATCH_DONE_LSB   0u
+#define MOE_SCHED_EVENT_REFILL_REQ_LSB   1u
+#define MOE_SCHED_EVENT_REFILL_COUNT_LSB 2u
+#define MOE_SCHED_EVENT_REFILL_COUNT_MASK 0x7ull
+#define MOE_SCHED_EVENT_TASK_COUNT_LSB   5u
+#define MOE_SCHED_EVENT_TASK_COUNT_MASK  0xfull
+
+#define MOE_SCHED_CONFIG_ACTIVE_COUNT_LSB 16u
+#define MOE_SCHED_CONFIG_ACTIVE_COUNT_MASK 0x7full
+#define MOE_SCHED_CONFIG_PARALLEL_WORK_LSB 32u
+#define MOE_SCHED_CONFIG_SERIAL_WORK_LSB   48u
+#define MOE_SCHED_CONFIG_WORK_MASK         0xffffull
+
+#define MOE_SCHED_CACHE_NONE 0x80u
 
 #define MOE_SCHED_EID_RAW_W  6u
 #define MOE_SCHED_NTOK_W     9u
+
+#define MOE_SCHED_DESC_NTOK_MASK  0x1ffu
+#define MOE_SCHED_DESC_EID_MASK   0x3fu
+#define MOE_SCHED_DESC_EID_LSB    MOE_SCHED_NTOK_W
+#define MOE_SCHED_DESC_VALID_LSB  (MOE_SCHED_NTOK_W + MOE_SCHED_EID_RAW_W)
 
 #define MOE_SCHED_TASK_WORD_EID_LSB            0u
 #define MOE_SCHED_TASK_WORD_TOKEN_START_LSB    6u
@@ -69,7 +84,89 @@ static inline uintptr_t moe_sched_base(void)
     return (uintptr_t)chiplet_addr_transform((uint64_t)MOE_SCHED_LOCAL_BASE);
 }
 
-static inline void moe_sched_fence(void)
+static inline __attribute__((always_inline)) uint16_t moe_sched_pack_descriptor(
+    uint32_t expert_id,
+    uint32_t ntokens)
+{
+    return (uint16_t)(
+        (ntokens & MOE_SCHED_DESC_NTOK_MASK) |
+        ((expert_id & MOE_SCHED_DESC_EID_MASK) << MOE_SCHED_DESC_EID_LSB) |
+        (1u << MOE_SCHED_DESC_VALID_LSB));
+}
+
+static inline __attribute__((always_inline)) uint64_t moe_sched_pack_descriptor_quad(
+    const uint16_t *descriptors,
+    uint32_t start,
+    uint32_t count)
+{
+    uint64_t word = 0u;
+    switch (count) {
+        case 4u:
+            word |= (uint64_t)descriptors[start + 3u] << 48u;
+            /* fall through */
+        case 3u:
+            word |= (uint64_t)descriptors[start + 2u] << 32u;
+            /* fall through */
+        case 2u:
+            word |= (uint64_t)descriptors[start + 1u] << 16u;
+            /* fall through */
+        case 1u:
+            word |= (uint64_t)descriptors[start];
+            break;
+        default:
+            break;
+    }
+    return word;
+}
+
+static inline __attribute__((always_inline)) uint64_t moe_sched_pack_config(
+    int16_t cache_eid_c2,
+    int16_t cache_eid_c3,
+    uint32_t active_count,
+    uint32_t total_parallel_work,
+    uint32_t total_serial_work)
+{
+    uint32_t c2 = (cache_eid_c2 < 0) ?
+        MOE_SCHED_CACHE_NONE : ((uint32_t)cache_eid_c2 & MOE_SCHED_DESC_EID_MASK);
+    uint32_t c3 = (cache_eid_c3 < 0) ?
+        MOE_SCHED_CACHE_NONE : ((uint32_t)cache_eid_c3 & MOE_SCHED_DESC_EID_MASK);
+    return (uint64_t)c2 |
+        ((uint64_t)c3 << 8u) |
+        ((uint64_t)(active_count & MOE_SCHED_CONFIG_ACTIVE_COUNT_MASK) <<
+         MOE_SCHED_CONFIG_ACTIVE_COUNT_LSB) |
+        ((uint64_t)(total_parallel_work & MOE_SCHED_CONFIG_WORK_MASK) <<
+         MOE_SCHED_CONFIG_PARALLEL_WORK_LSB) |
+        ((uint64_t)(total_serial_work & MOE_SCHED_CONFIG_WORK_MASK) <<
+         MOE_SCHED_CONFIG_SERIAL_WORK_LSB);
+}
+
+static inline __attribute__((always_inline)) uint32_t
+moe_sched_event_batch_done(uint64_t event)
+{
+    return (uint32_t)((event >> MOE_SCHED_EVENT_BATCH_DONE_LSB) & 1u);
+}
+
+static inline __attribute__((always_inline)) uint32_t
+moe_sched_event_refill_requested(uint64_t event)
+{
+    return (uint32_t)((event >> MOE_SCHED_EVENT_REFILL_REQ_LSB) & 1u);
+}
+
+static inline __attribute__((always_inline)) uint32_t
+moe_sched_event_refill_count(uint64_t event)
+{
+    return (uint32_t)((event >> MOE_SCHED_EVENT_REFILL_COUNT_LSB) &
+                      MOE_SCHED_EVENT_REFILL_COUNT_MASK);
+}
+
+static inline __attribute__((always_inline)) uint32_t
+moe_sched_event_task_count(uint64_t event)
+{
+    return (uint32_t)((event >> MOE_SCHED_EVENT_TASK_COUNT_LSB) &
+                      MOE_SCHED_EVENT_TASK_COUNT_MASK);
+}
+
+static inline __attribute__((always_inline)) void moe_sched_fence(void)
 {
     asm volatile("fence iorw, iorw" ::: "memory");
 }
