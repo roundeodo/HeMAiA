@@ -101,6 +101,7 @@ __moe_dyn_prefetch_s4_blocks(
     uint32_t dma_binding)
 {
     uint32_t dma_runs_done = 0u;
+    uint32_t xdma_addresses_preloaded = 0u;
     uint32_t scheduled = sync_steps != 0u ? __moe_s4_schedule_step(
         phase_steps0, phase_steps1, initial_phase, 0u) : 0u;
 
@@ -128,35 +129,82 @@ __moe_dyn_prefetch_s4_blocks(
                     blk, MOE_XDMA_PREPARED_S4PF);
             uint32_t final_dma_block =
                 dma_runs_done + 1u == st->s1_block_count;
+            uint32_t prepare_store = final_dma_block != 0u &&
+                __moe_dyn_has_output(cfg) != 0u;
+            __moe_dyn_2d_pair_pending_t pending;
 
-            if (final_dma_block != 0u &&
-                __moe_dyn_has_output(cfg) != 0u) {
-                __moe_dyn_2d_pair_pending_t pending;
+            if (dma_binding == MOE_DYN_DMA_IDMA && prepare_store != 0u) {
                 __moe_dyn_start_final_pair_2d_and_prepare_store(
                     dma_binding,
                     __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
                     __moe_dyn_l1_wide(up_dst), up_src + src_offset,
                     st->indiv_B_block_stride, configure_xdma,
                     cfg, st, &pending);
-                if (step + 1u < sync_steps) {
-                    scheduled = __moe_s4_schedule_step(
-                        phase_steps0, phase_steps1, initial_phase, step + 1u);
-                }
-                __moe_pipeline_publish(&s2->store_prepared, 1u);
-                __moe_dyn_wait_pair_2d(&pending);
-            } else {
-                __moe_dyn_2d_pair_pending_t pending;
+            } else if (dma_binding == MOE_DYN_DMA_IDMA) {
                 __moe_dyn_start_pair_2d(
                     dma_binding,
                     __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
                     __moe_dyn_l1_wide(up_dst), up_src + src_offset,
                     st->indiv_B_block_stride, configure_xdma, &pending);
-                if (step + 1u < sync_steps) {
-                    scheduled = __moe_s4_schedule_step(
-                        phase_steps0, phase_steps1, initial_phase, step + 1u);
+            } else {
+                if (xdma_addresses_preloaded == 0u) {
+                    if (configure_xdma != 0u) {
+                        BINGO_TRACE_MARKER(
+                            BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
+                        xdma_memcpy_2d_fast_configure(
+                            MOE_BANK_WEIGHT_ROW_BYTES,
+                            MOE_BANK_WEIGHT_ROW_BYTES,
+                            MOE_BANK_TCDM_ROW_BYTES,
+                            st->indiv_B_block_stride /
+                                MOE_BANK_WEIGHT_ROW_BYTES);
+                        BINGO_TRACE_MARKER(
+                            BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
+                    }
+                    __moe_dyn_prepare_pair_2d_xdma_addresses(
+                        dma_binding,
+                        __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
+                        __moe_dyn_l1_wide(up_dst), up_src + src_offset);
                 }
-                __moe_dyn_wait_pair_2d(&pending);
+                __moe_dyn_start_pair_2d_preloaded_xdma(
+                    dma_binding,
+                    __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
+                    __moe_dyn_l1_wide(up_dst), up_src + src_offset,
+                    st->indiv_B_block_stride, &pending);
+                if (prepare_store != 0u) {
+                    __moe_dyn_prepare_store_xdma(cfg, st);
+                }
             }
+
+            if (step + 1u < sync_steps) {
+                scheduled = __moe_s4_schedule_step(
+                    phase_steps0, phase_steps1, initial_phase, step + 1u);
+            }
+
+            xdma_addresses_preloaded = 0u;
+            if (dma_binding != MOE_DYN_DMA_IDMA &&
+                step + 1u < sync_steps &&
+                scheduled < st->s1_block_count) {
+                uint32_t next_src_offset =
+                    scheduled * st->indiv_B_block_stride;
+                uint32_t next_gate_dst = __moe_bank_weight_block_addr(
+                    st->l1_b_gate_addr, scheduled,
+                    st->indiv_B_block_stride);
+                uint32_t next_up_dst = __moe_bank_weight_block_addr(
+                    st->l1_b_up_addr, scheduled,
+                    st->indiv_B_block_stride);
+                __moe_dyn_prepare_pair_2d_xdma_addresses(
+                    dma_binding,
+                    __moe_dyn_l1_wide(next_gate_dst),
+                    gate_src + next_src_offset,
+                    __moe_dyn_l1_wide(next_up_dst),
+                    up_src + next_src_offset);
+                xdma_addresses_preloaded = 1u;
+            }
+
+            if (prepare_store != 0u) {
+                __moe_pipeline_publish(&s2->store_prepared, 1u);
+            }
+            __moe_dyn_wait_pair_2d(&pending);
             dma_runs_done++;
 
             if (selected_phase == 0u) {
