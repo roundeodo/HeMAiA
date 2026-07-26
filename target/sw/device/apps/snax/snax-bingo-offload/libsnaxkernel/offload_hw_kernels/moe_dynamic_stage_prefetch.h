@@ -85,79 +85,25 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(void *arg)
     return BINGO_RET_SUCC;
 }
 
-/* Production S4 prefetch: advance one bank-safe block step at a time with the
- * S4 compute worker. The two workers use reserved and sync_enabled as their
- * monotonically increasing completion counters. */
-SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
+__attribute__((always_inline)) static inline void
+__moe_dyn_prefetch_s4_blocks(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t sync_steps,
+    uint32_t compute_active,
+    uint32_t initial_phase,
+    uint32_t phase_steps0,
+    uint32_t phase_steps1,
+    uint64_t gate_src,
+    uint64_t up_src,
+    uint32_t dma_binding)
 {
-    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
-        (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
-    const __snax_bingo_moe_dynamic_expert_static_args_t *st =
-        (const __snax_bingo_moe_dynamic_expert_static_args_t *)(uintptr_t)
-        blk->static_arg_addr;
-    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
-        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-        blk->task_arg_addr;
-    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
-    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    if (!__moe_dyn_slot_active_this_round(cfg, st)) {
-        return BINGO_RET_SUCC;
-    }
-
-    MOE_PROFILE_BEGIN(profile);
-    if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u ||
-        cfg->s3_call[0].valid == 0u) {
-        __moe_initialize_next_slot(blk, cfg, st);
-    }
-
-    uint32_t initial_phase = __moe_s4_block_initial_phase(st);
-    uint32_t compute_active = cfg->s4_call.valid != 0u &&
-        cfg->s4_call.M != 0u;
-    uint32_t m_tiles = compute_active != 0u ? cfg->s4_call.M : 0u;
-    uint32_t sync_steps = __moe_s4_phase_schedule_length(
-        st->s1_block_count, st->s3_block_count, m_tiles);
-
-    if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
-        if (__moe_dyn_has_output(cfg) != 0u &&
-            s2->store_prepared == 0u) {
-            __moe_dyn_prepare_store_xdma(cfg, st);
-            __moe_pipeline_publish(&s2->store_prepared, 1u);
-        }
-        __moe_pipeline_publish(&s2->reserved, sync_steps);
-        MOE_PROFILE_COMMIT(
-            arg, cfg, profile, MOE_PROFILE_STAGE_PREFETCH_S4,
-            MOE_PROFILE_RESOURCE_NONE, 0u, 0u,
-            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_NO_PREFETCH,
-            BINGO_RET_SUCC);
-        return BINGO_RET_SUCC;
-    }
-
-    uint32_t dma_binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_START);
-    uint32_t expert_id = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
-    uint32_t weight_bytes = st->indiv_B_expert_stride;
-    uint64_t gate_src = st->indiv_gate_B_l3 +
-        (uint64_t)expert_id * weight_bytes;
-    uint64_t up_src = st->indiv_up_B_l3 +
-        (uint64_t)expert_id * weight_bytes;
-    uint32_t phase_steps0 = __moe_s4_phase_steps(
-        st->s1_block_count, st->s3_block_count, m_tiles, 0u);
-    uint32_t phase_steps1 = __moe_s4_phase_steps(
-        st->s1_block_count, st->s3_block_count, m_tiles, 1u);
     uint32_t dma_runs_done = 0u;
     uint32_t scheduled = sync_steps != 0u ? __moe_s4_schedule_step(
         phase_steps0, phase_steps1, initial_phase, 0u) : 0u;
 
-    /* S3 load may finish two blocks before S3 compute. Wait until the
-     * penultimate S3 block releases the phase selected for the first S4 DMA;
-     * the final S3 block then reads the opposite phase. */
-    if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) == 0u &&
-        cfg->s3_call[0].valid != 0u && st->s3_block_count > 1u) {
-        __moe_pipeline_wait(
-            &s2->compute_done, st->s3_block_count - 1u);
-    }
-
-    MOE_PROFILE_RESOURCE_BEGIN(profile);
     for (uint32_t step = 0u; step < sync_steps; step++) {
         if (step != 0u && compute_active != 0u) {
             __moe_pipeline_wait(&s2->sync_enabled, step);
@@ -226,6 +172,94 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
         }
 
         __moe_pipeline_publish(&s2->reserved, step + 1u);
+    }
+}
+
+/* Production S4 prefetch: advance one bank-safe block step at a time with the
+ * S4 compute worker. The two workers use reserved and sync_enabled as their
+ * monotonically increasing completion counters. */
+SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
+{
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
+        (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st =
+        (const __snax_bingo_moe_dynamic_expert_static_args_t *)(uintptr_t)
+        blk->static_arg_addr;
+    __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
+        (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
+        blk->task_arg_addr;
+    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
+    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
+    if (!__moe_dyn_slot_active_this_round(cfg, st)) {
+        return BINGO_RET_SUCC;
+    }
+
+    MOE_PROFILE_BEGIN(profile);
+    if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u ||
+        cfg->s3_call[0].valid == 0u) {
+        __moe_initialize_next_slot(blk, cfg, st);
+    }
+
+    uint32_t initial_phase = __moe_s4_block_initial_phase(st);
+    uint32_t compute_active = cfg->s4_call.valid != 0u &&
+        cfg->s4_call.M != 0u;
+    uint32_t m_tiles = compute_active != 0u ? cfg->s4_call.M : 0u;
+    uint32_t sync_steps = __moe_s4_phase_schedule_length(
+        st->s1_block_count, st->s3_block_count, m_tiles);
+
+    if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) {
+        if (__moe_dyn_has_output(cfg) != 0u &&
+            s2->store_prepared == 0u) {
+            __moe_dyn_prepare_store_xdma(cfg, st);
+            __moe_pipeline_publish(&s2->store_prepared, 1u);
+        }
+        __moe_pipeline_publish(&s2->reserved, sync_steps);
+        MOE_PROFILE_COMMIT(
+            arg, cfg, profile, MOE_PROFILE_STAGE_PREFETCH_S4,
+            MOE_PROFILE_RESOURCE_NONE, 0u, 0u,
+            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_NO_PREFETCH,
+            BINGO_RET_SUCC);
+        return BINGO_RET_SUCC;
+    }
+
+    uint32_t dma_binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_START);
+    uint32_t expert_id = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
+    uint32_t weight_bytes = st->indiv_B_expert_stride;
+    uint64_t gate_src = st->indiv_gate_B_l3 +
+        (uint64_t)expert_id * weight_bytes;
+    uint64_t up_src = st->indiv_up_B_l3 +
+        (uint64_t)expert_id * weight_bytes;
+    uint32_t phase_steps0 = __moe_s4_phase_steps(
+        st->s1_block_count, st->s3_block_count, m_tiles, 0u);
+    uint32_t phase_steps1 = __moe_s4_phase_steps(
+        st->s1_block_count, st->s3_block_count, m_tiles, 1u);
+
+    /* S3 load may finish two blocks before S3 compute. Wait until the
+     * penultimate S3 block releases the phase selected for the first S4 DMA;
+     * the final S3 block then reads the opposite phase. */
+    if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) == 0u &&
+        cfg->s3_call[0].valid != 0u && st->s3_block_count > 1u) {
+        __moe_pipeline_wait(
+            &s2->compute_done, st->s3_block_count - 1u);
+    }
+
+    MOE_PROFILE_RESOURCE_BEGIN(profile);
+    if (dma_binding == MOE_DYN_DMA_IDMA) {
+        __moe_dyn_prefetch_s4_blocks(
+            blk, cfg, st, s2, sync_steps, compute_active, initial_phase,
+            phase_steps0, phase_steps1, gate_src, up_src,
+            MOE_DYN_DMA_IDMA);
+    } else if (dma_binding == MOE_DYN_DMA_XDMA) {
+        __moe_dyn_prefetch_s4_blocks(
+            blk, cfg, st, s2, sync_steps, compute_active, initial_phase,
+            phase_steps0, phase_steps1, gate_src, up_src,
+            MOE_DYN_DMA_XDMA);
+    } else {
+        __moe_dyn_prefetch_s4_blocks(
+            blk, cfg, st, s2, sync_steps, compute_active, initial_phase,
+            phase_steps0, phase_steps1, gate_src, up_src,
+            MOE_DYN_DMA_BOTH);
     }
 
     if (__moe_dyn_has_output(cfg) != 0u &&
