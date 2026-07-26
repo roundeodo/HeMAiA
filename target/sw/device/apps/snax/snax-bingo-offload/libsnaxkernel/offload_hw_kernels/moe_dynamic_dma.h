@@ -181,6 +181,53 @@ __attribute__((always_inline)) static inline void __moe_dyn_start_pair_2d(
     pending->wait_idma = 1u;
 }
 
+__attribute__((always_inline)) static inline void __moe_dyn_start_single_2d(
+    uint32_t binding,
+    uint64_t dst_addr,
+    uint64_t src_addr,
+    uint32_t bytes,
+    uint32_t configure_xdma,
+    __moe_dyn_2d_pair_pending_t *pending)
+{
+    uint32_t repeats = bytes / MOE_BANK_WEIGHT_ROW_BYTES;
+    pending->binding = binding;
+    pending->repeats = repeats;
+    pending->wait_idma = 0u;
+    pending->xdma_task0 = -1;
+    pending->xdma_task1 = -1;
+
+    if (binding == MOE_DYN_DMA_IDMA) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
+        snrt_dma_start_2d_wideptr(
+            dst_addr, src_addr, MOE_BANK_WEIGHT_ROW_BYTES,
+            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
+        BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+        pending->wait_idma = 1u;
+        return;
+    }
+
+    if (configure_xdma != 0u) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
+        xdma_memcpy_2d_fast_configure(
+            MOE_BANK_WEIGHT_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES,
+            MOE_BANK_TCDM_ROW_BYTES, repeats);
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
+    }
+    xdma_memcpy_fast_set_addresses(src_addr, dst_addr);
+    pending->xdma_task0 = xdma_start();
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_start_single_2d_preloaded_xdma(
+    uint32_t bytes, __moe_dyn_2d_pair_pending_t *pending)
+{
+    pending->binding = MOE_DYN_DMA_XDMA;
+    pending->repeats = bytes / MOE_BANK_WEIGHT_ROW_BYTES;
+    pending->wait_idma = 0u;
+    pending->xdma_task0 = xdma_start();
+    pending->xdma_task1 = -1;
+}
+
 __attribute__((always_inline)) static inline void __moe_dyn_wait_pair_2d(
     __moe_dyn_2d_pair_pending_t *pending)
 {
@@ -235,7 +282,7 @@ __moe_dyn_prepare_pair_2d_xdma_addresses(
 {
     if (binding == MOE_DYN_DMA_XDMA) {
         xdma_memcpy_fast_set_addresses(src0_addr, dst0_addr);
-    } else {
+    } else if (binding == MOE_DYN_DMA_BOTH) {
         xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
     }
 }
@@ -254,8 +301,23 @@ __moe_dyn_start_pair_2d_preloaded_xdma(
     pending->binding = binding;
     pending->repeats = repeats;
     pending->wait_idma = 0u;
-    pending->xdma_task0 = xdma_start();
+    pending->xdma_task0 = -1;
     pending->xdma_task1 = -1;
+
+    if (binding == MOE_DYN_DMA_IDMA) {
+        BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
+        snrt_dma_start_2d_wideptr(
+            dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
+            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
+        snrt_dma_start_2d_wideptr(
+            dst1_addr, src1_addr, MOE_BANK_WEIGHT_ROW_BYTES,
+            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
+        BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+        pending->wait_idma = 1u;
+        return;
+    }
+
+    pending->xdma_task0 = xdma_start();
 
     if (binding == MOE_DYN_DMA_XDMA) {
         xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);

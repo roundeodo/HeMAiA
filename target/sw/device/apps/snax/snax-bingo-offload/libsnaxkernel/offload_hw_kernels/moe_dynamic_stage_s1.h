@@ -41,6 +41,8 @@ static inline void __moe_initialize_slot_state(
     s1->csr_prepared_reserved = 0u;
     s2->valid = 0u;
     s2->sync_enabled = 0u;
+    s2->transfer_count = 0u;
+    s2->transfers_per_step = 0u;
     s2->compute_done = 0u;
     s2->prefetch_done = 0u;
     s2->store_prepared = 0u;
@@ -77,6 +79,11 @@ static inline void __moe_initialize_slot_state(
         s2->block_count = st->s3_block_count;
         s2->s1_block_count = st->s1_block_count;
         s2->binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, pf_slot);
+        s2->transfers_per_step =
+            st->indiv_B_block_stride / st->indiv_down_B_block_stride;
+        s2->transfer_count =
+            (2u * st->s3_block_count + s2->transfers_per_step - 1u) /
+            s2->transfers_per_step;
         s2->reserved = pf_expert;
         s2->valid = 1u;
         s2->sync_enabled = cfg->s2_call.valid != 0u;

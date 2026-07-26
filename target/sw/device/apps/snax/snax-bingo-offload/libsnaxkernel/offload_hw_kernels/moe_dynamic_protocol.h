@@ -91,6 +91,24 @@ static inline uint32_t __moe_dyn_binding_uses_xdma(uint32_t binding)
     return binding == MOE_DYN_DMA_XDMA || binding == MOE_DYN_DMA_BOTH;
 }
 
+static inline uint32_t __moe_s4_dma_blocks_per_step(uint32_t dma_slot_vd)
+{
+    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
+    if (MOE_DYN_VD_VALID(dma_slot_vd, slot) == 0u) return 0u;
+    return 1u;
+}
+
+static inline uint32_t __moe_s4_compute_runs_per_step(
+    uint32_t dma_slot_vd, uint32_t base_runs)
+{
+    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
+    if (MOE_DYN_VD_VALID(dma_slot_vd, slot) == 0u ||
+        MOE_DYN_VD_DMA(dma_slot_vd, slot) == MOE_DYN_DMA_BOTH) {
+        return base_runs;
+    }
+    return 2u * base_runs;
+}
+
 static inline uint32_t __moe_dyn_stage_block_n(
     uint32_t stage_n, uint32_t block_count)
 {

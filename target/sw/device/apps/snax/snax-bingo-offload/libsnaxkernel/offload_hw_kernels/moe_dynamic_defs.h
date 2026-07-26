@@ -45,6 +45,8 @@ typedef struct __attribute__((aligned(8))) {
     uint32_t binding;
     uint32_t valid;
     uint32_t sync_enabled;
+    uint32_t transfer_count;
+    uint32_t transfers_per_step;
     volatile uint32_t compute_done;
     volatile uint32_t prefetch_done;
     volatile uint32_t store_prepared;
