@@ -50,17 +50,6 @@ __attribute__((always_inline)) static inline uint32_t __moe_s4_schedule_step(
     return (tail_ordinal << 1u) | tail_phase;
 }
 
-__attribute__((always_inline)) static inline uint32_t __moe_s4_dma_block(
-    uint32_t block_count, uint32_t phase, uint32_t ordinal,
-    uint32_t *block)
-{
-    if (ordinal >= __moe_s4_blocks_in_phase(block_count, phase)) {
-        return 0u;
-    }
-    *block = phase + 2u * ordinal;
-    return 1u;
-}
-
 __attribute__((always_inline)) static inline uint32_t __moe_s4_compute_run(
     uint32_t block_count, uint32_t m_tiles,
     uint32_t phase, uint32_t ordinal,

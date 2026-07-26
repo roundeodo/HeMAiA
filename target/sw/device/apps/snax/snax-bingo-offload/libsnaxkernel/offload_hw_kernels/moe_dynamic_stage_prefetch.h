@@ -145,6 +145,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
     uint32_t phase_steps1 = __moe_s4_phase_steps(
         st->s1_block_count, st->s3_block_count, m_tiles, 1u);
     uint32_t dma_runs_done = 0u;
+    uint32_t scheduled = sync_steps != 0u ? __moe_s4_schedule_step(
+        phase_steps0, phase_steps1, initial_phase, 0u) : 0u;
 
     /* S3 load may finish two blocks before S3 compute. Wait until the
      * penultimate S3 block releases the phase selected for the first S4 DMA;
@@ -161,14 +163,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
             __moe_pipeline_wait(&s2->sync_enabled, step);
         }
 
-        uint32_t scheduled = __moe_s4_schedule_step(
-            phase_steps0, phase_steps1, initial_phase, step);
         uint32_t selected_phase = scheduled & 1u;
-        uint32_t ordinal = scheduled >> 1u;
-
-        uint32_t n = 0u;
-        if (__moe_s4_dma_block(
-                st->s1_block_count, selected_phase, ordinal, &n) != 0u) {
+        uint32_t n = scheduled;
+        if (n < st->s1_block_count) {
             if (selected_phase == 0u) {
                 BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4PF_PHASE0_START);
             } else {
@@ -195,14 +192,24 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
                     __moe_dyn_l1_wide(up_dst), up_src + src_offset,
                     st->indiv_B_block_stride, configure_xdma,
                     cfg, st, &pending);
+                if (step + 1u < sync_steps) {
+                    scheduled = __moe_s4_schedule_step(
+                        phase_steps0, phase_steps1, initial_phase, step + 1u);
+                }
                 __moe_pipeline_publish(&s2->store_prepared, 1u);
                 __moe_dyn_wait_pair_2d(&pending);
             } else {
-                __moe_dyn_copy_pair_2d(
+                __moe_dyn_2d_pair_pending_t pending;
+                __moe_dyn_start_pair_2d(
                     dma_binding,
                     __moe_dyn_l1_wide(gate_dst), gate_src + src_offset,
                     __moe_dyn_l1_wide(up_dst), up_src + src_offset,
-                    st->indiv_B_block_stride, configure_xdma);
+                    st->indiv_B_block_stride, configure_xdma, &pending);
+                if (step + 1u < sync_steps) {
+                    scheduled = __moe_s4_schedule_step(
+                        phase_steps0, phase_steps1, initial_phase, step + 1u);
+                }
+                __moe_dyn_wait_pair_2d(&pending);
             }
             dma_runs_done++;
 
@@ -211,6 +218,11 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
             } else {
                 BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4PF_PHASE1_END);
             }
+        }
+
+        if (n >= st->s1_block_count && step + 1u < sync_steps) {
+            scheduled = __moe_s4_schedule_step(
+                phase_steps0, phase_steps1, initial_phase, step + 1u);
         }
 
         __moe_pipeline_publish(&s2->reserved, step + 1u);
