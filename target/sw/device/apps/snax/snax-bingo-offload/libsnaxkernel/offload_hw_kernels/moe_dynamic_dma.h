@@ -86,16 +86,14 @@ static inline uint32_t __moe_dyn_copy_pair(uint32_t binding,
     return BINGO_RET_SUCC;
 }
 
+/* Dynamic-MoE 2D pairs always cross L3 and cluster-local L1, so their xDMA
+ * completion is remote and does not need retained source/destination state. */
 typedef struct {
     uint32_t binding;
     uint32_t repeats;
     uint32_t wait_idma;
     int32_t xdma_task0;
     int32_t xdma_task1;
-    uint64_t xdma_dst0;
-    uint64_t xdma_src0;
-    uint64_t xdma_dst1;
-    uint64_t xdma_src1;
 #ifdef BINGO_MOE_IDMA_2D_PROBE_COUNTERS
     uint32_t probe_start;
 #endif
@@ -117,10 +115,6 @@ __attribute__((always_inline)) static inline void __moe_dyn_start_pair_2d(
     pending->wait_idma = 0u;
     pending->xdma_task0 = -1;
     pending->xdma_task1 = -1;
-    pending->xdma_dst0 = dst0_addr;
-    pending->xdma_src0 = src0_addr;
-    pending->xdma_dst1 = dst1_addr;
-    pending->xdma_src1 = src1_addr;
 
     if (binding == MOE_DYN_DMA_IDMA) {
 #ifdef BINGO_MOE_IDMA_2D_PROBE_COUNTERS
@@ -179,8 +173,6 @@ __attribute__((always_inline)) static inline void __moe_dyn_start_pair_2d(
     }
     xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
     pending->xdma_task0 = xdma_start();
-    pending->xdma_dst0 = dst1_addr;
-    pending->xdma_src0 = src1_addr;
     BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
     snrt_dma_start_2d_wideptr(
         dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
@@ -222,14 +214,14 @@ __attribute__((always_inline)) static inline void __moe_dyn_wait_pair_2d(
 #endif
     }
     if (pending->xdma_task0 >= 0) {
-        __moe_dyn_wait_xdma(
-            pending->xdma_dst0, pending->xdma_src0,
-            pending->xdma_task0);
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
+        xdma_remote_wait((uint32_t)pending->xdma_task0);
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END);
     }
     if (pending->xdma_task1 >= 0) {
-        __moe_dyn_wait_xdma(
-            pending->xdma_dst1, pending->xdma_src1,
-            pending->xdma_task1);
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
+        xdma_remote_wait((uint32_t)pending->xdma_task1);
+        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END);
     }
 }
 
@@ -383,12 +375,6 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
     pending->wait_idma = binding != MOE_DYN_DMA_XDMA;
     pending->xdma_task0 = -1;
     pending->xdma_task1 = -1;
-    pending->xdma_dst0 = binding == MOE_DYN_DMA_BOTH ?
-        dst1_addr : dst0_addr;
-    pending->xdma_src0 = binding == MOE_DYN_DMA_BOTH ?
-        src1_addr : src0_addr;
-    pending->xdma_dst1 = dst1_addr;
-    pending->xdma_src1 = src1_addr;
     asm volatile("" :
                  "+r"(dst0_addr), "+r"(src0_addr),
                  "+r"(dst1_addr), "+r"(src1_addr),
