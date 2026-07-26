@@ -37,6 +37,7 @@ __attribute__((always_inline)) static inline uint32_t __moe_s4_schedule_step(
 {
     if (phase_steps0 == 0u) return (step << 1u) | 1u;
     if (phase_steps1 == 0u) return step << 1u;
+    if (phase_steps0 == phase_steps1) return step ^ (initial_phase & 1u);
 
     uint32_t paired = 2u * (phase_steps0 < phase_steps1 ?
         phase_steps0 : phase_steps1);
