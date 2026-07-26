@@ -345,9 +345,9 @@ __moe_dyn_prepare_store_xdma(
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
 }
 
-/* Final S4 block with a following store.  Keep this inline so address
- * derivation and pending-state setup can be hoisted out of the final DMA
- * phase; the store CSR writer itself remains a no-stack helper. */
+/* Final S4 block with a following store.  Launch every weight transfer before
+ * deriving the following store configuration so L1 argument traffic cannot
+ * delay either DMA engine. */
 __attribute__((always_inline)) static inline void
 __moe_dyn_start_final_pair_2d_and_prepare_store(
     uint32_t binding,
@@ -362,30 +362,13 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
     __moe_dyn_2d_pair_pending_t *pending)
 {
     uint32_t repeats = bytes / MOE_BANK_WEIGHT_ROW_BYTES;
-    uint64_t store_dst = st->output_l3_base +
-        (uint64_t)cfg->expert_id * (uint64_t)st->output_expert_stride_bytes +
-        (uint64_t)cfg->token_ref_start * (uint64_t)st->A_row_stride;
-    uint64_t store_src = __moe_dyn_l1_wide(__moe_dyn_output_base(cfg, st));
-    uint32_t store_tokens = cfg->ntokens < MOE_BANK_TOKEN_LANES ?
-        cfg->ntokens : MOE_BANK_TOKEN_LANES;
-    uint32_t token_bytes = st->A_token_bytes;
 
     pending->binding = binding;
     pending->repeats = repeats;
     pending->wait_idma = binding != MOE_DYN_DMA_XDMA;
     pending->xdma_task0 = -1;
     pending->xdma_task1 = -1;
-    asm volatile("" :
-                 "+r"(dst0_addr), "+r"(src0_addr),
-                 "+r"(dst1_addr), "+r"(src1_addr),
-                 "+r"(store_dst), "+r"(store_src),
-                 "+r"(store_tokens), "+r"(token_bytes) :: "memory");
-
     if (binding == MOE_DYN_DMA_IDMA) {
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
-        __moe_bank_configure_store(
-            store_src, store_dst, store_tokens, token_bytes);
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
         snrt_dma_start_2d_wideptr(
             dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
@@ -394,6 +377,7 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
             dst1_addr, src1_addr, MOE_BANK_WEIGHT_ROW_BYTES,
             MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
         BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+        __moe_dyn_prepare_store_xdma(cfg, st);
         return;
     }
 
@@ -410,12 +394,9 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
         int32_t task0 = (int32_t)xdma_start();
         xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
         int32_t task1 = (int32_t)xdma_start();
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
-        __moe_bank_configure_store(
-            store_src, store_dst, store_tokens, token_bytes);
-        BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
         pending->xdma_task0 = task0;
         pending->xdma_task1 = task1;
+        __moe_dyn_prepare_store_xdma(cfg, st);
         return;
     }
 
@@ -426,9 +407,6 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
     BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
     xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
     int32_t task0 = (int32_t)xdma_start();
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
-    __moe_bank_configure_store(
-        store_src, store_dst, store_tokens, token_bytes);
-    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
     pending->xdma_task0 = task0;
+    __moe_dyn_prepare_store_xdma(cfg, st);
 }
