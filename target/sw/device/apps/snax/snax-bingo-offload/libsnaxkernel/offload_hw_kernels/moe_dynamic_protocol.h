@@ -91,24 +91,6 @@ static inline uint32_t __moe_dyn_binding_uses_xdma(uint32_t binding)
     return binding == MOE_DYN_DMA_XDMA || binding == MOE_DYN_DMA_BOTH;
 }
 
-static inline uint32_t __moe_s4_dma_blocks_per_step(uint32_t dma_slot_vd)
-{
-    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    if (MOE_DYN_VD_VALID(dma_slot_vd, slot) == 0u) return 0u;
-    return 1u;
-}
-
-static inline uint32_t __moe_s4_compute_runs_per_step(
-    uint32_t dma_slot_vd, uint32_t base_runs)
-{
-    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    if (MOE_DYN_VD_VALID(dma_slot_vd, slot) == 0u ||
-        MOE_DYN_VD_DMA(dma_slot_vd, slot) == MOE_DYN_DMA_BOTH) {
-        return base_runs;
-    }
-    return 2u * base_runs;
-}
-
 static inline uint32_t __moe_dyn_stage_block_n(
     uint32_t stage_n, uint32_t block_count)
 {
@@ -166,6 +148,59 @@ static inline void __moe_prepare_s1_xdma_shape(
         st->indiv_B_block_stride, MOE_XDMA_PREPARED_S1);
 }
 
+static inline void __moe_prepare_s4pf_xdma_phase_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    uint32_t block_bytes, uint32_t block_count, uint32_t phase)
+{
+    uint32_t rows = block_bytes / MOE_BANK_WEIGHT_ROW_BYTES;
+    uint32_t phase_blocks = __moe_s4_blocks_in_phase(block_count, phase);
+    uint32_t spatial_stride = XDMA_WIDTH / XDMA_SPATIAL_CHAN;
+
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_START);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLE_PTR, 0u);
+    snax_write_xdma_cfg_reg(XDMA_SRC_SPATIAL_STRIDE_PTR, spatial_stride);
+    snax_write_xdma_cfg_reg(XDMA_DST_SPATIAL_STRIDE_PTR, spatial_stride);
+
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR, 1u);
+    snax_write_xdma_cfg_reg(
+        XDMA_SRC_TEMP_STRIDE_PTR, MOE_BANK_WEIGHT_ROW_BYTES);
+    snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR + 1u, rows);
+    snax_write_xdma_cfg_reg(
+        XDMA_SRC_TEMP_STRIDE_PTR + 1u, MOE_BANK_WEIGHT_ROW_BYTES);
+    snax_write_xdma_cfg_reg(
+        XDMA_SRC_TEMP_BOUND_PTR + 2u, phase_blocks);
+    snax_write_xdma_cfg_reg(
+        XDMA_SRC_TEMP_STRIDE_PTR + 2u, 2u * block_bytes);
+
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR, 1u);
+    snax_write_xdma_cfg_reg(
+        XDMA_DST_TEMP_STRIDE_PTR, MOE_BANK_WEIGHT_ROW_BYTES);
+    snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR + 1u, rows);
+    snax_write_xdma_cfg_reg(
+        XDMA_DST_TEMP_STRIDE_PTR + 1u, MOE_BANK_TCDM_ROW_BYTES);
+    snax_write_xdma_cfg_reg(
+        XDMA_DST_TEMP_BOUND_PTR + 2u, phase_blocks);
+    snax_write_xdma_cfg_reg(
+        XDMA_DST_TEMP_STRIDE_PTR + 2u,
+        block_bytes * (MOE_BANK_TCDM_ROW_BYTES /
+            MOE_BANK_WEIGHT_ROW_BYTES));
+
+#pragma GCC unroll 2
+    for (uint32_t i = 3u; i < XDMA_SRC_TEMP_DIM; i++) {
+        snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_BOUND_PTR + i, 1u);
+        snax_write_xdma_cfg_reg(XDMA_SRC_TEMP_STRIDE_PTR + i, 0u);
+        snax_write_xdma_cfg_reg(XDMA_DST_TEMP_BOUND_PTR + i, 1u);
+        snax_write_xdma_cfg_reg(XDMA_DST_TEMP_STRIDE_PTR + i, 0u);
+    }
+    snax_write_xdma_cfg_reg(XDMA_SRC_ENABLED_CHAN_PTR, 0xffffffffu);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_CHAN_PTR, 0xffffffffu);
+    snax_write_xdma_cfg_reg(XDMA_DST_ENABLED_BYTE_PTR, 0xffffffffu);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
+    __moe_pipeline_publish(
+        &__moe_s1_dma_ctrl(blk)->xdma_prepared_stage,
+        MOE_XDMA_PREPARED_S4PF);
+}
+
 static inline void __moe_prepare_s4pf_xdma_shape(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
@@ -175,9 +210,9 @@ static inline void __moe_prepare_s4pf_xdma_shape(
     if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) return;
     uint32_t binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
     if (__moe_dyn_binding_uses_xdma(binding) == 0u) return;
-    __moe_prepare_pair_xdma_shape(
-        blk, MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot),
-        st->indiv_B_block_stride, MOE_XDMA_PREPARED_S4PF);
+    __moe_prepare_s4pf_xdma_phase_shape(
+        blk, st->indiv_B_block_stride, st->s1_block_count,
+        __moe_s4_block_initial_phase(st));
 }
 
 static inline uint32_t __moe_dyn_shape_m(uint32_t shape)

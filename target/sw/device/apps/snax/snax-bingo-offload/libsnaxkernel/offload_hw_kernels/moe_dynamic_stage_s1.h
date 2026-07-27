@@ -404,7 +404,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s1_stage(void *
     for (uint32_t n = 0u; n < s1->block_count; n++) {
         __moe_pipeline_wait(&sync->prefetch_done, n + 1u);
         __moe_run_s1_block(
-            blk, cfg, st, n, 0u, MOE_S4_CSR_LAYOUT_BLOCK_SYNC);
+            blk, cfg, st, n, 0u, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
         if (n + 2u < s1->block_count) {
             __moe_pipeline_publish(&sync->compute_done, n + 1u);
         }

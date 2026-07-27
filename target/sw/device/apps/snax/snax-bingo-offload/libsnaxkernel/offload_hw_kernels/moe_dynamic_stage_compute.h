@@ -116,15 +116,13 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s2(void *arg)
         blk->task_arg_addr;
     if (__moe_dyn_slot_active_this_round(cfg, st)) {
         __moe_run_s2_compute(
-            blk, cfg, st, MOE_S4_CSR_LAYOUT_BLOCK_SYNC);
+            blk, cfg, st, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
     }
     return BINGO_RET_SUCC;
 }
 
-/* S4 consumes the final call record lowered by CVA6 in MoEPrepare. */
-/* Production S4 compute: run one logical block per synchronization step. The
- * block order starts on the phase opposite the final S3 reader and remains
- * valid for arbitrary runtime M and either equal or unequal stage counts. */
+/* S4 consumes the final call record lowered by CVA6 in MoEPrepare.  One RUN
+ * traverses every down-weight block resident in the selected bank phase. */
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
 {
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
@@ -164,99 +162,80 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
     uint32_t intermediate_base = __moe_dyn_intermediate_base(cfg, st);
     uint32_t output_base = __moe_dyn_output_base(cfg, st);
     uint32_t initial_phase = __moe_s4_block_initial_phase(st);
-    uint32_t dma_blocks_per_step =
-        __moe_s4_dma_blocks_per_step(cfg->dma_slot_vd);
-    uint32_t compute_runs_per_step = __moe_s4_compute_runs_per_step(
-        cfg->dma_slot_vd,
-        st->indiv_B_block_stride / st->indiv_down_B_block_stride);
-    uint32_t sync_steps = __moe_s4_phase_schedule_length(
-        st->s1_block_count, st->s3_block_count, m_tiles,
-        dma_blocks_per_step, compute_runs_per_step);
-    uint32_t phase_steps0 = __moe_s4_phase_steps(
-        st->s1_block_count, st->s3_block_count, m_tiles,
-        dma_blocks_per_step, compute_runs_per_step, 0u);
-    uint32_t phase_steps1 = __moe_s4_phase_steps(
-        st->s1_block_count, st->s3_block_count, m_tiles,
-        dma_blocks_per_step, compute_runs_per_step, 1u);
     uint32_t synchronize = MOE_DYN_VD_VALID(
         cfg->dma_slot_vd, MOE_DYN_DMA_SLOT_S4_PREFETCH);
 
     if (!__moe_csr_stage_is_prepared(blk, MOE_CSR_PREPARED_S4)) {
         (void)__moe_prepare_s4_csr(
-            blk, cfg, st, MOE_S4_CSR_LAYOUT_BLOCK_SYNC);
+            blk, cfg, st, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
     }
 
-    for (uint32_t step = 0u; step < sync_steps; step++) {
+    for (uint32_t step = 0u; step < 2u; step++) {
         if (step != 0u && synchronize != 0u) {
             __moe_pipeline_wait(&sync->reserved, step);
         }
 
-        uint32_t scheduled = __moe_s4_schedule_step(
-            phase_steps0, phase_steps1, initial_phase, step);
-        uint32_t selected_phase = scheduled & 1u;
-        uint32_t base_ordinal =
-            (scheduled >> 1u) * compute_runs_per_step;
+        uint32_t phase = __moe_s4_phase_at_step(initial_phase, step);
+        uint32_t phase_blocks = __moe_s4_blocks_in_phase(
+            st->s3_block_count, phase);
+        if (phase == 0u) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_START);
+        } else {
+            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_START);
+        }
 
-        for (uint32_t sub = 0u; sub < compute_runs_per_step; sub++) {
-            uint32_t mt = 0u;
-            uint32_t n = 0u;
-            if (__moe_s4_compute_run(
-                    st->s3_block_count, m_tiles, selected_phase,
-                    base_ordinal + sub, &mt, &n) == 0u) {
-                continue;
-            }
-
-            if (selected_phase == 0u) {
-                BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_START);
-            } else {
-                BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_START);
-            }
-
+        for (uint32_t mt = 0u; mt < m_tiles && phase_blocks != 0u; mt++) {
             BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_START);
             moe_start_dual_vc_and_streamer();
 
-            uint32_t next_mt = 0u;
-            uint32_t next_block = 0u;
-            uint32_t next_valid = 0u;
-            if (sub + 1u < compute_runs_per_step) {
-                next_valid = __moe_s4_compute_run(
-                    st->s3_block_count, m_tiles, selected_phase,
-                    base_ordinal + sub + 1u, &next_mt, &next_block);
-            }
-            if (next_valid == 0u) {
-                next_valid = __moe_s4_peek_compute_run(
-                    st->s3_block_count, m_tiles, initial_phase,
-                    phase_steps0, phase_steps1, step + 1u,
-                    compute_runs_per_step, &next_mt, &next_block);
-            }
-            if (next_valid != 0u) {
-                uint32_t next_token = token_start + next_mt * token_step;
+            if (mt + 1u < m_tiles) {
+                uint32_t next_token = token_start + (mt + 1u) * token_step;
                 __moe_bank_patch_mode1_run_bases(
                     __moe_bank_mode0_output_addr(
                         intermediate_base, next_token, 0u,
                         st->indiv_N_per_block, st->s1_block_count),
                     __moe_bank_down_weight_block_addr(
-                        st->l1_b_down_addr, next_block,
+                        st->l1_b_down_addr, phase,
                         st->indiv_down_B_block_stride),
                     __moe_bank_down_weight_block_addr(
-                        st->l1_b_down_addr + 64u, next_block,
+                        st->l1_b_down_addr + 64u, phase,
                         st->indiv_down_B_block_stride),
                     __moe_bank_mode1_output_addr(
-                        output_base, next_token, next_block,
+                        output_base, next_token, phase,
                         st->indiv_down_N_per_block, st->s3_block_count),
                     __moe_bank_mode1_output_addr(
-                        output_base + 64u, next_token, next_block,
+                        output_base + 64u, next_token, phase,
                         st->indiv_down_N_per_block, st->s3_block_count));
+            } else if (step == 0u) {
+                uint32_t next_phase = __moe_s4_phase_at_step(
+                    initial_phase, 1u);
+                if (__moe_s4_blocks_in_phase(
+                        st->s3_block_count, next_phase) != 0u) {
+                    BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
+                    __moe_configure_s4_phase(
+                        cfg, st, token_start, next_phase);
+                    BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
+                }
             }
 
             moe_wait_dual_vc_and_streamer();
             BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
+        }
 
-            if (selected_phase == 0u) {
-                BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_END);
-            } else {
-                BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_END);
+        if (phase_blocks == 0u && step == 0u) {
+            uint32_t next_phase = __moe_s4_phase_at_step(initial_phase, 1u);
+            if (__moe_s4_blocks_in_phase(
+                    st->s3_block_count, next_phase) != 0u) {
+                BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
+                __moe_configure_s4_phase(cfg, st, token_start, next_phase);
+                BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
             }
+        }
+
+        if (phase == 0u) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE0_END);
+        } else {
+            BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_S4COMP_PHASE1_END);
         }
         if (synchronize != 0u) {
             __moe_pipeline_publish(&sync->sync_enabled, step + 1u);
@@ -266,7 +245,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
     MOE_PROFILE_CAPTURE_VC_COUNTER(profile);
     MOE_PROFILE_RESOURCE_END(profile);
     MOE_INDIV_PRINT(
-        "[INDIV_S4_BLOCK_DONE] C%u slot=%u eid=%u M=%u N=%u rc=%u\r\n",
+        "[INDIV_S4_PHASE_DONE] C%u slot=%u eid=%u M=%u N=%u rc=%u\r\n",
         snrt_cluster_idx(), MOE_DYN_CTRL_SLOT_ID(cfg->ctrl), cfg->expert_id,
         m_tiles, call->N, BINGO_RET_SUCC);
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_DOWN_FULL_END);

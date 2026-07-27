@@ -171,6 +171,51 @@ static inline void __moe_bank_configure_mode1(
     moe_set_dual_versacore_rescale1(0, rscl_mult, 0, rscl_shift);
 }
 
+static inline void __moe_bank_configure_mode1_phase(
+    uint32_t A_addr, uint32_t B0_addr, uint32_t B1_addr,
+    uint32_t D0_addr, uint32_t D1_addr,
+    uint32_t K, uint32_t N, uint32_t array_shape,
+    uint32_t phase_blocks, uint32_t B_phase_stride,
+    uint32_t D_phase_stride, uint32_t rscl_mult, uint32_t rscl_shift)
+{
+    uint32_t meshRow = __moe_dyn_shape_m(array_shape);
+    uint32_t meshCol = __moe_dyn_meshcol(array_shape);
+    uint32_t panel_span = (K / 4u) * MOE_BANK_TCDM_ROW_BYTES;
+    int32_t Asl[2] = {8, 16};
+    int32_t Atb[6] = {
+        (int32_t)K, (int32_t)N, (int32_t)phase_blocks, 1, 1, 1};
+    int32_t Ats[6] = {MOE_BANK_TCDM_ROW_BYTES, 0, 0, 0, 0, 0};
+    int32_t Bsl[2] = {8, (int32_t)panel_span};
+    int32_t Btb[4] = {
+        4, (int32_t)(K / 4u), (int32_t)N, (int32_t)phase_blocks};
+    int32_t Bts[4] = {
+        16, MOE_BANK_TCDM_ROW_BYTES,
+        (int32_t)((1u << array_shape) * panel_span),
+        (int32_t)B_phase_stride};
+    int32_t Dsl[1] = {8};
+    int32_t Dtb[4] = {
+        (int32_t)(meshCol / 4u), (int32_t)meshRow,
+        (int32_t)N, (int32_t)phase_blocks};
+    int32_t Dts[4] = {
+        MOE_BANK_TCDM_ROW_BYTES, 8,
+        (int32_t)((meshCol / 4u) * MOE_BANK_TCDM_ROW_BYTES),
+        (int32_t)D_phase_stride};
+    int32_t chan_a[1] = {(int32_t)MOE_DUAL_VC_CHAN_EN_A(array_shape)};
+    int32_t chan_b[1] = {(int32_t)MOE_DUAL_VC_CHAN_EN_B(array_shape)};
+    int32_t chan_d[1] = {1};
+    moe_set_dual_versacore_streamer_csr(
+        A_addr, Asl, Atb, Ats, 0, chan_a,
+        B0_addr, Bsl, Btb, Bts, 0, chan_b,
+        B1_addr, Bsl, Btb, Bts, 0, chan_b,
+        D0_addr, Dsl, Dtb, Dts, 0, chan_d,
+        D1_addr, Dsl, Dtb, Dts, 0, chan_d);
+    moe_set_dual_versacore_mode(1u);
+    moe_set_dual_versacore_csr(
+        1u, K, N * phase_blocks, 0u, array_shape, 0u);
+    moe_set_dual_versacore_rescale0(0, rscl_mult, 0, rscl_shift);
+    moe_set_dual_versacore_rescale1(0, rscl_mult, 0, rscl_shift);
+}
+
 static inline uint32_t __moe_bank_weight_block_addr(
     uint32_t ping_base, uint32_t block, uint32_t payload_bytes);
 
@@ -277,6 +322,42 @@ static inline uint32_t __moe_prepare_s3_csr(
     return 1u;
 }
 
+static inline void __moe_configure_s4_phase(
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    uint32_t token, uint32_t phase)
+{
+    const __snax_bingo_moe_dyn_s4_call_args_t *call = &cfg->s4_call;
+    uint32_t n_tiles = __moe_dyn_stage_block_n(
+        call->N, st->s3_block_count);
+    uint32_t phase_blocks = __moe_s4_blocks_in_phase(
+        st->s3_block_count, phase);
+    uint32_t b_phase_stride = st->indiv_down_B_block_stride *
+        (MOE_BANK_TCDM_ROW_BYTES / MOE_BANK_WEIGHT_ROW_BYTES);
+    uint32_t d_phase_stride =
+        2u * (st->indiv_down_N_per_block / 4u) *
+        MOE_BANK_TCDM_ROW_BYTES;
+
+    __moe_bank_configure_mode1_phase(
+        __moe_bank_mode0_output_addr(
+            __moe_dyn_intermediate_base(cfg, st), token, 0u,
+            st->indiv_N_per_block, st->s1_block_count),
+        __moe_bank_down_weight_block_addr(
+            st->l1_b_down_addr, phase, st->indiv_down_B_block_stride),
+        __moe_bank_down_weight_block_addr(
+            st->l1_b_down_addr + 64u, phase,
+            st->indiv_down_B_block_stride),
+        __moe_bank_mode1_output_addr(
+            __moe_dyn_output_base(cfg, st), token, phase,
+            st->indiv_down_N_per_block, st->s3_block_count),
+        __moe_bank_mode1_output_addr(
+            __moe_dyn_output_base(cfg, st) + 64u, token, phase,
+            st->indiv_down_N_per_block, st->s3_block_count),
+        st->indiv_down_K1, n_tiles, call->array_shape, phase_blocks,
+        b_phase_stride, d_phase_stride,
+        st->rescale_mult, st->rescale_shift);
+}
+
 static inline uint32_t __moe_prepare_s4_csr(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
@@ -290,8 +371,14 @@ static inline uint32_t __moe_prepare_s4_csr(
     uint32_t n_tiles =
         __moe_dyn_stage_block_n(call->N, st->s3_block_count);
     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_START);
-    uint32_t block = s4_csr_layout == MOE_S4_CSR_LAYOUT_BLOCK_SYNC ?
+    uint32_t block = s4_csr_layout != MOE_S4_CSR_LAYOUT_SEQUENTIAL ?
         __moe_s4_block_initial_phase(st) : 0u;
+    if (s4_csr_layout == MOE_S4_CSR_LAYOUT_PHASE_BATCHED) {
+        __moe_configure_s4_phase(cfg, st, token, block);
+        BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
+        __moe_csr_publish_prepared(blk, MOE_CSR_PREPARED_S4);
+        return 1u;
+    }
     __moe_bank_configure_mode1(
         __moe_bank_mode0_output_addr(
             __moe_dyn_intermediate_base(cfg, st), token, 0u,

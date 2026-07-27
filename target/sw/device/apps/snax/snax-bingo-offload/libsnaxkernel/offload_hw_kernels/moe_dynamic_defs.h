@@ -20,6 +20,7 @@
 
 #define MOE_S4_CSR_LAYOUT_SEQUENTIAL 0u
 #define MOE_S4_CSR_LAYOUT_BLOCK_SYNC 1u
+#define MOE_S4_CSR_LAYOUT_PHASE_BATCHED 2u
 
 typedef struct __attribute__((aligned(8))) {
     uint64_t gate_src_base;

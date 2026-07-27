@@ -218,7 +218,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_config_s3_block0(void *
     if (__moe_dyn_slot_active_this_round(cfg, st) &&
         cfg->s3_call[0].valid != 0u) {
         __moe_configure_s3_block0(
-            blk, cfg, st, MOE_S4_CSR_LAYOUT_BLOCK_SYNC);
+            blk, cfg, st, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
     }
     return BINGO_RET_SUCC;
 }
@@ -257,7 +257,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s3_stage(void *
     for (uint32_t n = 0u; n < st->s3_block_count; n++) {
         __moe_pipeline_wait(&sync->prefetch_done, n + 1u);
         __moe_run_s3_block(
-            blk, cfg, st, n, 0u, MOE_S4_CSR_LAYOUT_BLOCK_SYNC);
+            blk, cfg, st, n, 0u, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
         __moe_pipeline_publish(&sync->compute_done, n + 1u);
     }
     return BINGO_RET_SUCC;
