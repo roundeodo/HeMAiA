@@ -120,6 +120,7 @@ def derive_common_workload_params(config: dict) -> dict:
         )
     )
     num_experts = int(config["num_indiv_experts"])
+    num_weight_backings = int(config["num_indiv_weight_backings"])
     down_mesh_col = 2 * int(mesh_col)
     if total_tokens <= 0:
         raise ValueError("total_tokens must be positive")
@@ -133,6 +134,16 @@ def derive_common_workload_params(config: dict) -> dict:
         raise ValueError("intermediate_size must be divisible by S0 tileSize")
     if num_experts <= 0 or num_experts % (2 * int(mesh_col)) != 0:
         raise ValueError("num_indiv_experts must be divisible by 2*S0 meshCol")
+    if num_weight_backings <= 0 or num_weight_backings > num_experts:
+        raise ValueError(
+            "num_indiv_weight_backings must be in [1, num_indiv_experts]"
+        )
+    if num_weight_backings & (num_weight_backings - 1):
+        raise ValueError("num_indiv_weight_backings must be a power of two")
+    if num_experts % num_weight_backings != 0:
+        raise ValueError(
+            "num_indiv_experts must be divisible by num_indiv_weight_backings"
+        )
     if s1_block_count <= 0 or s3_block_count <= 0:
         raise ValueError("S1/S3 block counts must be positive")
     if s1_block_count > MOE_MAX_BLOCKS or s3_block_count > MOE_MAX_BLOCKS:
@@ -162,12 +173,16 @@ def derive_common_workload_params(config: dict) -> dict:
         "A_tileSize": int(tile_size),
         "down_meshCol": down_mesh_col,
         "num_indiv_experts": num_experts,
+        "num_indiv_weight_backings": num_weight_backings,
+        "indiv_weight_backing_mask": num_weight_backings - 1,
         "num_shared_experts": int(config["num_shared_experts"]),
         "top_k": int(config["top_k"]),
         # A split candidate may emit one task to C2 and one task to C3 for the
         # same expert. The expert is removed after that commit, so each cluster
         # still receives at most one task per expert in one batch.
-        "dynamic_slot_count": num_experts,
+        "dynamic_slot_count": min(
+            num_experts, total_tokens * int(config["top_k"])
+        ),
         # CVA6 expands each RTL task into complete S1/S2/S3/S4 call records.
         # The 384B slot covers up to eight S1 and eight S3 blocks and is kept
         # 64B-aligned for the L3-to-L1 active-range transfer.

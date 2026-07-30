@@ -217,6 +217,7 @@ def emit_moe_data(**kw):
     sdN2, sdK2 = p["shared_down_N2"], p["shared_down_K2"]
     num_shared = p["num_shared_experts"]
     num_indiv_experts = p["num_indiv_experts"]
+    num_indiv_weight_backings = p["num_indiv_weight_backings"]
     M_total = p["M_total"]
     K_total = p["input_hidden"]
     K1_A = K_total // tileSize_A
@@ -308,11 +309,22 @@ def emit_moe_data(**kw):
     rB_stream = np.ascontiguousarray(rB_values.transpose(0, 2, 1, 4, 3))
     data_str += [format_vector_definition("uint8_t", "router_B", pack_int4(rB_stream))]
 
-    log("generating indiv_gate_B / up_B / down_B")
+    log(
+        "generating indiv_gate_B / up_B / down_B "
+        f"({num_indiv_weight_backings} physical backings for "
+        f"{num_indiv_experts} logical experts)"
+    )
     gB_phys = np.random.randint(
         -7,
         7,
-        size=(num_indiv_experts, iN2, iN1, iK2 * iK1, tileSize, meshCol),
+        size=(
+            num_indiv_weight_backings,
+            iN2,
+            iN1,
+            iK2 * iK1,
+            tileSize,
+            meshCol,
+        ),
         dtype=np.int8,
     )
     gB_packed = pack_int4(
@@ -329,7 +341,14 @@ def emit_moe_data(**kw):
     uB_phys = np.random.randint(
         -7,
         7,
-        size=(num_indiv_experts, iN2, iN1, iK2 * iK1, tileSize, meshCol),
+        size=(
+            num_indiv_weight_backings,
+            iN2,
+            iN1,
+            iK2 * iK1,
+            tileSize,
+            meshCol,
+        ),
         dtype=np.int8,
     )
     uB_packed = pack_int4(
@@ -346,7 +365,15 @@ def emit_moe_data(**kw):
     dB_phys = np.random.randint(
         -7,
         7,
-        size=(num_indiv_experts, 2, idN2, idN1, idK2 * idK1, tileSize, down_vc_meshCol),
+        size=(
+            num_indiv_weight_backings,
+            2,
+            idN2,
+            idN1,
+            idK2 * idK1,
+            tileSize,
+            down_vc_meshCol,
+        ),
         dtype=np.int8,
     )
     dB_packed = pack_int4(

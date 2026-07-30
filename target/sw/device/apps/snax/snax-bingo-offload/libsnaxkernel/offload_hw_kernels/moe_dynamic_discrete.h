@@ -80,8 +80,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_load_down_block(
     }
 
     uint32_t block_bytes = st->indiv_down_B_block_stride;
+    uint32_t weight_eid = MOE_DYN_DMA_EID(
+        cfg->dma_slot_eids, MOE_DYN_DMA_SLOT_S3);
     uint64_t down_src = st->indiv_down_B_l3 +
-        (uint64_t)cfg->expert_id * st->indiv_down_B_expert_stride;
+        (uint64_t)weight_eid * st->indiv_down_B_expert_stride;
     __moe_transfer_s3_block(
         blk, cfg, st, blk->block_idx, down_src, block_bytes,
         st->s3_block_count, MOE_DYN_CTRL_DMA_S3(ctrl));
@@ -173,14 +175,14 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dynamic_expert_prefetch_s4_next
         return BINGO_RET_SUCC;
     }
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_START);
-    uint32_t expert_id = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
+    uint32_t weight_eid = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
     uint32_t weight_bytes = st->indiv_B_expert_stride;
     uint32_t dma_binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
     MOE_PROFILE_RESOURCE_BEGIN(profile);
     uint64_t gate_src = st->indiv_gate_B_l3 +
-        (uint64_t)expert_id * st->indiv_B_expert_stride;
+        (uint64_t)weight_eid * st->indiv_B_expert_stride;
     uint64_t up_src = st->indiv_up_B_l3 +
-        (uint64_t)expert_id * st->indiv_B_expert_stride;
+        (uint64_t)weight_eid * st->indiv_B_expert_stride;
     uint32_t store_prepared_early = 0u;
     for (uint32_t n = 0u; n < st->s1_block_count; n++) {
         uint32_t src_offset = n * st->indiv_B_block_stride;

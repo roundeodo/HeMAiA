@@ -149,10 +149,22 @@ def print_report(
         for name, count, last, total in phases:
             print(f"  {name:16s} count={count:3d} last={last:10d} total={total:10d}")
 
+    # Inactive static slots commit task metadata as zero. Grouping those records
+    # by the encoded slot would fold every inactive node into C2/C3 slot 0 and
+    # incorrectly extend the active slot and cluster windows to the end of the
+    # whole static DFG.
+    active_records = [record for record in records if record["ntokens"] > 0]
+    inactive_records = len(records) - len(active_records)
+    if inactive_records:
+        print(
+            f"\nINACTIVE STATIC RECORDS ignored={inactive_records} "
+            f"active={len(active_records)}"
+        )
+
     slots: dict[tuple[int, int], list[dict[str, int]]] = defaultdict(list)
     clusters: dict[int, list[dict[str, int]]] = defaultdict(list)
     resources: dict[tuple[int, str], list[tuple[int, int]]] = defaultdict(list)
-    for record in records:
+    for record in active_records:
         slots[(record["cluster"], record["slot"])].append(record)
         clusters[record["cluster"]].append(record)
         resource = record["resource"]
@@ -185,9 +197,8 @@ def print_report(
             f"vc_hw={vc_hw:9d} peer_wait={wait:7d} bytes={dma_bytes}"
         )
 
-    active_slots = {
-        key: group for key, group in slots.items() if max(r["ntokens"] for r in group) > 0
-    }
+    active_slots = slots
+    mac_per_pair = 3 * hidden_size * intermediate_size
     active_clusters = sorted({key[0] for key in active_slots})
     if active_slots and active_clusters:
         first_slot_start = min(
@@ -203,7 +214,6 @@ def print_report(
             max(record["ntokens"] for record in group)
             for group in active_slots.values()
         )
-        mac_per_pair = 3 * hidden_size * intermediate_size
         useful_mac = routed_token_expert_pairs * mac_per_pair
         total_peak = individual_cluster_count * peak_mac_per_cluster_cc
         ideal_cycles = useful_mac / total_peak
@@ -238,9 +248,43 @@ def print_report(
         group = clusters[cluster]
         start, end = min(r["start"] for r in group), max(r["end"] for r in group)
         cluster_windows[cluster] = (start, end)
+        cluster_slot_ids = sorted({r["slot"] for r in group})
+        routed_pairs = sum(
+            max(r["ntokens"] for r in group if r["slot"] == slot)
+            for slot in cluster_slot_ids
+        )
+        ideal_cycles = routed_pairs * mac_per_pair / peak_mac_per_cluster_cc
+        window = delta(end, start)
+        efficiency = 100.0 * ideal_cycles / window if window else 0.0
         print(
-            f"  C{cluster} slots={len({r['slot'] for r in group}):2d} "
+            f"  C{cluster} slots={len(cluster_slot_ids):2d} pairs={routed_pairs:3d} "
             f"records={len(group):3d} start={start} end={end} window={delta(end, start)}"
+            f" ideal={ideal_cycles:.0f} efficiency={efficiency:.2f}%"
+        )
+
+    print("\nINTER-SLOT GAPS")
+    for cluster in sorted(clusters):
+        group = clusters[cluster]
+        windows = []
+        for slot in sorted({r["slot"] for r in group}):
+            slot_group = [r for r in group if r["slot"] == slot]
+            windows.append(
+                (
+                    min(r["start"] for r in slot_group),
+                    max(r["end"] for r in slot_group),
+                )
+            )
+        slot_window_sum = sum(delta(end, start) for start, end in windows)
+        inter_slot_gap = sum(
+            max(0, windows[idx][0] - windows[idx - 1][1])
+            for idx in range(1, len(windows))
+        )
+        cluster_start, cluster_end = cluster_windows[cluster]
+        cluster_window = delta(cluster_end, cluster_start)
+        gap_share = 100.0 * inter_slot_gap / cluster_window if cluster_window else 0.0
+        print(
+            f"  C{cluster} slot_windows={slot_window_sum:9d} "
+            f"inter_slot_gap={inter_slot_gap:9d} gap_share={gap_share:6.2f}%"
         )
 
     print("\nRESOURCE UTILIZATION IN CLUSTER WINDOW")

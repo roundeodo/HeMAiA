@@ -268,12 +268,12 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s4(void *arg)
     }
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S4_START);
-    uint32_t expert_id = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
+    uint32_t weight_eid = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
     uint32_t weight_bytes = st->indiv_B_expert_stride;
     uint64_t gate_src = st->indiv_gate_B_l3 +
-        (uint64_t)expert_id * weight_bytes;
+        (uint64_t)weight_eid * weight_bytes;
     uint64_t up_src = st->indiv_up_B_l3 +
-        (uint64_t)expert_id * weight_bytes;
+        (uint64_t)weight_eid * weight_bytes;
 
     /* S3 load may finish two blocks before S3 compute. Wait until the
      * penultimate S3 block releases the phase selected for the first S4 DMA;

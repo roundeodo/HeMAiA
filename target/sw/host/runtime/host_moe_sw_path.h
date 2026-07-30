@@ -3,6 +3,16 @@
 // Pure-software scheduling and CVA6-side complete call-record generation. This
 // file is not included in a MOE_ENABLE_HW_SCHEDULER build.
 
+#ifndef MOE_HW_WEIGHT_BACKING_MASK
+#error "pure-SW lowering requires MOE_HW_WEIGHT_BACKING_MASK"
+#endif
+
+static inline __attribute__((always_inline)) uint32_t
+__host_moe_weight_backing_id(uint32_t logical_eid)
+{
+    return logical_eid & (uint32_t)MOE_HW_WEIGHT_BACKING_MASK;
+}
+
 static inline int __host_moe_dma_slot_index(moe_dma_op_kind_t kind)
 {
     switch (kind) {
@@ -243,7 +253,8 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
         dst_arg->dma_slot_vd |=
             (1u | ((uint32_t)op->dma << 1u)) << (slot * 3u);
         dst_arg->dma_slot_eids |=
-            ((uint32_t)op->expert_id & 0x3fu) << (slot * 6u);
+            (__host_moe_weight_backing_id((uint32_t)op->expert_id) & 0x3fu) <<
+            (slot * 6u);
     }
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_EXEC_DMA_FILL_END);
 

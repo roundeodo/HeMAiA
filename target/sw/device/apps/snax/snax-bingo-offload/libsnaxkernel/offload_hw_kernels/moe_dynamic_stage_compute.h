@@ -216,6 +216,8 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
                         cfg, st, token_start, next_phase);
                     BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_CFG_END);
                 }
+            } else {
+                (void)__moe_prepare_next_slot_s2_csr(blk, cfg, st);
             }
 
             moe_wait_dual_vc_and_streamer();

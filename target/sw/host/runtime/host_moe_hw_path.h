@@ -16,6 +16,16 @@ typedef struct {
     int32_t final_cam[2];
 } __host_moe_lower_state_t;
 
+#ifndef MOE_HW_WEIGHT_BACKING_MASK
+#error "pure-HW lowering requires MOE_HW_WEIGHT_BACKING_MASK"
+#endif
+
+static inline __attribute__((always_inline)) uint32_t
+__host_moe_weight_backing_id(uint32_t logical_eid)
+{
+    return logical_eid & (uint32_t)MOE_HW_WEIGHT_BACKING_MASK;
+}
+
 static inline __attribute__((always_inline)) void
 __host_moe_lower_task_word_to_slot(
     uint64_t task_word,
@@ -55,6 +65,7 @@ __host_moe_lower_task_word_to_slot(
     uint32_t expert_id =
         (uint32_t)((task_word >> MOE_SCHED_TASK_WORD_EID_LSB) &
                    MOE_SCHED_TASK_WORD_EID_MASK);
+    uint32_t weight_eid = __host_moe_weight_backing_id(expert_id);
     uint32_t ci =
         (uint32_t)((ctrl >> MOE_SCHED_TASK_CTRL_CLUSTER_LSB) & 0x1u);
     uint32_t has_s2pf =
@@ -73,6 +84,11 @@ __host_moe_lower_task_word_to_slot(
     uint32_t s4pf_target_eid =
         (s4pf_desc >> MOE_SCHED_S4PF_DESC_TARGET_EID_LSB) &
         (uint32_t)MOE_SCHED_S4PF_DESC_TARGET_EID_MASK;
+    uint32_t s4pf_weight_eid =
+        __host_moe_weight_backing_id(s4pf_target_eid);
+    uint32_t s4pf_op =
+        (s4pf_desc >> MOE_SCHED_S4PF_DESC_OP_LSB) &
+        (uint32_t)MOE_SCHED_S4PF_DESC_OP_MASK;
     uint32_t skip_s2 = (m_s2_exec == 0u) ? 1u : 0u;
     uint32_t skip_s4 = (m_s4_exec == 0u) ? 1u : 0u;
     uint32_t single_dma = (ci == 0u) ?
@@ -95,8 +111,7 @@ __host_moe_lower_task_word_to_slot(
         ((local_slot & 0x3fu) << 14u);
     __snax_bingo_kernel_moe_dynamic_expert_args_t *dst_arg;
 
-    uint32_t s4pf_valid =
-        (s4pf_desc >> MOE_SCHED_S4PF_DESC_VALID_LSB) & 1u;
+    uint32_t s4pf_valid = s4pf_op != MOE_SCHED_S4PF_DESC_OP_NONE;
 
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_start(MOE_HOST_TIMING_HW_LOWER);
@@ -187,28 +202,29 @@ __host_moe_lower_task_word_to_slot(
             ((uint32_t)1u | (dma_s1 << 1u)) <<
             ((uint32_t)MOE_TASK_DMA_SLOT_S1 * 3u);
         dma_slot_eids |=
-            (expert_id & 0x3fu) << ((uint32_t)MOE_TASK_DMA_SLOT_S1 * 6u);
+            (weight_eid & 0x3fu) << ((uint32_t)MOE_TASK_DMA_SLOT_S1 * 6u);
     }
     if (skip_s3 == 0u || has_s2pf != 0u) {
         uint32_t slot = (has_s2pf != 0u) ?
             MOE_TASK_DMA_SLOT_S2_PREFETCH : MOE_TASK_DMA_SLOT_S3;
         uint32_t dma_s3_for_slot = (has_s2pf != 0u) ?
-            ((shape_s3 == 2u) ? (uint32_t)MOE_DMA_BOTH : single_dma) :
-            dma_s3;
+            single_dma : dma_s3;
         dma_slot_vd |=
             ((uint32_t)1u | (dma_s3_for_slot << 1u)) << (slot * 3u);
-        dma_slot_eids |= (expert_id & 0x3fu) << (slot * 6u);
+        dma_slot_eids |= (weight_eid & 0x3fu) << (slot * 6u);
     }
 #if MOE_MCYCLE_DETAIL
     __moe_host_timing_start(MOE_HOST_TIMING_LOWER_S4PF);
 #endif
-    if ((s4pf_desc & (1u << MOE_SCHED_S4PF_DESC_VALID_LSB)) != 0u &&
-        (s4pf_desc & (1u << MOE_SCHED_S4PF_DESC_NO_COPY_LSB)) == 0u) {
+    if (s4pf_op == MOE_SCHED_S4PF_DESC_OP_SINGLE ||
+        s4pf_op == MOE_SCHED_S4PF_DESC_OP_BOTH) {
+        uint32_t s4pf_dma = (s4pf_op == MOE_SCHED_S4PF_DESC_OP_BOTH) ?
+            (uint32_t)MOE_DMA_BOTH : single_dma;
         dma_slot_vd |=
-            ((uint32_t)1u | (single_dma << 1u)) <<
+            ((uint32_t)1u | (s4pf_dma << 1u)) <<
             ((uint32_t)MOE_TASK_DMA_SLOT_S4_PREFETCH * 3u);
         dma_slot_eids |=
-            (s4pf_target_eid & 0x3fu) <<
+            (s4pf_weight_eid & 0x3fu) <<
             ((uint32_t)MOE_TASK_DMA_SLOT_S4_PREFETCH * 6u);
     }
     dst_arg->dma_slot_word = MOE_PACK_U32_PAIR(dma_slot_vd, dma_slot_eids);
@@ -226,13 +242,11 @@ __host_moe_lower_task_word_to_slot(
     printf_safe(
         "[INDIV_PLAN] C%u slot=%u eid=%u start=%u ntok=%u "
         "shape_s1=%u shape_s3=%u skip=%u%u%u%u s2pf=%u "
-        "s4pf=%u/%u/e%u word=0x%08x_%08x\r\n",
+        "s4pf_op=%u/e%u word=0x%08x_%08x\r\n",
         ci + 2u, local_slot, expert_id, token_ref_start, ntok_u,
         shape_s1, shape_s3, skip_s1, skip_s2, skip_s3, skip_s4,
         has_s2pf,
-        (s4pf_desc >> MOE_SCHED_S4PF_DESC_VALID_LSB) & 1u,
-        (s4pf_desc >> MOE_SCHED_S4PF_DESC_NO_COPY_LSB) & 1u,
-        s4pf_target_eid, (uint32_t)(task_word >> 32u),
+        s4pf_op, s4pf_target_eid, (uint32_t)(task_word >> 32u),
         (uint32_t)task_word);
 #endif
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_HW_LOWER_END);

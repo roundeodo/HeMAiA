@@ -96,7 +96,7 @@ def generate_expert_weights(rng: np.random.Generator, p: dict, prefix: str):
     return lines, gate_matrix, up_matrix, down_matrix
 
 
-def generate_slot0_golden(
+def generate_slot_golden(
     tokens: np.ndarray,
     gate_matrix: np.ndarray,
     up_matrix: np.ndarray,
@@ -147,19 +147,30 @@ def emit_header(config: dict) -> str:
             alignment=128,
         ),
     ]
-    for prefix in ("c1",):
+    for prefix in ("c0", "c1"):
         weight_lines, gate_matrix, up_matrix, down_matrix = generate_expert_weights(
             rng, p, f"moe_test_{prefix}"
         )
         lines += weight_lines
-        slot0_golden = generate_slot0_golden(
+        slot0_golden = generate_slot_golden(
             token_values[slot0_refs], gate_matrix, up_matrix, down_matrix
+        )
+        slot1_golden = generate_slot_golden(
+            token_values[slot1_refs], gate_matrix, up_matrix, down_matrix
         )
         lines.append(
             format_vector_definition(
                 "int16_t",
                 f"moe_test_{prefix}_slot0_golden",
                 slot0_golden.reshape(-1),
+                alignment=128,
+            )
+        )
+        lines.append(
+            format_vector_definition(
+                "int16_t",
+                f"moe_test_{prefix}_slot1_golden",
+                slot1_golden.reshape(-1),
                 alignment=128,
             )
         )

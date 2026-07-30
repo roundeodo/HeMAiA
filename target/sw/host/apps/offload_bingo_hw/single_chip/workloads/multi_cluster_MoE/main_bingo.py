@@ -118,7 +118,7 @@ ENABLE_PHASE3_PHASE4 = True
 # runtime_state 同步和 L3->C2/C3 L1 dynamic args flush；只是不触发 C2/C3 上的
 # GEMM/DMA slot 任务。
 # 设为 True 时恢复完整 individual expert 执行链（默认完整 workload）。
-ENABLE_INDIVIDUAL_SLOTS = False
+ENABLE_INDIVIDUAL_SLOTS = True
 
 
 # Use the canonical ABI mirror from libbingo. request/schedule buffers are now
@@ -172,6 +172,11 @@ def addr_offset(handle, offset: int):
     if isinstance(handle, str):
         return f"({handle}) + {offset}"
     return f"{handle.get_c_var_name()} + {offset}"
+
+
+def weight_backing_eid(params, logical_eid: int) -> int:
+    """Map a logical expert ID to its FPGA-resident weight backing."""
+    return int(logical_eid) & int(params["indiv_weight_backing_mask"])
 
 
 def enforce_in_order_completion_per_core(bingo_dfg: BingoDFG) -> None:
@@ -266,6 +271,8 @@ def write_moe_config_header(header_path: str, params) -> None:
         f"#define MOE_HW_DOWN_HALF_ROW_BYTES {params['A_token_bytes'] // 2}u",
         f"#define MOE_HW_S1_N_BASE {params['indiv_N1'] * params['meshCol']}u",
         f"#define MOE_HW_S3_N_BASE {params['indiv_down_N1'] * params['meshCol']}u",
+        f"#define MOE_HW_WEIGHT_BACKING_COUNT {params['num_indiv_weight_backings']}u",
+        f"#define MOE_HW_WEIGHT_BACKING_MASK {params['indiv_weight_backing_mask']}u",
         "",
     ]
     with open(header_path, "w", encoding="utf-8") as f:
@@ -576,6 +583,8 @@ def create_dfg(params, mh):
     E = params["num_indiv_experts"]
     initial_c2_eid = 0
     initial_c3_eid = E - 1
+    initial_c2_weight_eid = weight_backing_eid(params, initial_c2_eid)
+    initial_c3_weight_eid = weight_backing_eid(params, initial_c3_eid)
     N2 = params["indiv_N2"]
     N2d = params["indiv_down_N2"]
 
@@ -701,11 +710,11 @@ def create_dfg(params, mh):
         kernel_args=SnaxBingoKernelMoeStageWeightPair2dArgs(
             src0_addr=addr_offset(
                 mh["L3_Sym_Indiv_Gate_B"],
-                initial_c2_eid * params["indiv_B_expert_stride"],
+                initial_c2_weight_eid * params["indiv_B_expert_stride"],
             ),
             src1_addr=addr_offset(
                 mh["L3_Sym_Indiv_Up_B"],
-                initial_c2_eid * params["indiv_B_expert_stride"],
+                initial_c2_weight_eid * params["indiv_B_expert_stride"],
             ),
             dst0_addr=mh["C2_indiv_L1_B_gate"],
             dst1_addr=mh["C2_indiv_L1_B_up"],
@@ -754,11 +763,11 @@ def create_dfg(params, mh):
         kernel_args=SnaxBingoKernelMoeStageWeightPair2dArgs(
             src0_addr=addr_offset(
                 mh["L3_Sym_Indiv_Gate_B"],
-                initial_c3_eid * params["indiv_B_expert_stride"],
+                initial_c3_weight_eid * params["indiv_B_expert_stride"],
             ),
             src1_addr=addr_offset(
                 mh["L3_Sym_Indiv_Up_B"],
-                initial_c3_eid * params["indiv_B_expert_stride"],
+                initial_c3_weight_eid * params["indiv_B_expert_stride"],
             ),
             dst0_addr=mh["C3_indiv_L1_B_gate"],
             dst1_addr=mh["C3_indiv_L1_B_up"],
@@ -891,11 +900,11 @@ def create_dfg(params, mh):
         kernel_args=SnaxBingoKernelMoeStageWeightPair2dArgs(
             src0_addr=addr_offset(
                 mh["L3_Sym_Indiv_Down_B"],
-                initial_c2_eid * params["indiv_down_B_expert_stride"],
+                initial_c2_weight_eid * params["indiv_down_B_expert_stride"],
             ),
             src1_addr=addr_offset(
                 mh["L3_Sym_Indiv_Down_B"],
-                initial_c2_eid * params["indiv_down_B_expert_stride"]
+                initial_c2_weight_eid * params["indiv_down_B_expert_stride"]
                 + params["s3_block_count"] * params["indiv_down_B_block_stride"],
             ),
             dst0_addr=mh["C2_indiv_L1_B_down"],
@@ -917,11 +926,11 @@ def create_dfg(params, mh):
         kernel_args=SnaxBingoKernelMoeStageWeightPair2dArgs(
             src0_addr=addr_offset(
                 mh["L3_Sym_Indiv_Down_B"],
-                initial_c3_eid * params["indiv_down_B_expert_stride"],
+                initial_c3_weight_eid * params["indiv_down_B_expert_stride"],
             ),
             src1_addr=addr_offset(
                 mh["L3_Sym_Indiv_Down_B"],
-                initial_c3_eid * params["indiv_down_B_expert_stride"]
+                initial_c3_weight_eid * params["indiv_down_B_expert_stride"]
                 + params["s3_block_count"] * params["indiv_down_B_block_stride"],
             ),
             dst0_addr=mh["C3_indiv_L1_B_down"],
@@ -1344,7 +1353,7 @@ def main():
         extra_include_header_list=[data_header_name, "moe_runtime_timing.h"],
         post_execute_code=["__host_bingo_moe_print_phase_timing();"],
         pre_host_include_header_list=[config_header_name],
-        profile_kernel_prefix="__snax_bingo_kernel_moe_dynamic_expert_",
+        profile_kernel_prefix="__snax_bingo_kernel_moe_dyn_opt_",
         profile_condition="MOE_RUNTIME_TIMING",
         profile_report_function="__host_bingo_moe_print_runtime_timing",
     )

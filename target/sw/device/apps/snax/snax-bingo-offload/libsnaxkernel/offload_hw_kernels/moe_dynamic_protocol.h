@@ -32,6 +32,8 @@
  * ──────────────────────────────────────────────────────────────────────────── */
 #define MOE_DYN_VD_VALID(vd, s)  (((vd) >> ((s)*3u)) & 1u)
 #define MOE_DYN_VD_DMA(vd, s)    (((vd) >> ((s)*3u + 1u)) & 3u)
+// DMA slot IDs select physical weight backings. cfg->expert_id remains the
+// logical Router/scheduler/CAM identity used by token and output indexing.
 #define MOE_DYN_DMA_EID(eids, s) (((eids) >> ((s)*6u)) & 0x3fu)
 
 #define MOE_DYN_DMA_SLOT_S1          0u

@@ -48,6 +48,7 @@ def _build_discrete_slot_chain(
     """Build the original ABI-visible, one-node-per-block chain."""
     s1_loads = []
     s1_computes = []
+    s1_config = None
     for block in range(s1_block_count):
         block_args = make_block_args(block)
         load = add_node(
@@ -57,7 +58,7 @@ def _build_discrete_slot_chain(
             label(f"S1_LOAD_BLOCK_{block}"),
         )
         if block == 0:
-            config = add_node(
+            s1_config = add_node(
                 gemm_core_id,
                 OPTIMIZED_STAGE_KERNELS["s1_config"],
                 block_args,
@@ -76,8 +77,8 @@ def _build_discrete_slot_chain(
         )
         add_edge(input_ready, load)
         if block == 0:
-            add_edge(input_ready, config)
-            add_edge(config, compute)
+            add_edge(input_ready, s1_config)
+            add_edge(s1_config, compute)
         else:
             add_edge(s1_loads[block - 1], load)
             if block >= 2:
@@ -171,6 +172,7 @@ def _build_discrete_slot_chain(
     return {
         "store": store,
         "s1_load": s1_loads,
+        "s1_config": s1_config,
         "s1_compute": s1_computes,
         "s2_prefetch": s2_prefetch,
         "s2_compute": s2_compute,
@@ -276,6 +278,7 @@ def _build_optimized_slot_chain(
     return {
         "store": store,
         "s1_load": s1_load,
+        "s1_config": s1_config,
         "s1_compute": s1_compute,
         "s2_prefetch": s2_prefetch,
         "s2_compute": s2_compute,

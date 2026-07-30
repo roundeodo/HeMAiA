@@ -178,8 +178,10 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_load_s3_stage(void *arg
     uint32_t block_count = st->s3_block_count;
     uint32_t block_bytes = st->indiv_down_B_block_stride;
     uint32_t dma_binding = MOE_DYN_CTRL_DMA_S3(ctrl);
+    uint32_t weight_eid = MOE_DYN_DMA_EID(
+        cfg->dma_slot_eids, MOE_DYN_DMA_SLOT_S3);
     uint64_t down_src = st->indiv_down_B_l3 +
-        (uint64_t)cfg->expert_id * st->indiv_down_B_expert_stride;
+        (uint64_t)weight_eid * st->indiv_down_B_expert_stride;
     for (uint32_t n = 0u; n < block_count; n++) {
         if (n == 1u) {
             __moe_pipeline_wait_cookie(

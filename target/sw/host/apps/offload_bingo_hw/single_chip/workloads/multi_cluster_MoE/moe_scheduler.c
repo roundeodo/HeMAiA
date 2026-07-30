@@ -134,10 +134,11 @@ static snap_t mk_snap(uint32_t start, uint8_t s1, uint8_t s3,
 /* Apply S2 down-prefetch; returns unchanged if it doesn't fit. */
 static snap_t apply_s2pf(snap_t sn, uint8_t s3, uint32_t ps)
 {
-    uint32_t pe=ps+kTd3[s3];
+    (void)s3;
+    uint32_t pe=ps+kTd3[0];
     if (sn.bw_s3==0u) return sn;
     if (ps<sn.dma1_end || pe>sn.s2_end) return sn;
-    sn.s2pf_start=(int32_t)ps; sn.s2pf_end=(int32_t)pe; sn.s2pf_bw=kAlloc[s3];
+    sn.s2pf_start=(int32_t)ps; sn.s2pf_end=(int32_t)pe; sn.s2pf_bw=64u;
     sn.dma3_end=sn.s2_end; sn.s3_end=sn.s2_end; sn.s4_start=sn.s2_end; sn.bw_s3=0;
     sn.task_end=sn.s2_end+best_s4(sn.ntok);
     return sn;
@@ -212,7 +213,8 @@ typedef enum {
 
 static int s2pf_can_start(const snap_t *s, uint8_t s3, uint32_t ps)
 {
-    uint32_t dur = kTd3[s3];
+    (void)s3;
+    uint32_t dur = kTd3[0];
     return s->bw_s3>0u && ps>=s->dma1_end && ps+dur<=s->s2_end;
 }
 
@@ -826,6 +828,8 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
         uint8_t skip_s1=p->skip_s1?1u:0u;
         uint8_t skip_s3=p->skip_s3?1u:0u;
         uint8_t has_s2pf=p->has_s2pf?1u:0u;
+        moe_dma_binding_t single_dma = ci==0u ?
+            MOE_DMA_IDMA : MOE_DMA_XDMA;
 
         tk->cluster=p->cluster;
         tk->expert_id=p->expert_id;
@@ -833,8 +837,10 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
         tk->ntokens=p->ntokens;
         tk->shape_s1=p->shape_s1;
         tk->shape_s3=p->shape_s3;
-        tk->dma_s1=skip_s1?MOE_DMA_NONE:(kAlloc[p->shape_s1]>=128u?MOE_DMA_BOTH:MOE_DMA_IDMA);
-        tk->dma_s3=skip_s3?MOE_DMA_NONE:(kAlloc[p->shape_s3]>=128u?MOE_DMA_BOTH:MOE_DMA_XDMA);
+        tk->dma_s1=skip_s1?MOE_DMA_NONE:
+            (kAlloc[p->shape_s1]>=128u?MOE_DMA_BOTH:single_dma);
+        tk->dma_s3=skip_s3?MOE_DMA_NONE:
+            (kAlloc[p->shape_s3]>=128u?MOE_DMA_BOTH:single_dma);
         tk->skip_s1=skip_s1;
         tk->skip_s3=skip_s3;
 
@@ -861,7 +867,7 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
             op->task_idx=(uint16_t)out->n_tasks;
             op->expert_id=(int16_t)p->expert_id;
             op->kind=MOE_DMA_OP_S1;
-            op->dma=(kAlloc[p->shape_s1]>=128u)?MOE_DMA_BOTH:MOE_DMA_IDMA;
+            op->dma=(kAlloc[p->shape_s1]>=128u)?MOE_DMA_BOTH:single_dma;
         }
 
         if (!skip_s3 || has_s2pf){
@@ -869,7 +875,8 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
             moe_dma_op_t *op=&out->dma_ops[out->n_dma_ops++];
             op->task_idx=(uint16_t)out->n_tasks;
             op->expert_id=(int16_t)p->expert_id;
-            op->dma=(kAlloc[p->shape_s3]>=128u)?MOE_DMA_BOTH:MOE_DMA_XDMA;
+            op->dma=has_s2pf?single_dma:
+                ((kAlloc[p->shape_s3]>=128u)?MOE_DMA_BOTH:single_dma);
             op->kind=has_s2pf?MOE_DMA_OP_S2_PREFETCH:MOE_DMA_OP_S3;
         }
 
@@ -882,7 +889,7 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
             op->task_idx=(uint16_t)out->n_tasks;
             op->expert_id=-1;
             op->kind=MOE_DMA_OP_S4_PREFETCH;
-            op->dma=MOE_DMA_IDMA;
+            op->dma=single_dma;
         }
 
         out->n_tasks++;

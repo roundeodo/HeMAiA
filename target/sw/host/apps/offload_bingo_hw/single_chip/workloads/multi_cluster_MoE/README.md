@@ -56,6 +56,15 @@ Mode-0 W/V use banks 16..47 in the first 4 MiB; Mode-1 W2L/W2R use the same
 bank groups in the next 2 MiB. Mode-0 output uses banks 48..63 and Mode-1
 output uses banks 0..15. Every arena base is explicitly aligned to 512 bytes.
 
+For the FPGA performance workload, `num_indiv_experts` is the logical Router,
+scheduler and CAM namespace while `num_indiv_weight_backings` is the number of
+stored gate/up/down weight sets. A logical expert maps to a backing with
+`logical_eid & (num_indiv_weight_backings - 1)`. Only DMA weight-source IDs use
+the mapped value. Task IDs, CAM tags, token references and output offsets retain
+the logical ID, so two logical experts sharing one backing still cause a full
+weight reload when their logical CAM tags differ. The backing count is required
+to be a power of two to keep lowering to one mask operation.
+
 The bank-aware individual path uses `weight_chunk_cols` as its block-granularity
 input. The generator derives
 `s1_block_count=intermediate_size/weight_chunk_cols` and

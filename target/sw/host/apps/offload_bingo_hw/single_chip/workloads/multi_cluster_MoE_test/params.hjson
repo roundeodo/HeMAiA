@@ -1,7 +1,7 @@
 # Two-slot production-path test for the 2048 -> 1024 -> 2048 individual expert.
 {
     array_shape: 0
-    total_tokens: 7
+    total_tokens: 11
     hidden_size: 2048
     intermediate_size: 1024
     // Equal 256 KiB aggregate payloads for one DMA/VC pipeline phase.

@@ -55,11 +55,12 @@ static inline void __moe_initialize_slot_state(
 
     uint32_t ctrl = cfg->ctrl;
     if (MOE_DYN_CTRL_SKIP_S1(ctrl) == 0u) {
-        uint32_t expert_id = cfg->expert_id;
+        uint32_t weight_eid = MOE_DYN_DMA_EID(
+            cfg->dma_slot_eids, MOE_DYN_DMA_SLOT_S1);
         s1->gate_src_base = st->indiv_gate_B_l3 +
-            (uint64_t)expert_id * st->indiv_B_expert_stride;
+            (uint64_t)weight_eid * st->indiv_B_expert_stride;
         s1->up_src_base = st->indiv_up_B_l3 +
-            (uint64_t)expert_id * st->indiv_B_expert_stride;
+            (uint64_t)weight_eid * st->indiv_B_expert_stride;
         s1->gate_dst_base = st->l1_b_gate_addr;
         s1->up_dst_base = st->l1_b_up_addr;
         s1->block_bytes = st->indiv_B_block_stride;
@@ -70,9 +71,9 @@ static inline void __moe_initialize_slot_state(
 
     uint32_t pf_slot = MOE_DYN_DMA_SLOT_S2_PREFETCH;
     if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, pf_slot) != 0u) {
-        uint32_t pf_expert = MOE_DYN_DMA_EID(cfg->dma_slot_eids, pf_slot);
+        uint32_t pf_weight_eid = MOE_DYN_DMA_EID(cfg->dma_slot_eids, pf_slot);
         s2->down_src_base = st->indiv_down_B_l3 +
-            (uint64_t)pf_expert * st->indiv_down_B_expert_stride;
+            (uint64_t)pf_weight_eid * st->indiv_down_B_expert_stride;
         s2->down_dst_base = st->l1_b_down_addr;
         s2->half_bytes = st->down_half_weight_bytes;
         s2->block_bytes = st->indiv_down_B_block_stride;
@@ -84,7 +85,7 @@ static inline void __moe_initialize_slot_state(
         s2->transfer_count =
             (2u * st->s3_block_count + s2->transfers_per_step - 1u) /
             s2->transfers_per_step;
-        s2->reserved = pf_expert;
+        s2->reserved = pf_weight_eid;
         s2->valid = 1u;
         s2->sync_enabled = cfg->s2_call.valid != 0u;
     }
@@ -104,25 +105,59 @@ static inline void __moe_initialize_slot_if_needed(
     }
 }
 
-static inline void __moe_initialize_next_slot(
+static inline uint32_t __moe_next_slot_view(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
-    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    __snax_bingo_kernel_moe_dynamic_expert_block_args_t *next_blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t **next_cfg)
 {
     volatile uint32_t *state =
         (volatile uint32_t *)(uintptr_t)st->active_state_l1_addr;
     uint32_t active_idx = (MOE_DYN_CTRL_CLUSTER(cfg->ctrl) == 0u) ?
         MOE_DYN_RT_C2_ACTIVE_SLOTS : MOE_DYN_RT_C3_ACTIVE_SLOTS;
-    if (MOE_DYN_CTRL_SLOT_ID(cfg->ctrl) + 1u >= state[active_idx]) return;
+    if (MOE_DYN_CTRL_SLOT_ID(cfg->ctrl) + 1u >= state[active_idx]) return 0u;
 
-    __snax_bingo_kernel_moe_dynamic_expert_block_args_t next_blk = *blk;
-    next_blk.task_arg_addr += BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES;
-    next_blk.pipeline_ctrl_addr += MOE_PIPELINE_CTRL_SLOT_BYTES;
-    next_blk.block_idx = 0u;
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *next_cfg =
+    *next_blk = *blk;
+    next_blk->task_arg_addr += BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES;
+    next_blk->pipeline_ctrl_addr += MOE_PIPELINE_CTRL_SLOT_BYTES;
+    next_blk->block_idx = 0u;
+    *next_cfg =
         (const __snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
-        next_blk.task_arg_addr;
+        next_blk->task_arg_addr;
+    return 1u;
+}
+
+static inline void __moe_initialize_next_slot(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    __snax_bingo_kernel_moe_dynamic_expert_block_args_t next_blk;
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *next_cfg;
+    if (__moe_next_slot_view(blk, cfg, st, &next_blk, &next_cfg) == 0u) {
+        return;
+    }
     __moe_initialize_slot_if_needed(&next_blk, next_cfg, st);
+}
+
+static inline uint32_t __moe_prepare_next_slot_s2_csr(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    __snax_bingo_kernel_moe_dynamic_expert_block_args_t next_blk;
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *next_cfg;
+    if (__moe_next_slot_view(blk, cfg, st, &next_blk, &next_cfg) == 0u ||
+        MOE_DYN_CTRL_ACTIVE(next_cfg->ctrl) == 0u ||
+        MOE_DYN_CTRL_SKIP_S1(next_cfg->ctrl) == 0u) {
+        return 0u;
+    }
+
+    __moe_pipeline_wait_cookie(
+        &__moe_s1_dma_ctrl(&next_blk)->csr_prepared_reserved,
+        MOE_PIPELINE_INIT_COOKIE, 0u);
+    return __moe_prepare_s2_csr(&next_blk, next_cfg, st);
 }
 
 static inline void __moe_submit_token_gather(
