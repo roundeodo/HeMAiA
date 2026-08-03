@@ -86,6 +86,183 @@ patches addresses for later blocks. Load block `n >= 2` waits for compute block
 
 The production-slot mode is enabled by default in the workload Makefile.
 
+The `s2pf_both` profile reuses the default two-slot production handoff and its
+byte-exact checks. It changes only C0 slot0 S2PF from IDMA to `BOTH`; C1 slot0
+still has no S2PF, and both slot1 bindings remain unchanged. It retains the
+compact baseline input, two expert weight sets, and 68 KiB output per cluster.
+Every checked output byte is written by the two slots, so setup does not clear
+the output buffers before the device path starts.
+
+The fixed-order scheduler experiments are separate workload profiles. The new
+case-0 policy-0 workload is selected with `MOE_TEST_SCHEDULE=static_desc`.
+Case-0 policy-1 uses `MOE_TEST_SCHEDULE=dynamic_desc`.
+The earlier experiments remain available with `MOE_TEST_SCHEDULE=high_to_low` or
+`MOE_TEST_SCHEDULE=low_to_high` or `MOE_TEST_SCHEDULE=ends_inward`; the default
+remains `baseline`:
+
+```text
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=s2pf_both MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=s2pf_both MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=static_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=static_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=dynamic_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=dynamic_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=high_to_low
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=high_to_low
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=low_to_high
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=low_to_high
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=ends_inward
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=ends_inward
+```
+
+The `static_desc` profile is the first distribution's `STATIC_DESC` policy from
+`scheduler_showcase_fpga_workloads.json`. It uses the exported 70-token routing
+exactly. The global queue is high-to-low, but the generated runtime records have
+no physical-policy choices: every task uses S1=B and S3=B, C2 uses IDMA for both
+weight loads, C3 uses XDMA, and S2PF/S4PF are disabled. C2 receives
+E0,E3,E4,E5,E7,...,E41 and ends at tick 159; C3 receives
+E1,E2,E6,E8,...,E42 and ends at tick 162.
+
+Applying the established 3/4-tick DFG/API allowance to each cluster-local slot
+before taking the maximum gives:
+
+```text
+C2: 159 + 22 * 3/4 = 175.50 ticks
+C3: 162 + 21 * 3/4 = 177.75 ticks
+global lower bound = max(C2, C3) = 177.75 ticks
+```
+
+At 8192 cycles per focused-workload tick this is 1,456,128 cycles. The pure
+four-stage policy result is 162 ticks; 177.75 ticks is the FPGA DFG/API-adjusted
+structural reference. FPGA correctness and measured runtime still require the
+output checks and timing records from a completed run.
+
+The `dynamic_desc` profile uses the same exported distribution, token routing,
+descending issue order, and cluster assignment as `static_desc`, but preserves
+the policy's dynamic physical decisions. E0 and E1 use A/B with cluster-local
+S2PF. E1 preloads E2 S1 through XDMA, and E3 preloads E4 S1 through BOTH; E2
+and E4 therefore skip S1. E5 through E21 use B/B with BOTH S1 and BOTH S2PF.
+E22 uses C/C with BOTH S1 and S3. The remaining tail uses B/B with each
+cluster's local DMA lane. The 21 cross-cluster stage-level DMA release edges
+preserve the exported IDMA/XDMA operation order without adding a slot barrier.
+
+Both model streams finish at tick 159. Applying the same per-cluster DFG/API
+allowance gives:
+
+```text
+C2: 159 + 22 * 3/4 = 175.50 ticks
+C3: 159 + 21 * 3/4 = 174.75 ticks
+global lower bound = max(C2, C3) = 175.50 ticks
+```
+
+At 8192 cycles per focused-workload tick this is 1,437,696 cycles. The pure
+four-stage policy result is 159 ticks; 175.50 ticks is the FPGA DFG/API-adjusted
+structural reference.
+
+The high-to-low profile uses the exact 64-expert distribution
+`[22, 18, 14, 3x19, 2x8, 1x13, 0x21]`. The left-to-right issue order is split
+by replaying `fixed_orders.descending` from
+`scheduler_rtl_distilled_showcase.json`; it is not an even/odd static split.
+The first concurrent pair is E0(22) on C0 and E1(18) on C1. C1 then runs
+E2(14) at tick 27 while C0 runs E3(3) at tick 33. E0/E1/E2 use A/B with
+S2PF; E3 uses A/B with an ordinary S3-B path. E4 through E21 use B/B, and
+the special E22(2) also uses B/B. E23 waits
+for E22's S3 DMA release. E23 through E42 use C/C and form the serialized
+BOTH-DMA tail. This reference history does not
+use S4PF. Logical expert IDs remain
+distinct, but all 64 IDs map to the single physical synthetic weight backing.
+
+Both slot0 gathers wait for the same one-time setup release. After that point,
+each cluster advances from its own previous store. The E22-to-E42 tail adds
+only cross-cluster DMA-release edges from one S3 load to the next S1 load; it
+does not add a whole-slot barrier or delay the next task's compute-side CSR
+preconfiguration. The schedule manifest checks C0=163 and C1=160, hence a
+left-to-right makespan of 163 abstract scheduler ticks. With the focused
+2048x1024 dimensions, one abstract tick is 8192 cycles and the model makespan
+is 1,335,296 cycles.
+
+The low-to-high profile replays `ascending` from the FPGA showcase handoff for
+the same distribution and input data. C0 executes
+E41,E39,...,E3,E1 and the first E0 slice; C1 executes
+E42,E40,...,E4,E2 and the second E0 slice. Each cluster has 22 local slots.
+The final SPLIT gives C0 E0 token ranks 0 through 10 and C1 ranks 11 through
+21. The generated golden checks use those same disjoint ranges. E1 uses BOTH
+for S2 prefetch, E2 retains its explicit C/C xDMA-S1 and iDMA-S3 bindings, and
+the two E0 slices use their cluster-local single-DMA S2 prefetches. E0 starts
+only after both E1 and E2 have stored their outputs; there is no per-round
+global barrier elsewhere.
+
+The exported four-stage replay ends at C0=165 and C1=165, so its fixed-order
+model makespan is 165 ticks. For FPGA comparison, use the same structural/API
+allowance already used for high-to-low: 3/4 tick for every slot on the critical
+cluster-local stream. Therefore the theoretical reachable lower bound is
+
+```text
+165 + 22 * 3/4 = 181.5 ticks
+```
+
+This makes low-to-high 2.0 ticks, or 1.11%, above the corresponding 179.5-tick
+high-to-low bound. Under this focused FPGA workload's existing 8192-cycle tick,
+181.5 ticks is 1,486,848 cycles. This conversion deliberately does not use the
+handoff model's original 11,264-cycle tick. The values 165 and 181.5 are
+model-derived references; only an FPGA run with output checks and timing
+records can establish measured correctness and runtime.
+
+The ends-inward profile replays the handoff's `ends_inward` method. C0 executes
+E0,E41,E2 and then E4 through E21. C1 executes E42,E1,E40,E3 and then E39
+through E22. It contains 43 tasks with no SPLIT: C0 has 21 local slots and C1
+has 22. The early tasks preserve the exported nonuniform profiles: E41 is C/B
+with BOTH S1 and BOTH S2 prefetch; E42 and E40 use A/B with xDMA S1 and BOTH
+S3; E3 uses A/C with BOTH S1 and iDMA S3. Seven stage-level cross-cluster DMA
+release edges preserve the exported IDMA/XDMA order. They do not introduce a
+global slot barrier.
+
+The fixed four-stage replay reaches tick 58 after the early special tasks. C0
+then executes E4 through E21 as 18 six-tick tasks, while C1 executes E39 through
+E22 as 18 six-tick tasks. Both cluster streams therefore end at
+`58 + 18*6 = 166` ticks. Applying the same per-slot structural/API allowance
+separately gives:
+
+```text
+C0: 166 + 21 * 3/4 = 181.75 ticks
+C1: 166 + 22 * 3/4 = 182.50 ticks
+global lower bound = max(C0, C1) = 182.5 ticks
+```
+
+This is 1.0 tick above low-to-high's 181.5-tick bound and 3.0 ticks above
+high-to-low's 179.5-tick bound. At 8192 cycles per focused-workload tick, the
+ends-inward lower bound is 1,495,040 cycles. These remain model-derived
+references until an FPGA run passes both output checks and timing validation.
+
 ```text
 make -C target/sw clean
 make -C target/sw sw
@@ -103,24 +280,27 @@ make -C target/sim bingo-vis-traces
 
 ## FPGA Timing
 
-The test reuses the production workload's low-intrusion runtime timing path.
-With `MOE_RUNTIME_TIMING=1`, every active individual-expert kernel records its
-timing fields in the existing 64-byte Bingo task scratchpad. Device kernels do
-not print while the DFG is running. After the scheduler returns, CVA6 scans the
-records and prints the fixed-schema lines between `MOE_TIMING_BEGIN` and
-`MOE_TIMING_END`.
+The test reuses the production workload's runtime timing path.
+`MOE_RUNTIME_TIMING=1` records only the two cluster-local begin/end pairs for a
+low-overhead global time. `MOE_RUNTIME_TIMING=2` records every static DFG task,
+including skipped tasks, for slot/stage/task diagnosis. Device kernels do not
+print while the DFG is running. After the scheduler returns, CVA6 prints the
+schema-v3 records between `MOE_TIMING_BEGIN` and `MOE_TIMING_END`.
 
-Build the FPGA test image with runtime timing enabled and simulation-only trace
-markers disabled:
+Build the FPGA test image with low-overhead timing and simulation-only trace
+markers disabled. Substitute `MOE_RUNTIME_TIMING=2` in both commands when a
+full diagnostic capture is required:
 
 ```text
 make -C target/sw clean
 make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
   WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
   CFG_OVERRIDE=target/rtl/cfg/hemaia_4cluster_singlechip.hjson \
+  MOE_TEST_SCHEDULE=ends_inward \
   MOE_RUNTIME_TIMING=1 DEBUG_LEVEL=0 NODE_TIMING=0 PERF_TRACING=0
 make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
   WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=ends_inward \
   MOE_RUNTIME_TIMING=1 DEBUG_LEVEL=0 NODE_TIMING=0 PERF_TRACING=0
 make bootrom
 ```
@@ -130,7 +310,10 @@ model dimensions:
 
 ```text
 python3 target/sw/host/apps/offload_bingo_hw/single_chip/workloads/\
-multi_cluster_MoE/analyze_moe_runtime_timing.py /path/to/uart.log \
-  --params target/sw/host/apps/offload_bingo_hw/single_chip/workloads/\
-multi_cluster_MoE_test/params.hjson --details
+multi_cluster_MoE/analyze_moe_runtime_timing.py /path/to/uart.log --details
 ```
+
+The analyzer computes one wrap-safe local span per cluster and reports their
+maximum as global time. It never subtracts timestamps from different clusters.
+It prints active-slot S1/S2/S3/S4/store wall times and, with `--details`, every
+DFG task. It does not infer gaps or idle time from uncovered intervals.

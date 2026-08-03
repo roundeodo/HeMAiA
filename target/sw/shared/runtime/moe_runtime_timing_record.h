@@ -20,6 +20,10 @@ enum bingo_moe_runtime_timing_stage {
     MOE_PROFILE_STAGE_PREFETCH_S4,
     MOE_PROFILE_STAGE_COMPUTE_S4,
     MOE_PROFILE_STAGE_STORE,
+    MOE_PROFILE_STAGE_CONFIG_S1,
+    MOE_PROFILE_STAGE_CONFIG_S3,
+    MOE_PROFILE_STAGE_CLUSTER_BEGIN,
+    MOE_PROFILE_STAGE_CLUSTER_END,
 };
 
 enum bingo_moe_runtime_timing_resource {
@@ -28,6 +32,7 @@ enum bingo_moe_runtime_timing_resource {
     MOE_PROFILE_RESOURCE_XDMA,
     MOE_PROFILE_RESOURCE_DMA_BOTH,
     MOE_PROFILE_RESOURCE_VERSACORE,
+    MOE_PROFILE_RESOURCE_CONFIG,
 };
 
 enum bingo_moe_runtime_timing_flags {

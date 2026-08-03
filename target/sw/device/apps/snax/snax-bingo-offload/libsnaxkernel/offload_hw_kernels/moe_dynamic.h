@@ -16,6 +16,7 @@
 #include "moe_router_kernels.h"
 #include "moe_swiglu_config.h"
 #include "moe_dynamic_protocol.h"
+#include "moe_dynamic_profile.h"
 #include "moe_dynamic_bank.h"
 #include "moe_down_config.h"
 #include "moe_dynamic_dma.h"

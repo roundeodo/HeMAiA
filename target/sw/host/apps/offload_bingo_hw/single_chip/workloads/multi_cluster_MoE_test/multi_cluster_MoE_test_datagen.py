@@ -22,6 +22,26 @@ sys.path.insert(0, str(REPO_ROOT / "deps" / "snitch_cluster" / "util" / "sim"))
 sys.path.insert(0, str(REPO_ROOT / "deps" / "snitch_cluster" / "util" / "silu_pkg"))
 from data_utils import format_vector_definition  # noqa: E402
 from moe_test_layout import derive_params  # noqa: E402
+from moe_test_schedule import (  # noqa: E402
+    BASELINE_PROFILE,
+    C_TAIL_SMOKE_PROFILE,
+    DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    DYNAMIC_DESC_PROFILE,
+    ENDS_INWARD_EXPECTED_MAKESPAN_TICKS,
+    ENDS_INWARD_PROFILE,
+    EXPERT_COUNT,
+    HIGH_TO_LOW_COUNTS,
+    HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS,
+    HIGH_TO_LOW_PROFILE,
+    LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS,
+    LOW_TO_HIGH_PROFILE,
+    S1_STAGE_SMOKE_PROFILE,
+    SCHEDULE_PROFILES,
+    STATIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    STATIC_DESC_PROFILE,
+    STATIC_DESC_TOKEN_IDS_BY_EXPERT,
+    build_schedule_profile,
+)
 from silu_out16_balanced_golden import silu_out16_balanced_eval_q  # noqa: E402
 
 
@@ -112,9 +132,7 @@ def generate_slot_golden(
     return rescale_down_32to16(down_acc)
 
 
-def emit_header(config: dict) -> str:
-    p = derive_params(config)
-    rng = np.random.default_rng(320)
+def _emit_baseline_header(p: dict, rng: np.random.Generator) -> str:
     token_values = rng.integers(
         -256,
         256,
@@ -177,16 +195,216 @@ def emit_header(config: dict) -> str:
     return "\n\n".join(lines)
 
 
+def _high_to_low_token_refs(max_tokens_per_expert: int):
+    total_routes = sum(HIGH_TO_LOW_COUNTS)
+    source_tokens = total_routes // 2
+    refs = np.zeros(EXPERT_COUNT * max_tokens_per_expert, dtype=np.uint16)
+    token_ids_by_expert = {}
+    route = 0
+    for expert_id, ntokens in enumerate(HIGH_TO_LOW_COUNTS):
+        token_ids = []
+        for local_token in range(ntokens):
+            token_id = route % source_tokens
+            rank = route // source_tokens
+            refs[expert_id * max_tokens_per_expert + local_token] = np.uint16(
+                token_id | (rank << 15)
+            )
+            token_ids.append(token_id)
+            route += 1
+        token_ids_by_expert[expert_id] = np.asarray(token_ids, dtype=np.int64)
+    if route != total_routes:
+        raise AssertionError("high-to-low token reference count mismatch")
+    # Token 0 rank 0 is encoded as zero, so validate using the explicit lists.
+    explicit_histogram = np.bincount(
+        np.concatenate(tuple(token_ids_by_expert.values())),
+        minlength=source_tokens,
+    )
+    if not np.all(explicit_histogram == 2):
+        raise AssertionError("every synthetic source token must route to two experts")
+    return refs, token_ids_by_expert
+
+
+def _static_desc_token_refs(max_tokens_per_expert: int):
+    refs = np.zeros(EXPERT_COUNT * max_tokens_per_expert, dtype=np.uint16)
+    token_ids_by_expert = {
+        expert_id: np.asarray(token_ids, dtype=np.int64)
+        for expert_id, token_ids in enumerate(STATIC_DESC_TOKEN_IDS_BY_EXPERT)
+    }
+    owners = [[] for _ in range(sum(HIGH_TO_LOW_COUNTS) // 2)]
+    for expert_id, token_ids in token_ids_by_expert.items():
+        for token_id in token_ids:
+            owners[int(token_id)].append(expert_id)
+    if any(len(token_owners) != 2 for token_owners in owners):
+        raise AssertionError("STATIC_DESC routing must have exactly two owners")
+
+    for expert_id, token_ids in token_ids_by_expert.items():
+        start = expert_id * max_tokens_per_expert
+        for local_rank, token_id in enumerate(token_ids):
+            route_rank = owners[int(token_id)].index(expert_id)
+            refs[start + local_rank] = np.uint16(
+                int(token_id) | (route_rank << 15)
+            )
+    return refs, token_ids_by_expert
+
+
+def _smoke_token_refs(queues, max_tokens_per_expert: int):
+    slots = sorted(
+        (slot for cluster_slots in queues.values() for slot in cluster_slots),
+        key=lambda slot: slot.expert_id,
+    )
+    max_expert_id = max(slot.expert_id for slot in slots)
+    refs = np.zeros(
+        (max_expert_id + 1) * max_tokens_per_expert,
+        dtype=np.uint16,
+    )
+    token_ids_by_expert = {}
+    next_token_id = 0
+    for slot in slots:
+        token_ids = np.arange(
+            next_token_id,
+            next_token_id + slot.ntokens,
+            dtype=np.int64,
+        )
+        start = slot.expert_id * max_tokens_per_expert
+        refs[start : start + slot.ntokens] = token_ids.astype(np.uint16)
+        token_ids_by_expert[slot.expert_id] = token_ids
+        next_token_id += slot.ntokens
+    return refs, token_ids_by_expert
+
+
+def _emit_high_to_low_header(p: dict, rng: np.random.Generator) -> str:
+    queues = build_schedule_profile(p["schedule_profile"])
+    token_values = rng.integers(
+        -256,
+        256,
+        size=(p["gather_source_tokens"], p["hidden_size"]),
+        dtype=np.int16,
+    )
+    input_rows = token_values.view(np.uint8).reshape(-1)
+    if p["schedule_profile"] in (
+        STATIC_DESC_PROFILE,
+        DYNAMIC_DESC_PROFILE,
+    ):
+        token_refs, token_ids_by_expert = _static_desc_token_refs(
+            p["prod_max_tokens_per_expert"]
+        )
+        counts = np.asarray(HIGH_TO_LOW_COUNTS, dtype=np.uint8)
+        if p["schedule_profile"] == STATIC_DESC_PROFILE:
+            profile_comment = (
+                "// Case 0 STATIC_DESC; exact exported routing and fixed B/B lanes."
+            )
+        else:
+            profile_comment = (
+                "// Case 0 DYNAMIC_DESC; exact exported routing and dynamic lanes."
+            )
+    elif p["schedule_profile"] in (
+        HIGH_TO_LOW_PROFILE,
+        LOW_TO_HIGH_PROFILE,
+        ENDS_INWARD_PROFILE,
+    ):
+        token_refs, token_ids_by_expert = _high_to_low_token_refs(
+            p["prod_max_tokens_per_expert"]
+        )
+        counts = np.asarray(HIGH_TO_LOW_COUNTS, dtype=np.uint8)
+        direction = p["schedule_profile"].replace("_", "-")
+        profile_comment = (
+            f"// Optional {direction} 64-expert profile; 43 experts are active."
+        )
+    else:
+        token_refs, token_ids_by_expert = _smoke_token_refs(
+            queues, p["prod_max_tokens_per_expert"]
+        )
+        counts = np.zeros(EXPERT_COUNT, dtype=np.uint8)
+        for slots in queues.values():
+            for slot in slots:
+                counts[slot.expert_id] = slot.ntokens
+        profile_comment = "// Focused E23/E24 two-token smoke profile."
+    lines = [
+        "// Auto-generated by multi_cluster_MoE_test_datagen.py.",
+        profile_comment,
+        "#pragma once",
+        "#include <stdint.h>",
+        "",
+        f"#define MOE_TEST_HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS {HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_STATIC_DESC_EXPECTED_MAKESPAN_TICKS {STATIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS {DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS {LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_ENDS_INWARD_EXPECTED_MAKESPAN_TICKS {ENDS_INWARD_EXPECTED_MAKESPAN_TICKS}u",
+        format_vector_definition(
+            "uint8_t", "moe_test_input_A", input_rows, alignment=128
+        ),
+        format_vector_definition(
+            "uint16_t",
+            "moe_test_prod_slot_token_refs",
+            token_refs,
+            alignment=128,
+        ),
+        format_vector_definition(
+            "uint8_t",
+            "moe_test_high_to_low_counts",
+            counts,
+            alignment=64,
+        ),
+    ]
+    for cluster_name in ("c0", "c1"):
+        weight_lines, gate_matrix, up_matrix, down_matrix = generate_expert_weights(
+            rng, p, f"moe_test_{cluster_name}"
+        )
+        lines += weight_lines
+        for slot in queues[cluster_name]:
+            token_ids = token_ids_by_expert[slot.expert_id][
+                slot.token_start_rank : slot.token_start_rank + slot.ntokens
+            ]
+            if len(token_ids) != slot.ntokens:
+                raise AssertionError("slot token slice exceeds routed-token list")
+            golden = generate_slot_golden(
+                token_values[token_ids],
+                gate_matrix,
+                up_matrix,
+                down_matrix,
+            )
+            lines.append(
+                format_vector_definition(
+                    "int16_t",
+                    f"moe_test_{cluster_name}_e{slot.expert_id:02d}_golden",
+                    golden.reshape(-1),
+                    alignment=128,
+                )
+            )
+    return "\n\n".join(lines)
+
+
+def emit_header(config: dict, schedule_profile: str = BASELINE_PROFILE) -> str:
+    p = derive_params(config, schedule_profile)
+    rng = np.random.default_rng(320)
+    if schedule_profile in (
+        HIGH_TO_LOW_PROFILE,
+        LOW_TO_HIGH_PROFILE,
+        ENDS_INWARD_PROFILE,
+        STATIC_DESC_PROFILE,
+        DYNAMIC_DESC_PROFILE,
+        C_TAIL_SMOKE_PROFILE,
+        S1_STAGE_SMOKE_PROFILE,
+    ):
+        return _emit_high_to_low_header(p, rng)
+    return _emit_baseline_header(p, rng)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--cfg", type=pathlib.Path, required=True)
     parser.add_argument("--hwcfg", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--schedule-profile",
+        choices=SCHEDULE_PROFILES,
+        default=BASELINE_PROFILE,
+    )
     args = parser.parse_args()
     with args.cfg.open() as f:
         cfg = hjson.loads(f.read())
     with args.hwcfg.open() as f:
         hwcfg = hjson.loads(f.read())
-    print(emit_header({**cfg, **hwcfg}))
+    print(emit_header({**cfg, **hwcfg}, args.schedule_profile))
 
 
 if __name__ == "__main__":

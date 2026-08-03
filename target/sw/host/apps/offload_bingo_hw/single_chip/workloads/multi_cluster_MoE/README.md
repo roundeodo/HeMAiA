@@ -174,10 +174,13 @@ perturb timing. There is no HW/SW check, legacy or runtime fallback build mode.
 
 ## End-of-run runtime timing
 
-Add `MOE_RUNTIME_TIMING=1` to collect trace-like timing without printing from a
-running device kernel. Every active individual stage writes a compact record
-to its existing 64-byte scratchpad. After the complete DFG exits, CVA6 only
-prints the raw fixed-schema records needed by the offline analyzer.
+`MOE_RUNTIME_TIMING=1` is the low-overhead global-time mode. Only the two
+cluster-local begin/end pairs write records; CVA6 prints four schema-v3 records
+after the DFG exits. `MOE_RUNTIME_TIMING=2` is the diagnostic mode: every
+static DFG task writes one compact record to its existing 64-byte scratchpad,
+including skipped tasks. Optimized multi-block wrappers record the complete
+wrapper duration. Use level 2 only for slot/stage/task analysis because its
+hot-path record writes perturb execution.
 
 ```sh
 make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
@@ -190,18 +193,22 @@ make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
 Analyze an FPGA UART log with:
 
 ```sh
-python3 analyze_moe_runtime_timing.py /path/to/uart.log
+python3 analyze_moe_runtime_timing.py /path/to/uart.log --details
 ```
 
-The default report contains host phase timing, slot windows, cluster windows,
-the individual-expert compute efficiency, and C2/C3 iDMA, xDMA, and VersaCore
-resource utilization. Compute efficiency is useful ideal compute cycles divided
-by the timespan from the first active slot start to the last active slot end. Its
-numerator is `sum(ntokens) * 3 * hidden_size * intermediate_size` MAC divided by
-the two-cluster theoretical peak; measured `vc_api`/`vc_hw` busy cycles are only
-resource diagnostics. Add `--details` to print each slot's node and resource
-start/end timestamps. A `dma_both` interval contributes to both DMA resource
-timelines.
+Each cluster has begin/end markers on one DMA core. Its execution time is the
+wrap-safe difference between those two local `mcycle` values. Global execution
+time is the maximum cluster-local duration; timestamps from different clusters
+are never subtracted. At level 1 the report stops after global time. At level 2
+it also gives each active slot's task window and S1/S2/S3/S4/store wall times.
+Stages may overlap, so stage wall times must not be summed. Add `--details` to a
+level-2 capture to list every DFG node with its core, stage, local start, local
+end, duration, resource span, explicit peer wait, flags, and result code.
+
+Schema-v2 logs are rejected for performance conclusions because they lack
+cluster scope markers, config-stage records, DFG node IDs, and complete
+multi-block wrapper records. The analyzer deliberately emits no inferred slot
+gap, idle time, utilization, or stage efficiency from either schema.
 
 With the flag absent, all device recording macros, the generated address table,
 the final scan, and all profile strings are removed by preprocessing.

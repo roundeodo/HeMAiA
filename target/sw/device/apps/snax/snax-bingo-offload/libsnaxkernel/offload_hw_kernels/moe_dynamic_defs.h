@@ -66,6 +66,7 @@ _Static_assert(sizeof(__moe_s2_prefetch_ctrl_t) <= 64u,
 
 #define MOE_XDMA_PREPARED_NONE 0u
 #define MOE_XDMA_PREPARED_S1   1u
+#define MOE_XDMA_PREPARED_S2PF 2u
 #define MOE_XDMA_PREPARED_S3   3u
 #define MOE_XDMA_PREPARED_S4PF 5u
 
@@ -126,7 +127,7 @@ _Static_assert(sizeof(__moe_s2_prefetch_ctrl_t) <= 64u,
 #define MOE_INDIV_PRINT(...) do { } while (0)
 #endif
 
-#if MOE_RUNTIME_TIMING
+#if MOE_RUNTIME_TIMING >= 1
 typedef struct {
     uint32_t start;
     uint32_t resource_start;
@@ -134,29 +135,6 @@ typedef struct {
     uint32_t peer_wait;
     uint32_t resource_units;
 } __moe_runtime_timing_local_t;
-
-#define MOE_PROFILE_BEGIN(name) \
-    __moe_runtime_timing_local_t name = { \
-        .start = snrt_mcycle(), .resource_start = 0u, \
-        .resource_end = 0u, .peer_wait = 0u, .resource_units = 0u }
-
-#define MOE_PROFILE_WAIT(name, statement) \
-    do { \
-        uint32_t __wait_start = snrt_mcycle(); \
-        statement; \
-        (name).peer_wait += snrt_mcycle() - __wait_start; \
-    } while (0)
-
-#define MOE_PROFILE_RESOURCE_BEGIN(name) \
-    do { (name).resource_start = snrt_mcycle(); } while (0)
-
-#define MOE_PROFILE_RESOURCE_END(name) \
-    do { (name).resource_end = snrt_mcycle(); } while (0)
-
-#define MOE_PROFILE_CAPTURE_VC_COUNTER(name) \
-    do { (name).resource_units = read_dual_vc_perf_counter(); } while (0)
-
-#define MOE_PROFILE_RESOURCE_UNITS(name) ((name).resource_units)
 
 static inline void __moe_profile_commit(
     void *arg,
@@ -191,6 +169,43 @@ static inline void __moe_profile_commit(
     sp->end_time = snrt_mcycle();
     sp->reserved[MOE_SP_PROFILE_MAGIC_IDX] = MOE_RUNTIME_TIMING_MAGIC;
 }
+
+#define MOE_SCOPE_PROFILE_BEGIN(name) \
+    __moe_runtime_timing_local_t name = { \
+        .start = snrt_mcycle(), .resource_start = 0u, \
+        .resource_end = 0u, .peer_wait = 0u, .resource_units = 0u }
+#define MOE_SCOPE_PROFILE_COMMIT(arg, cfg, name, stage) \
+    __moe_profile_commit((arg), (cfg), &(name), (stage), \
+        MOE_PROFILE_RESOURCE_NONE, 0u, 0u, 0u, BINGO_RET_SUCC)
+#else
+#define MOE_SCOPE_PROFILE_BEGIN(name)
+#define MOE_SCOPE_PROFILE_COMMIT(...) do { } while (0)
+#endif
+
+#if MOE_RUNTIME_TIMING >= 2
+
+#define MOE_PROFILE_BEGIN(name) \
+    __moe_runtime_timing_local_t name = { \
+        .start = snrt_mcycle(), .resource_start = 0u, \
+        .resource_end = 0u, .peer_wait = 0u, .resource_units = 0u }
+
+#define MOE_PROFILE_WAIT(name, statement) \
+    do { \
+        uint32_t __wait_start = snrt_mcycle(); \
+        statement; \
+        (name).peer_wait += snrt_mcycle() - __wait_start; \
+    } while (0)
+
+#define MOE_PROFILE_RESOURCE_BEGIN(name) \
+    do { (name).resource_start = snrt_mcycle(); } while (0)
+
+#define MOE_PROFILE_RESOURCE_END(name) \
+    do { (name).resource_end = snrt_mcycle(); } while (0)
+
+#define MOE_PROFILE_CAPTURE_VC_COUNTER(name) \
+    do { (name).resource_units = read_dual_vc_perf_counter(); } while (0)
+
+#define MOE_PROFILE_RESOURCE_UNITS(name) ((name).resource_units)
 #define MOE_PROFILE_COMMIT(arg, cfg, name, stage, resource, block, units, flags, result) \
     __moe_profile_commit((arg), (cfg), &(name), (stage), (resource), \
                          (block), (units), (flags), (result))

@@ -1203,6 +1203,32 @@ def create_dfg(params, mh):
 
     individual_runtime_nodes = []
 
+    def add_cluster_scope_node(prefix: str, cluster_id: int, kernel_name: str, deps):
+        marker_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
+            addr_offset(
+                mh[f"{prefix}_Dyn_Args"],
+                MOE_RUNTIME_HEADER_BYTES,
+            ),
+            mh[f"{prefix}_Static_Args"],
+            addr_offset(
+                mh[f"{prefix}_Pipeline_Ctrl"],
+                MOE_PIPELINE_CTRL_BANK_OFFSET,
+            ),
+            0,
+        )
+        node = BingoNode(
+            assigned_chiplet_id=0,
+            assigned_cluster_id=cluster_id,
+            assigned_core_id=DMA_CORE_ID,
+            kernel_name=kernel_name,
+            kernel_args=marker_args,
+        )
+        bingo_dfg.bingo_add_node(node)
+        individual_runtime_nodes.append(node)
+        for dep in deps:
+            bingo_dfg.bingo_add_edge(dep, node)
+        return node
+
     def add_dynamic_slot_chain(prefix: str, cluster_id: int, slot: int, deps):
         dyn_arg_addr = addr_offset(
             mh[f"{prefix}_Dyn_Args"],
@@ -1250,6 +1276,9 @@ def create_dfg(params, mh):
         chain = build_dynamic_expert_slot_chain(
             add_node=lambda core, kernel, args, _label: add_node(core, kernel, args),
             add_edge=bingo_dfg.bingo_add_edge,
+            add_descriptor_sequence=lambda producer, consumer: bingo_dfg.add_edge(
+                producer, consumer, descriptor_sequence=True
+            ),
             make_block_args=make_block_args,
             input_ready=input_ready,
             s1_block_count=N2,
@@ -1266,8 +1295,16 @@ def create_dfg(params, mh):
         # Preserve those two ordered streams without inventing a cross-cluster
         # round barrier: an algorithm round may contain only one cluster task,
         # and a later task on the other cluster is allowed to overlap it.
-        prev_c2_stores = [node_execute]
-        prev_c3_stores = [node_execute]
+        c2_scope_begin = add_cluster_scope_node(
+            "C2_indiv", CLUSTER_INDIV_A,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin", [node_execute]
+        )
+        c3_scope_begin = add_cluster_scope_node(
+            "C3_indiv", CLUSTER_INDIV_B,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin", [node_execute]
+        )
+        prev_c2_stores = [c2_scope_begin]
+        prev_c3_stores = [c3_scope_begin]
         for slot in range(params["dynamic_slot_count"]):
             c2_store = add_dynamic_slot_chain(
                 "C2_indiv", CLUSTER_INDIV_A, slot, prev_c2_stores
@@ -1277,7 +1314,15 @@ def create_dfg(params, mh):
             )
             prev_c2_stores = [c2_store]
             prev_c3_stores = [c3_store]
-        individual_tail_nodes = prev_c2_stores + prev_c3_stores
+        c2_scope_end = add_cluster_scope_node(
+            "C2_indiv", CLUSTER_INDIV_A,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_end", prev_c2_stores
+        )
+        c3_scope_end = add_cluster_scope_node(
+            "C3_indiv", CLUSTER_INDIV_B,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_end", prev_c3_stores
+        )
+        individual_tail_nodes = [c2_scope_end, c3_scope_end]
 
     # Shared outputs remain resident in C0/C1 L1 until all individual slot
     # chains have completed. The legacy L1.5 output is one padded contiguous
@@ -1355,7 +1400,7 @@ def main():
         pre_host_include_header_list=[config_header_name],
         profile_kernel_prefix="__snax_bingo_kernel_moe_dyn_opt_",
         profile_condition="MOE_RUNTIME_TIMING",
-        profile_report_function="__host_bingo_moe_print_runtime_timing",
+        profile_report_function="__host_bingo_moe_print_runtime_timing_v3",
     )
 
 

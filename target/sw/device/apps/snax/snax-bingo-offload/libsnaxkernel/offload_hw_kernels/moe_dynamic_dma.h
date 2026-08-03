@@ -158,9 +158,9 @@ __attribute__((always_inline)) static inline void __moe_dyn_start_pair_2d(
             BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
         }
         xdma_memcpy_fast_set_addresses(src0_addr, dst0_addr);
-        pending->xdma_task0 = xdma_start();
+        pending->xdma_task0 = xdma_start_remote();
         xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
-        pending->xdma_task1 = xdma_start();
+        pending->xdma_task1 = xdma_start_remote();
         return;
     }
 
@@ -172,7 +172,7 @@ __attribute__((always_inline)) static inline void __moe_dyn_start_pair_2d(
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
     }
     xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
-    pending->xdma_task0 = xdma_start();
+    pending->xdma_task0 = xdma_start_remote();
     BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
     snrt_dma_start_2d_wideptr(
         dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
@@ -214,18 +214,44 @@ __attribute__((always_inline)) static inline void __moe_dyn_start_single_2d(
         BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
     }
     xdma_memcpy_fast_set_addresses(src_addr, dst_addr);
-    pending->xdma_task0 = xdma_start();
+    pending->xdma_task0 = xdma_start_remote();
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_dyn_start_single_2d_preloaded_xdma(
+    void)
+{
+    return xdma_start_remote();
 }
 
 __attribute__((always_inline)) static inline void
-__moe_dyn_start_single_2d_preloaded_xdma(
-    uint32_t bytes, __moe_dyn_2d_pair_pending_t *pending)
+__moe_dyn_start_single_2d_idma(
+    uint64_t dst_addr,
+    uint64_t src_addr,
+    uint32_t bytes)
 {
-    pending->binding = MOE_DYN_DMA_XDMA;
-    pending->repeats = bytes / MOE_BANK_WEIGHT_ROW_BYTES;
-    pending->wait_idma = 0u;
-    pending->xdma_task0 = xdma_start();
-    pending->xdma_task1 = -1;
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
+    snrt_dma_start_2d_wideptr(
+        dst_addr, src_addr, MOE_BANK_WEIGHT_ROW_BYTES,
+        MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES,
+        bytes / MOE_BANK_WEIGHT_ROW_BYTES);
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_wait_single_2d_idma(void)
+{
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_RUN_START);
+    snrt_dma_wait_all();
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_RUN_END);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_wait_single_2d_xdma(int32_t task_id)
+{
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
+    xdma_remote_wait((uint32_t)task_id);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END);
 }
 
 __attribute__((always_inline)) static inline void __moe_dyn_wait_pair_2d(
@@ -288,49 +314,359 @@ __moe_dyn_prepare_pair_2d_xdma_addresses(
 }
 
 __attribute__((always_inline)) static inline void
-__moe_dyn_start_pair_2d_preloaded_xdma(
+__moe_dyn_s2pf_both_addresses(
+    const __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t block,
+    uint64_t *dst0_addr,
+    uint64_t *src0_addr,
+    uint64_t *dst1_addr,
+    uint64_t *src1_addr)
+{
+    uint32_t block_bytes = s2->block_bytes;
+    *dst0_addr = __moe_dyn_l1_wide(__moe_bank_down_weight_block_addr(
+        s2->down_dst_base, block, block_bytes));
+    *src0_addr = s2->down_src_base + (uint64_t)block * block_bytes;
+    *dst1_addr = __moe_dyn_l1_wide(__moe_bank_down_weight_block_addr(
+        s2->down_dst_base + 64u, block, block_bytes));
+    *src1_addr = *src0_addr + s2->half_bytes;
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_s2pf_single_address(
+    const __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t block,
+    uint32_t side,
+    uint64_t *dst_addr,
+    uint64_t *src_addr)
+{
+    uint32_t block_bytes = s2->block_bytes;
+    uint32_t src_offset = block * block_bytes + side * s2->half_bytes;
+    *dst_addr = __moe_dyn_l1_wide(__moe_bank_down_weight_block_addr(
+        s2->down_dst_base + side * 64u, block, block_bytes));
+    *src_addr = s2->down_src_base + src_offset;
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s2pf_both_xdma_address(
+    const __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t block)
+{
+    uint64_t dst0 = 0u;
+    uint64_t src0 = 0u;
+    uint64_t dst1 = 0u;
+    uint64_t src1 = 0u;
+    __moe_dyn_s2pf_both_addresses(
+        s2, block, &dst0, &src0, &dst1, &src1);
+    __moe_dyn_prepare_pair_2d_xdma_addresses(
+        MOE_DYN_DMA_BOTH, dst0, src0, dst1, src1);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s2pf_single_xdma_address(
+    const __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t block,
+    uint32_t side)
+{
+    uint64_t dst = 0u;
+    uint64_t src = 0u;
+    __moe_dyn_s2pf_single_address(
+        s2, block, side, &dst, &src);
+    xdma_memcpy_fast_set_addresses(src, dst);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s2pf_xdma(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk)
+{
+    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
+    __moe_prepare_s2pf_xdma_shape(blk);
+    if (s2->binding == MOE_DYN_DMA_BOTH) {
+        __moe_dyn_prepare_s2pf_both_xdma_address(s2, 0u);
+    } else {
+        __moe_dyn_prepare_s2pf_single_xdma_address(s2, 0u, 0u);
+    }
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_s1_pair_addresses(
+    const __moe_s1_dma_ctrl_t *s1,
+    uint32_t block,
+    uint64_t *dst0_addr,
+    uint64_t *src0_addr,
+    uint64_t *dst1_addr,
+    uint64_t *src1_addr)
+{
+    uint32_t block_bytes = s1->block_bytes;
+    uint32_t weight_offset = block * block_bytes;
+    *dst0_addr = __moe_dyn_l1_wide(__moe_bank_weight_block_addr(
+        s1->gate_dst_base, block, block_bytes));
+    *src0_addr = s1->gate_src_base + weight_offset;
+    *dst1_addr = __moe_dyn_l1_wide(__moe_bank_weight_block_addr(
+        s1->up_dst_base, block, block_bytes));
+    *src1_addr = s1->up_src_base + weight_offset;
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s1_xdma_address(
+    const __moe_s1_dma_ctrl_t *s1,
+    uint32_t block)
+{
+    uint64_t dst0 = 0u;
+    uint64_t src0 = 0u;
+    uint64_t dst1 = 0u;
+    uint64_t src1 = 0u;
+    __moe_dyn_s1_pair_addresses(
+        s1, block, &dst0, &src0, &dst1, &src1);
+    if (s1->binding == MOE_DYN_DMA_XDMA) {
+        xdma_memcpy_fast_set_addresses(src0, dst0);
+    } else {
+        xdma_memcpy_fast_set_addresses(src1, dst1);
+    }
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s1_xdma(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    __moe_s1_dma_ctrl_t *s1 = __moe_s1_dma_ctrl(blk);
+    if (s1->valid == 0u ||
+        __moe_dyn_binding_uses_xdma(s1->binding) == 0u) {
+        return;
+    }
+    __moe_prepare_s1_xdma_shape(blk, cfg, st);
+    __moe_dyn_prepare_s1_xdma_address(s1, 0u);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_s3_pair_addresses(
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    uint64_t down_src,
+    uint32_t block,
+    uint64_t *dst0_addr,
+    uint64_t *src0_addr,
+    uint64_t *dst1_addr,
+    uint64_t *src1_addr)
+{
+    uint32_t block_bytes = st->indiv_down_B_block_stride;
+    *dst0_addr = __moe_dyn_l1_wide(__moe_bank_down_weight_block_addr(
+        st->l1_b_down_addr, block, block_bytes));
+    *src0_addr = down_src + (uint64_t)block * block_bytes;
+    *dst1_addr = __moe_dyn_l1_wide(__moe_bank_down_weight_block_addr(
+        st->l1_b_down_addr + 64u, block, block_bytes));
+    *src1_addr = down_src +
+        (uint64_t)(st->s3_block_count + block) * block_bytes;
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s3_xdma_address(
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    uint64_t down_src,
     uint32_t binding,
+    uint32_t block)
+{
+    uint64_t dst0 = 0u;
+    uint64_t src0 = 0u;
+    uint64_t dst1 = 0u;
+    uint64_t src1 = 0u;
+    __moe_dyn_s3_pair_addresses(
+        st, down_src, block, &dst0, &src0, &dst1, &src1);
+    if (binding == MOE_DYN_DMA_XDMA) {
+        xdma_memcpy_fast_set_addresses(src0, dst0);
+    } else {
+        xdma_memcpy_fast_set_addresses(src1, dst1);
+    }
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s3_xdma(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    uint32_t binding = MOE_DYN_CTRL_DMA_S3(cfg->ctrl);
+    if (MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) != 0u ||
+        cfg->s3_call[0].valid == 0u ||
+        __moe_dyn_binding_uses_xdma(binding) == 0u) {
+        return;
+    }
+    uint32_t weight_eid = MOE_DYN_DMA_EID(
+        cfg->dma_slot_eids, MOE_DYN_DMA_SLOT_S3);
+    uint64_t down_src = st->indiv_down_B_l3 +
+        (uint64_t)weight_eid * st->indiv_down_B_expert_stride;
+    __moe_prepare_s3_xdma_shape(blk, cfg, st);
+    __moe_dyn_prepare_s3_xdma_address(st, down_src, binding, 0u);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_s4pf_phase_addresses(
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    uint64_t gate_src,
+    uint64_t up_src,
+    uint32_t phase,
+    uint64_t *gate_dst,
+    uint64_t *gate_src_phase,
+    uint64_t *up_dst,
+    uint64_t *up_src_phase)
+{
+    uint32_t block_bytes = st->indiv_B_block_stride;
+    uint32_t src_offset = phase * block_bytes;
+    *gate_dst = __moe_dyn_l1_wide(__moe_bank_weight_block_addr(
+        st->l1_b_gate_addr, phase, block_bytes));
+    *gate_src_phase = gate_src + src_offset;
+    *up_dst = __moe_dyn_l1_wide(__moe_bank_weight_block_addr(
+        st->l1_b_up_addr, phase, block_bytes));
+    *up_src_phase = up_src + src_offset;
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s4pf_xdma_phase(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st,
+    uint64_t gate_src,
+    uint64_t up_src,
+    uint32_t binding,
+    uint32_t phase)
+{
+    uint64_t gate_dst = 0u;
+    uint64_t gate_src_phase = 0u;
+    uint64_t up_dst = 0u;
+    uint64_t up_src_phase = 0u;
+    __moe_prepare_s4pf_xdma_phase_shape(
+        blk, st->indiv_B_block_stride, st->s1_block_count, phase);
+    __moe_dyn_s4pf_phase_addresses(
+        st, gate_src, up_src, phase,
+        &gate_dst, &gate_src_phase, &up_dst, &up_src_phase);
+    if (binding == MOE_DYN_DMA_XDMA) {
+        xdma_memcpy_fast_set_addresses(gate_src_phase, gate_dst);
+    } else {
+        xdma_memcpy_fast_set_addresses(up_src_phase, up_dst);
+    }
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_s4pf_xdma(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
+    if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) return;
+    uint32_t binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
+    if (__moe_dyn_binding_uses_xdma(binding) == 0u) return;
+    uint32_t weight_eid = MOE_DYN_DMA_EID(cfg->dma_slot_eids, slot);
+    uint64_t gate_src = st->indiv_gate_B_l3 +
+        (uint64_t)weight_eid * st->indiv_B_expert_stride;
+    uint64_t up_src = st->indiv_up_B_l3 +
+        (uint64_t)weight_eid * st->indiv_B_expert_stride;
+    __moe_dyn_prepare_s4pf_xdma_phase(
+        blk, st, gate_src, up_src, binding,
+        __moe_s4_block_initial_phase(st));
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_prepare_after_s2pf_xdma(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
+    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
+{
+    uint32_t s3_active = MOE_DYN_CTRL_SKIP_S3(cfg->ctrl) == 0u &&
+        cfg->s3_call[0].valid != 0u;
+    uint32_t s3_binding = MOE_DYN_CTRL_DMA_S3(cfg->ctrl);
+    if (s3_active != 0u &&
+        __moe_dyn_binding_uses_xdma(s3_binding) != 0u) {
+        __moe_dyn_prepare_s3_xdma(blk, cfg, st);
+        return;
+    }
+    __moe_dyn_prepare_s4pf_xdma(blk, cfg, st);
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_dyn_xdma_start_remote_begin(void)
+{
+    uint32_t previous =
+        snax_read_xdma_cfg_reg(XDMA_COMMIT_REMOTE_TASK_PTR);
+    snax_write_xdma_cfg_reg(XDMA_START_PTR, 1u);
+    return (int32_t)previous;
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_dyn_xdma_start_remote_commit(int32_t previous)
+{
+    uint32_t committed;
+    do {
+        committed = snax_read_xdma_cfg_reg(XDMA_COMMIT_REMOTE_TASK_PTR);
+    } while (committed == (uint32_t)previous);
+    return (int32_t)committed;
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_dyn_start_both_2d_preloaded_xdma(
     uint64_t dst0_addr,
     uint64_t src0_addr,
-    uint64_t dst1_addr,
-    uint64_t src1_addr,
-    uint32_t bytes,
-    __moe_dyn_2d_pair_pending_t *pending)
+    uint32_t bytes)
 {
     uint32_t repeats = bytes / MOE_BANK_WEIGHT_ROW_BYTES;
-    pending->binding = binding;
-    pending->repeats = repeats;
-    pending->wait_idma = 0u;
-    pending->xdma_task0 = -1;
-    pending->xdma_task1 = -1;
-
-    if (binding == MOE_DYN_DMA_IDMA) {
-        BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
-        snrt_dma_start_2d_wideptr(
-            dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
-            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
-        snrt_dma_start_2d_wideptr(
-            dst1_addr, src1_addr, MOE_BANK_WEIGHT_ROW_BYTES,
-            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
-        BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
-        pending->wait_idma = 1u;
-        return;
-    }
-
-    pending->xdma_task0 = xdma_start();
-
-    if (binding == MOE_DYN_DMA_XDMA) {
-        xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
-        pending->xdma_task1 = xdma_start();
-        return;
-    }
-
+    int32_t previous = __moe_dyn_xdma_start_remote_begin();
     BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
     snrt_dma_start_2d_wideptr(
         dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
         MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
     BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
-    pending->wait_idma = 1u;
+    return __moe_dyn_xdma_start_remote_commit(previous);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_start_pair_2d_idma(
+    uint64_t dst0_addr,
+    uint64_t src0_addr,
+    uint64_t dst1_addr,
+    uint64_t src1_addr,
+    uint32_t bytes)
+{
+    uint32_t repeats = bytes / MOE_BANK_WEIGHT_ROW_BYTES;
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
+    snrt_dma_start_2d_wideptr(
+        dst0_addr, src0_addr, MOE_BANK_WEIGHT_ROW_BYTES,
+        MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
+    snrt_dma_start_2d_wideptr(
+        dst1_addr, src1_addr, MOE_BANK_WEIGHT_ROW_BYTES,
+        MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_dyn_start_pair_2d_preloaded_xdma(
+    uint64_t dst1_addr,
+    uint64_t src1_addr)
+{
+    (void)xdma_start_remote();
+    xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
+    return (int32_t)xdma_start_remote();
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_wait_pair_2d_idma(void)
+{
+    __moe_dyn_wait_single_2d_idma();
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_wait_pair_2d_xdma(int32_t last_task)
+{
+    __moe_dyn_wait_single_2d_xdma(last_task);
+}
+
+__attribute__((always_inline)) static inline void
+__moe_dyn_wait_both_2d(int32_t xdma_task)
+{
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_RUN_START);
+    snrt_dma_wait_all();
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_RUN_END);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_START);
+    xdma_remote_wait((uint32_t)xdma_task);
+    BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_WAIT_END);
 }
 
 __attribute__((always_inline)) static inline void __moe_dyn_copy_pair_2d(
@@ -499,9 +835,9 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
 
     if (binding == MOE_DYN_DMA_XDMA) {
         xdma_memcpy_fast_set_addresses(src0_addr, dst0_addr);
-        int32_t task0 = (int32_t)xdma_start();
+        int32_t task0 = (int32_t)xdma_start_remote();
         xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
-        int32_t task1 = (int32_t)xdma_start();
+        int32_t task1 = (int32_t)xdma_start_remote();
         pending->xdma_task0 = task0;
         pending->xdma_task1 = task1;
         __moe_dyn_prepare_store_xdma(cfg, st);
@@ -514,7 +850,7 @@ __moe_dyn_start_final_pair_2d_and_prepare_store(
         MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
     BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
     xdma_memcpy_fast_set_addresses(src1_addr, dst1_addr);
-    int32_t task0 = (int32_t)xdma_start();
+    int32_t task0 = (int32_t)xdma_start_remote();
     pending->xdma_task0 = task0;
     __moe_dyn_prepare_store_xdma(cfg, st);
 }

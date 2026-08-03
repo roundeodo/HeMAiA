@@ -172,7 +172,9 @@ static inline uint64_t __host_bingo_kernel_moe_prepare_request(void *arg)
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_REQUEST_BUILD_END);
 
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_SCHED_START);
+    __moe_host_timing_start(MOE_HOST_TIMING_SW_SCHED);
     moe_status_t status = moe_schedule(request, schedule);
+    __moe_host_timing_end(MOE_HOST_TIMING_SW_SCHED);
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_SCHED_END);
     BINGO_TRACE_MARKER(BINGO_TRACE_HOST_MOE_SCHED_PRINT_START);
     __moe_dbg_print_schedule(schedule);

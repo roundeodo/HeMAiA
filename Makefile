@@ -73,6 +73,10 @@ NODE_TIMING ?= 0
 MOE_INDIV_BRINGUP ?= 0
 MOE_RUNTIME_TIMING ?= 0
 
+ifneq ($(filter $(MOE_RUNTIME_TIMING),0 1 2),$(MOE_RUNTIME_TIMING))
+    $(error MOE_RUNTIME_TIMING must be 0, 1, or 2)
+endif
+
 # User flags for SW compilation
 # Useful for enabling debug prints or performance tracing
 # e.g. make sw DEBUG_LEVEL=1 PERF_TRACING=0
@@ -86,8 +90,8 @@ endif
 ifeq ($(MOE_INDIV_BRINGUP), 1)
     USER_FLAGS += -DMOE_INDIV_BRINGUP=1
 endif
-ifeq ($(MOE_RUNTIME_TIMING), 1)
-    USER_FLAGS += -DMOE_RUNTIME_TIMING=1
+ifneq ($(MOE_RUNTIME_TIMING), 0)
+    USER_FLAGS += -DMOE_RUNTIME_TIMING=$(MOE_RUNTIME_TIMING)
 endif
 
 sw: $(CFG)

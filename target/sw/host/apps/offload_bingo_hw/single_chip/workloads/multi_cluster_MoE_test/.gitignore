@@ -1,5 +1,6 @@
 multi_cluster_MoE_test_data.h
 offload_bingo_hw.h
+.schedule-*
 build/
 *.png
 *.csv

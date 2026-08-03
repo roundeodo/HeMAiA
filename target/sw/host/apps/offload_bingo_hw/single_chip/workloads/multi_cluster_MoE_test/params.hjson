@@ -11,6 +11,8 @@
     s1_block_count: 8
     s3_block_count: 4
     num_indiv_experts: 8
+    // All logical experts in this focused workload reuse one physical backing.
+    num_indiv_weight_backings: 1
     num_shared_experts: 2
     top_k: 2
     addNonZeroC: 0

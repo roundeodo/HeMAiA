@@ -2216,10 +2216,19 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                     f"(uint64_t*)bingo_l3_alloc(0x{chiplet_id:02x}, "
                     f"bingo_profile_sp_count_chip_{chiplet_id:02x} * sizeof(uint64_t));\n"
                 )
+                f.write(
+                    f"        uint32_t* bingo_profile_node_ids_chip_{chiplet_id:02x} = "
+                    f"(uint32_t*)bingo_l3_alloc(0x{chiplet_id:02x}, "
+                    f"bingo_profile_sp_count_chip_{chiplet_id:02x} * sizeof(uint32_t));\n"
+                )
             else:
                 f.write(
                     f"        uint64_t* bingo_profile_sp_addrs_chip_{chiplet_id:02x} = "
                     f"(uint64_t*)0;\n"
+                )
+                f.write(
+                    f"        uint32_t* bingo_profile_node_ids_chip_{chiplet_id:02x} = "
+                    f"(uint32_t*)0;\n"
                 )
             for profile_idx, node in enumerate(profile_nodes):
                 sp_var = node._scratchpad_c_var
@@ -2229,6 +2238,10 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                 f.write(
                     f"        bingo_profile_sp_addrs_chip_{chiplet_id:02x}[{profile_idx}] = "
                     f"(uint64_t)(uintptr_t){sp_var};\n"
+                )
+                f.write(
+                    f"        bingo_profile_node_ids_chip_{chiplet_id:02x}[{profile_idx}] = "
+                    f"{node.node_id}u;\n"
                 )
             f.write("        #endif\n\n")
 
@@ -2556,6 +2569,7 @@ class BingoDFG(DiGraphWrapper[BingoNode]):
                     f.write(
                         f"        {profile_report_function}("
                         f"bingo_profile_sp_addrs_chip_{chiplet_id:02x}, "
+                        f"bingo_profile_node_ids_chip_{chiplet_id:02x}, "
                         f"bingo_profile_sp_count_chip_{chiplet_id:02x});\n"
                     )
                     f.write("        #endif\n")

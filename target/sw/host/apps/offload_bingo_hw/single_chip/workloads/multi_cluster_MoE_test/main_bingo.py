@@ -25,7 +25,29 @@ from moe_dynamic_slot_dfg import (  # noqa: E402
     build_dynamic_expert_slot_chain,
     dynamic_expert_gather_kernel,
 )
+from moe_high_to_low_workload import (  # noqa: E402
+    add_high_to_low_schedule,
+    add_s1_stage_smoke_schedule,
+    define_high_to_low_memory,
+)
 from moe_test_layout import derive_params  # noqa: E402
+from moe_test_schedule import (  # noqa: E402
+    BASELINE_PROFILE,
+    C_TAIL_SMOKE_PROFILE,
+    DMA_BOTH,
+    DMA_NONE,
+    DYNAMIC_DESC_PROFILE,
+    ENDS_INWARD_PROFILE,
+    HIGH_TO_LOW_PROFILE,
+    LOW_TO_HIGH_PROFILE,
+    S2PF_BOTH_PROFILE,
+    S1_STAGE_SMOKE_PROFILE,
+    SCHEDULE_PROFILES,
+    STATIC_DESC_PROFILE,
+    build_schedule_profile,
+    format_schedule_manifest,
+    select_two_slot_s2pf_binding,
+)
 
 GEMM_CORE = 0
 DMA_CORE = 1
@@ -244,7 +266,9 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 | (runtime_cluster << 13)
                 | (1 << 14)
             )
-            s2_dma = bench["s2_prefetch_dma"]
+            s2_dma = select_two_slot_s2pf_binding(
+                p["schedule_profile"], prefix, 0, bench["s2_prefetch_dma"]
+            )
             s4_dma = bench["s4_prefetch_dma"]
             s2_prefetch_vd = (
                 ((1 | (s2_dma << 1)) << (2 * 3)) if s2_dma else 0
@@ -267,7 +291,10 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             slot1_s4_m_exec = (
                 next_token_count + s4_rows - 1
             ) // s4_rows
-            slot1_s2_dma = slot1_bench["s2_prefetch_dma"]
+            slot1_s2_dma = select_two_slot_s2pf_binding(
+                p["schedule_profile"], prefix, 1,
+                slot1_bench["s2_prefetch_dma"]
+            )
             slot1_s2_prefetch_vd = (
                 (1 | (slot1_s2_dma << 1)) << (2 * 3)
             )
@@ -278,7 +305,12 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"uint8_t *{runtime_name} = (uint8_t *)(uintptr_t){runtime_l3};",
                 f"memset({static_name}, 0, sizeof(*{static_name}));",
                 f"memset({runtime_name}, 0, {self.HEADER_BYTES + 2 * self.SLOT_BYTES}u);",
-                f"memset((void *)(uintptr_t){output_l3}, 0, {p['prod_output_bytes']}u);",
+                *(
+                    [f"memset((void *)(uintptr_t){output_l3}, 0, "
+                     f"{p['prod_output_bytes']}u);"]
+                    if p["prod_clear_output"]
+                    else []
+                ),
                 f"{static_name}->token_refs_addr = {token_refs_l1};",
                 f"{static_name}->input_A_l3_base = {input_l3};",
                 f"{static_name}->indiv_gate_B_l3 = {gate_l3};",
@@ -410,6 +442,11 @@ def get_args():
     parser.add_argument("--hwcfg", type=pathlib.Path, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--output_offload_file_name", type=str, required=True)
+    parser.add_argument(
+        "--schedule-profile",
+        choices=SCHEDULE_PROFILES,
+        default=BASELINE_PROFILE,
+    )
     return parser.parse_args()
 
 
@@ -418,7 +455,7 @@ def load_params(args):
         cfg = hjson.loads(f.read())
     with args.hwcfg.open() as f:
         hwcfg = hjson.loads(f.read())
-    return derive_params({**cfg, **hwcfg})
+    return derive_params({**cfg, **hwcfg}, args.schedule_profile)
 
 
 def define_production_memory(p):
@@ -542,6 +579,8 @@ def add_production_slot_handoff_test(dfg, p, mh):
     slot0_stores = {}
     slot_runtime_ready = []
     slot_gathers = []
+    scope_begins = {}
+    scope_args = {}
 
     for prefix, cluster in PROD_CLUSTERS:
         refs_to_l1 = add_copy(
@@ -580,6 +619,15 @@ def add_production_slot_handoff_test(dfg, p, mh):
         slot_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
             slot0_addr, static_addr, pipeline_ctrl_addr, 0
         )
+        scope_args[prefix] = slot_args
+        scope_begins[prefix] = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin",
+            slot_args,
+            f"{prefix.upper()}_PROD_SCOPE_BEGIN",
+        )
         gather = add_node(
             dfg,
             cluster,
@@ -601,6 +649,9 @@ def add_production_slot_handoff_test(dfg, p, mh):
                 dfg, cluster, core, kernel, args, label
             ),
             add_edge=dfg.bingo_add_edge,
+            add_descriptor_sequence=lambda producer, consumer: dfg.add_edge(
+                producer, consumer, descriptor_sequence=True
+            ),
             make_block_args=make_block_args,
             input_ready=gather,
             s1_block_count=p["s1_block_count"],
@@ -615,8 +666,10 @@ def add_production_slot_handoff_test(dfg, p, mh):
     # Give both cluster slots the same release condition. Each gather becomes
     # ready only after both clusters have finished loading their runtime ABI.
     for runtime_ready in slot_runtime_ready:
-        for gather in slot_gathers:
-            dfg.bingo_add_edge(runtime_ready, gather)
+        for scope_begin in scope_begins.values():
+            dfg.bingo_add_edge(runtime_ready, scope_begin)
+    for prefix, gather in zip((prefix for prefix, _ in PROD_CLUSTERS), slot_gathers):
+        dfg.bingo_add_edge(scope_begins[prefix], gather)
 
     slot1_chains = {}
     for prefix, cluster in PROD_CLUSTERS:
@@ -641,6 +694,9 @@ def add_production_slot_handoff_test(dfg, p, mh):
                 dfg, cluster, core, kernel, args, label
             ),
             add_edge=dfg.bingo_add_edge,
+            add_descriptor_sequence=lambda producer, consumer: dfg.add_edge(
+                producer, consumer, descriptor_sequence=True
+            ),
             make_block_args=make_slot1_block_args,
             input_ready=slot0_stores[prefix],
             s1_block_count=p["s1_block_count"],
@@ -651,10 +707,18 @@ def add_production_slot_handoff_test(dfg, p, mh):
             label_prefix=f"{prefix.upper()}_PROD_SLOT1",
         )
 
-    final_stores = [
-        (prefix, slot1_chains[prefix]["store"])
-        for prefix, _ in PROD_CLUSTERS
-    ]
+    final_stores = []
+    for prefix, cluster in PROD_CLUSTERS:
+        scope_end = add_node(
+            dfg,
+            cluster,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_end",
+            scope_args[prefix],
+            f"{prefix.upper()}_PROD_SCOPE_END",
+        )
+        dfg.bingo_add_edge(slot1_chains[prefix]["store"], scope_end)
+        final_stores.append((prefix, scope_end))
     done_checks = []
     for prefix, _ in final_stores:
         checks = (
@@ -695,8 +759,6 @@ def add_production_slot_handoff_test(dfg, p, mh):
     return done_checks
 
 
-
-
 def create_dfg(p, mh):
     dfg = BingoDFG(
         num_chiplets=1,
@@ -705,10 +767,39 @@ def create_dfg(p, mh):
         is_host_as_acc=True,
         chiplet_ids=[0x00],
     )
-    print(
-        "Execute concurrent C0/C1 slot0 and slot1 paths with fused slot handoff"
-    )
-    add_production_slot_handoff_test(dfg, p, mh)
+    if p["schedule_profile"] == S1_STAGE_SMOKE_PROFILE:
+        queues = build_schedule_profile(p["schedule_profile"])
+        print("s1_stage_smoke schedule: C1/E23 -> C0/E24, S1-only 2-token C/C")
+        add_s1_stage_smoke_schedule(dfg, p, mh, queues)
+    elif p["schedule_profile"] in (
+        HIGH_TO_LOW_PROFILE,
+        LOW_TO_HIGH_PROFILE,
+        ENDS_INWARD_PROFILE,
+        STATIC_DESC_PROFILE,
+        DYNAMIC_DESC_PROFILE,
+        C_TAIL_SMOKE_PROFILE,
+    ):
+        queues = build_schedule_profile(p["schedule_profile"])
+        if p["schedule_profile"] in (
+            HIGH_TO_LOW_PROFILE,
+            LOW_TO_HIGH_PROFILE,
+            ENDS_INWARD_PROFILE,
+            STATIC_DESC_PROFILE,
+            DYNAMIC_DESC_PROFILE,
+        ):
+            print(format_schedule_manifest(queues, p["schedule_profile"]))
+        else:
+            print("c_tail_smoke schedule: C1/E23 -> C0/E24, both 2-token C/C")
+        add_high_to_low_schedule(dfg, p, mh, queues, SLOT_IMPLEMENTATION)
+    else:
+        s2pf_mode = (
+            "BOTH" if p["schedule_profile"] == S2PF_BOTH_PROFILE else "single"
+        )
+        print(
+            "Execute concurrent C0/C1 slot0 and slot1 paths with fused slot "
+            f"handoff; C0 slot0 S2PF={s2pf_mode}"
+        )
+        add_production_slot_handoff_test(dfg, p, mh)
     return dfg
 
 
@@ -716,7 +807,20 @@ def main():
     args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
     params = load_params(args)
-    memory = define_production_memory(params)
+    if params["schedule_profile"] in (
+        HIGH_TO_LOW_PROFILE,
+        LOW_TO_HIGH_PROFILE,
+        ENDS_INWARD_PROFILE,
+        STATIC_DESC_PROFILE,
+        DYNAMIC_DESC_PROFILE,
+        C_TAIL_SMOKE_PROFILE,
+        S1_STAGE_SMOKE_PROFILE,
+    ):
+        memory = define_high_to_low_memory(
+            params, build_schedule_profile(params["schedule_profile"])
+        )
+    else:
+        memory = define_production_memory(params)
     dfg = create_dfg(params, memory)
     dfg.bingo_compile_dfg(
         params["app_name"],
@@ -728,7 +832,7 @@ def main():
         ],
         profile_kernel_prefix="__snax_bingo_kernel_moe_",
         profile_condition="MOE_RUNTIME_TIMING",
-        profile_report_function="__host_bingo_moe_print_runtime_timing",
+        profile_report_function="__host_bingo_moe_print_runtime_timing_v3",
     )
 
 if __name__ == "__main__":

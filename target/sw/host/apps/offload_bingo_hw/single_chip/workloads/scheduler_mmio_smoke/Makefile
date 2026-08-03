@@ -14,7 +14,6 @@ BINGO_HOST ?= 1
 INCL_DEVICE_BINARY ?= 1
 
 MOE_SCHED_DIR = $(MK_DIR)/../multi_cluster_MoE
-SRCS += $(MOE_SCHED_DIR)/moe_scheduler.c
 
 OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
 
@@ -24,6 +23,10 @@ OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
 INCDIRS += $(MK_DIR)
 INCDIRS += $(MOE_SCHED_DIR)
 PARTIAL_OUTPUTS += $(OFFLOAD_H)
+
+# The common host header contains unrelated software kernels. Keep this MMIO
+# image limited to the reachable smoke-test path.
+RISCV_LDFLAGS += -Wl,--gc-sections
 
 .PHONY: gen-offload
 

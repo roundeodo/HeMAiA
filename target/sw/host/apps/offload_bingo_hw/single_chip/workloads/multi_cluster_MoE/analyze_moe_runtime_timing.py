@@ -1,24 +1,32 @@
 #!/usr/bin/env python3
-"""Analyze compact end-of-DFG MoE timing records from a UART log."""
+"""Validate and analyze dynamic-MoE runtime timing records."""
 
 from __future__ import annotations
 
 import argparse
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 
-RECORD_RE = re.compile(
+V2_RECORD_RE = re.compile(
     r"\[MOE_TIMING_RECORD\]\s+"
     r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+"
     r"(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+"
     r"([0-9a-fA-F]+)\s+(\d+)"
 )
+V3_RECORD_RE = re.compile(
+    r"\[MTR3\]\s+"
+    r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+"
+    r"(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+"
+    r"([0-9a-fA-F]+)\s+(\d+)"
+)
 VERSION_RE = re.compile(r"\[MOE_TIMING_BEGIN\]\s+version=(\d+)")
-END_RE = re.compile(r"\[MOE_TIMING_END\]\s+records=(\d+)")
-PHASE_RE = re.compile(
-    r"\[MOE_PHASE_MCYCLE\]\s+(\S+)\s+count=(\d+)\s+last=(\d+)\s+total=(\d+)"
+LEVEL_RE = re.compile(
+    r"\[MOE_TIMING_BEGIN\]\s+version=\d+\s+level=(\d+)"
+)
+END_RE = re.compile(
+    r"\[MOE_TIMING_END\]\s+records=(\d+)(?:\s+expected=(\d+))?"
 )
 
 STAGE_NAMES = {
@@ -32,8 +40,19 @@ STAGE_NAMES = {
     8: "prefetch_s4",
     9: "compute_s4",
     10: "store",
+    11: "config_s1",
+    12: "config_s3",
+    13: "cluster_begin",
+    14: "cluster_end",
 }
-RESOURCE_NAMES = {0: "none", 1: "idma", 2: "xdma", 3: "dma_both", 4: "versacore"}
+RESOURCE_NAMES = {
+    0: "none",
+    1: "idma",
+    2: "xdma",
+    3: "dma_both",
+    4: "versacore",
+    5: "config",
+}
 FLAG_NAMES = {
     0: "active",
     1: "skipped",
@@ -42,33 +61,48 @@ FLAG_NAMES = {
     4: "no_prefetch",
     5: "no_store",
 }
-DEFAULT_PARAMS = Path(__file__).with_name("params.hjson")
+STAGE_GROUPS = (
+    ("S1", frozenset((2, 3, 11))),
+    ("S2", frozenset((4, 5))),
+    ("S3", frozenset((6, 7, 12))),
+    ("S4", frozenset((8, 9))),
+    ("STORE", frozenset((10,))),
+)
+REQUIRED_SLOT_STAGES = frozenset().union(*(ids for _, ids in STAGE_GROUPS))
+SCOPE_BEGIN = 13
+SCOPE_END = 14
+UINT32_MASK = (1 << 32) - 1
 
 
 def delta(end: int, start: int) -> int:
-    return (end - start) & 0xFFFFFFFF
+    return (end - start) & UINT32_MASK
 
 
-def decode_record(match: re.Match[str], version: int) -> dict[str, int]:
-    meta, task = int(match[1], 16), int(match[2], 16)
-    start = int(match[3])
-    if version == 2:
-        total = int(match[4])
-        resource_offset = int(match[5])
-        body = int(match[6])
-        end = (start + total) & 0xFFFFFFFF
-        resource_start = (start + resource_offset) & 0xFFFFFFFF
-        resource_end = (resource_start + body) & 0xFFFFFFFF
-    elif version == 1:
-        end = int(match[4])
-        resource_start = int(match[5])
-        resource_end = int(match[6])
-        total = delta(end, start)
-        body = delta(resource_end, resource_start)
-    else:
-        raise SystemExit(f"unsupported MOE timing schema version {version}")
+def format_ticks(cycles: int, cycles_per_tick: float) -> str:
+    return f"{cycles / cycles_per_tick:.6f}"
 
-    record = {
+
+def format_flags(flags: int) -> str:
+    names = [name for bit, name in FLAG_NAMES.items() if flags & (1 << bit)]
+    return ",".join(names) if names else "none"
+
+
+def decode_common(
+    *,
+    node: int | None,
+    meta: int,
+    task: int,
+    start: int,
+    total: int,
+    resource_offset: int,
+    resource_cycles: int,
+    peer_wait: int,
+    units: int,
+    flags: int,
+    result: int,
+) -> dict[str, int | None]:
+    return {
+        "node": node,
         "stage": meta & 0xFF,
         "resource": (meta >> 8) & 0xF,
         "cluster": (meta >> 12) & 0xF,
@@ -78,336 +112,389 @@ def decode_record(match: re.Match[str], version: int) -> dict[str, int]:
         "expert": (task >> 6) & 0xFF,
         "ntokens": (task >> 14) & 0x3FF,
         "start": start,
-        "end": end,
-        "resource_start": resource_start,
-        "resource_end": resource_end,
-        "peer_wait": int(match[7]),
-        "units": int(match[8]),
-        "flags": int(match[9], 16),
-        "result": int(match[10]),
+        "end": (start + total) & UINT32_MASK,
+        "total": total,
+        "resource_offset": resource_offset,
+        "resource_cycles": resource_cycles,
+        "peer_wait": peer_wait,
+        "units": units,
+        "flags": flags,
+        "result": result,
     }
-    record["total"] = total
-    record["body"] = body
-    pre = delta(record["resource_start"], record["start"])
-    record["setup"] = max(0, pre - record["peer_wait"])
-    record["post"] = delta(record["end"], record["resource_end"])
-    return record
 
 
-def union_cycles(intervals: list[tuple[int, int]]) -> tuple[int, int, int]:
-    if not intervals:
-        return 0, 0, 0
-    intervals.sort()
-    first, current_end = intervals[0]
-    last = current_end
-    busy = 0
-    for start, end in intervals[1:]:
-        if start > current_end:
-            busy += current_end - first
-            first, current_end = start, end
-        elif end > current_end:
-            current_end = end
-        if end > last:
-            last = end
-    busy += current_end - first
-    window_start = intervals[0][0]
-    return last - window_start, busy, last - window_start - busy
+def decode_v2(match: re.Match[str]) -> dict[str, int | None]:
+    return decode_common(
+        node=None,
+        meta=int(match[1], 16),
+        task=int(match[2], 16),
+        start=int(match[3]),
+        total=int(match[4]),
+        resource_offset=int(match[5]),
+        resource_cycles=int(match[6]),
+        peer_wait=int(match[7]),
+        units=int(match[8]),
+        flags=int(match[9], 16),
+        result=int(match[10]),
+    )
 
 
-def format_flags(flags: int) -> str:
-    names = [name for bit, name in FLAG_NAMES.items() if flags & (1 << bit)]
-    return ",".join(names) if names else "none"
+def decode_v3(match: re.Match[str]) -> dict[str, int | None]:
+    return decode_common(
+        node=int(match[1], 16),
+        meta=int(match[2], 16),
+        task=int(match[3], 16),
+        start=int(match[4]),
+        total=int(match[5]),
+        resource_offset=int(match[6]),
+        resource_cycles=int(match[7]),
+        peer_wait=int(match[8]),
+        units=int(match[9]),
+        flags=int(match[10], 16),
+        result=int(match[11]),
+    )
 
 
-def load_model_dimensions(params_path: Path) -> tuple[int, int]:
-    required = ("hidden_size", "intermediate_size")
-    field_re = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*(\d+)\b")
-    values: dict[str, int] = {}
-    for line in params_path.read_text().splitlines():
-        match = field_re.match(line)
-        if match and match[1] in required:
-            values[match[1]] = int(match[2])
-    missing = [name for name in required if name not in values]
-    if missing:
-        raise SystemExit(
-            f"{params_path} missing compute-efficiency fields: {', '.join(missing)}"
-        )
-    return values["hidden_size"], values["intermediate_size"]
+def parse_records(text: str, version: int) -> list[dict[str, int | None]]:
+    if version == 2:
+        return [decode_v2(match) for match in V2_RECORD_RE.finditer(text)]
+    if version == 3:
+        return [decode_v3(match) for match in V3_RECORD_RE.finditer(text)]
+    raise SystemExit(f"unsupported MOE timing schema version {version}")
 
 
-def print_report(
-    records: list[dict[str, int]],
-    phases: list[tuple[str, int, int, int]],
-    details: bool,
-    hidden_size: int,
-    intermediate_size: int,
-    peak_mac_per_cluster_cc: float,
-    individual_cluster_count: int,
+def print_v2_rejection(
+    records: list[dict[str, int | None]], details: bool
 ) -> None:
-    if phases:
-        print("HOST PHASE MCYCLE")
-        for name, count, last, total in phases:
-            print(f"  {name:16s} count={count:3d} last={last:10d} total={total:10d}")
+    print("\nVALIDATION status=LEGACY_INCOMPLETE")
+    print("  schema v2 cannot produce a valid global, slot-stage, or task report")
+    print("  optimized multi-block stages overwrite one scratchpad per block")
+    print("  config tasks, cluster scope markers, and DFG node IDs are absent")
+    print("  no gap, idle-time, global-time, or stage-efficiency value is emitted")
+    if details:
+        print("\nLEGACY RAW RECORDS")
+        for record in records:
+            print(
+                f"  C{record['cluster']} core={record['core']} "
+                f"slot={record['slot']} eid={record['expert']} "
+                f"stage={STAGE_NAMES.get(record['stage'], 'unknown')} "
+                f"start={record['start']} total={record['total']}"
+            )
 
-    # Inactive static slots commit task metadata as zero. Grouping those records
-    # by the encoded slot would fold every inactive node into C2/C3 slot 0 and
-    # incorrectly extend the active slot and cluster windows to the end of the
-    # whole static DFG.
-    active_records = [record for record in records if record["ntokens"] > 0]
-    inactive_records = len(records) - len(active_records)
-    if inactive_records:
-        print(
-            f"\nINACTIVE STATIC RECORDS ignored={inactive_records} "
-            f"active={len(active_records)}"
+
+def find_scopes(
+    records: list[dict[str, int | None]],
+) -> tuple[dict[int, dict[str, int]], list[str]]:
+    by_cluster: dict[int, list[dict[str, int | None]]] = defaultdict(list)
+    for record in records:
+        by_cluster[int(record["cluster"])].append(record)
+
+    scopes: dict[int, dict[str, int]] = {}
+    errors: list[str] = []
+    for cluster, group in sorted(by_cluster.items()):
+        begins = [r for r in group if r["stage"] == SCOPE_BEGIN]
+        ends = [r for r in group if r["stage"] == SCOPE_END]
+        if not begins and not ends:
+            continue
+        if len(begins) != 1 or len(ends) != 1:
+            errors.append(
+                f"C{cluster}: expected one cluster_begin and one cluster_end, "
+                f"found {len(begins)} and {len(ends)}"
+            )
+            continue
+        begin, end = begins[0], ends[0]
+        if begin["core"] != end["core"]:
+            errors.append(
+                f"C{cluster}: scope markers use different cores "
+                f"({begin['core']} vs {end['core']})"
+            )
+            continue
+        epoch = int(begin["end"])
+        stop = int(end["start"])
+        scopes[cluster] = {
+            "epoch": epoch,
+            "stop": stop,
+            "duration": delta(stop, epoch),
+            "core": int(begin["core"]),
+            "begin_node": int(begin["node"]),
+            "end_node": int(end["node"]),
+        }
+    if len(scopes) < 2:
+        errors.append(
+            f"global time requires two valid cluster-local scopes, found {len(scopes)}"
         )
+    return scopes, errors
 
-    slots: dict[tuple[int, int], list[dict[str, int]]] = defaultdict(list)
-    clusters: dict[int, list[dict[str, int]]] = defaultdict(list)
-    resources: dict[tuple[int, str], list[tuple[int, int]]] = defaultdict(list)
-    for record in active_records:
-        slots[(record["cluster"], record["slot"])].append(record)
-        clusters[record["cluster"]].append(record)
-        resource = record["resource"]
-        if resource in (1, 3):
-            resources[(record["cluster"], "idma")].append(
-                (record["resource_start"], record["resource_end"])
-            )
-        if resource in (2, 3):
-            resources[(record["cluster"], "xdma")].append(
-                (record["resource_start"], record["resource_end"])
-            )
-        if resource == 4:
-            resources[(record["cluster"], "versacore")].append(
-                (record["resource_start"], record["resource_end"])
-            )
 
-    print("\nSLOT WINDOWS")
-    for key in sorted(slots):
-        group = slots[key]
-        start, end = min(r["start"] for r in group), max(r["end"] for r in group)
-        dma = sum(r["body"] for r in group if r["resource"] in (1, 2, 3))
-        compute = sum(r["body"] for r in group if r["resource"] == 4)
-        vc_hw = sum(r["units"] for r in group if r["resource"] == 4)
-        wait = sum(r["peer_wait"] for r in group)
-        dma_bytes = sum(r["units"] for r in group if r["resource"] in (1, 2, 3))
+def add_scope_offsets(
+    records: list[dict[str, int | None]], scopes: dict[int, dict[str, int]]
+) -> list[str]:
+    errors: list[str] = []
+    for record in records:
+        cluster = int(record["cluster"])
+        if cluster not in scopes or record["stage"] in (SCOPE_BEGIN, SCOPE_END):
+            continue
+        scope = scopes[cluster]
+        start_offset = delta(int(record["start"]), scope["epoch"])
+        end_offset = start_offset + int(record["total"])
+        record["start_offset"] = start_offset
+        record["end_offset"] = end_offset
+        if end_offset > scope["duration"]:
+            errors.append(
+                f"node {record['node']} in C{cluster} ends outside its cluster scope"
+            )
+    return errors
+
+
+def print_global(
+    scopes: dict[int, dict[str, int]], cycles_per_tick: float
+) -> None:
+    print("\nGLOBAL EXECUTION TIME")
+    print("  definition=max(per-cluster local mcycle scope); no cross-cluster subtraction")
+    for cluster, scope in sorted(scopes.items()):
+        print(
+            f"  C{cluster} core={scope['core']} begin_node={scope['begin_node']} "
+            f"end_node={scope['end_node']} cycles={scope['duration']} "
+            f"ticks={format_ticks(scope['duration'], cycles_per_tick)}"
+        )
+    if len(scopes) >= 2:
+        critical_cluster, critical = max(
+            scopes.items(), key=lambda item: item[1]["duration"]
+        )
+        print(
+            f"  GLOBAL=max(C-local) C{critical_cluster} cycles={critical['duration']} "
+            f"ticks={format_ticks(critical['duration'], cycles_per_tick)}"
+        )
+    else:
+        print("  GLOBAL=UNAVAILABLE")
+
+
+def interval_union(intervals: list[tuple[int, int]]) -> int:
+    if not intervals:
+        return 0
+    intervals = sorted(intervals)
+    start, end = intervals[0]
+    total = 0
+    for next_start, next_end in intervals[1:]:
+        if next_start > end:
+            total += end - start
+            start, end = next_start, next_end
+        else:
+            end = max(end, next_end)
+    return total + end - start
+
+
+def active_slots(
+    records: list[dict[str, int | None]], scopes: dict[int, dict[str, int]]
+) -> dict[tuple[int, int], list[dict[str, int | None]]]:
+    slots: dict[tuple[int, int], list[dict[str, int | None]]] = defaultdict(list)
+    for record in records:
+        if (
+            int(record["cluster"]) in scopes
+            and int(record["ntokens"]) > 0
+            and record["stage"] not in (SCOPE_BEGIN, SCOPE_END)
+        ):
+            slots[(int(record["cluster"]), int(record["slot"]))].append(record)
+    return slots
+
+
+def validate_slots(
+    slots: dict[tuple[int, int], list[dict[str, int | None]]]
+) -> list[str]:
+    errors: list[str] = []
+    for (cluster, slot), group in sorted(slots.items()):
+        stages = Counter(int(record["stage"]) for record in group)
+        missing = sorted(REQUIRED_SLOT_STAGES - stages.keys())
+        if missing:
+            errors.append(
+                f"C{cluster} slot={slot}: missing task records "
+                + ",".join(STAGE_NAMES[stage] for stage in missing)
+            )
+        if slot == 0 and stages[1] == 0:
+            errors.append(f"C{cluster} slot=0: missing gather_s1 record")
+    return errors
+
+
+def validate_timing_level(
+    records: list[dict[str, int | None]], timing_level: int
+) -> list[str]:
+    if timing_level not in (1, 2):
+        return [f"unsupported MOE runtime timing level {timing_level}"]
+    if timing_level == 1:
+        unexpected = [
+            record
+            for record in records
+            if int(record["stage"]) not in (SCOPE_BEGIN, SCOPE_END)
+        ]
+        if unexpected:
+            return [
+                f"level 1 capture contains {len(unexpected)} non-scope records"
+            ]
+    return []
+
+
+def print_slot_and_stage_report(
+    slots: dict[tuple[int, int], list[dict[str, int | None]]],
+    cycles_per_tick: float,
+) -> None:
+    print("\nSLOT AND STAGE WALL TIMES")
+    print("  stage wall=max(node end)-min(node start) inside one cluster clock domain")
+    print("  stages may overlap; stage wall values must not be summed")
+    for (cluster, slot), group in sorted(slots.items()):
+        start = min(int(record["start_offset"]) for record in group)
+        end = max(int(record["end_offset"]) for record in group)
+        covered = interval_union(
+            [
+                (int(record["start_offset"]), int(record["end_offset"]))
+                for record in group
+            ]
+        )
         first = group[0]
         print(
-            f"  C{key[0]} slot={key[1]:2d} eid={first['expert']:2d} ntok={first['ntokens']:3d} "
-            f"window={delta(end, start):9d} dma_api={dma:9d} vc_api={compute:9d} "
-            f"vc_hw={vc_hw:9d} peer_wait={wait:7d} bytes={dma_bytes}"
+            f"  C{cluster} slot={slot:2d} eid={first['expert']:2d} "
+            f"ntok={first['ntokens']:3d} task_cycles={end - start:8d} "
+            f"task_ticks={format_ticks(end - start, cycles_per_tick)} "
+            f"recorded_union={covered:8d}"
         )
-
-    active_slots = slots
-    mac_per_pair = 3 * hidden_size * intermediate_size
-    active_clusters = sorted({key[0] for key in active_slots})
-    if active_slots and active_clusters:
-        first_slot_start = min(
-            min(record["start"] for record in group)
-            for group in active_slots.values()
-        )
-        last_slot_end = max(
-            max(record["end"] for record in group)
-            for group in active_slots.values()
-        )
-        timespan = delta(last_slot_end, first_slot_start)
-        routed_token_expert_pairs = sum(
-            max(record["ntokens"] for record in group)
-            for group in active_slots.values()
-        )
-        useful_mac = routed_token_expert_pairs * mac_per_pair
-        total_peak = individual_cluster_count * peak_mac_per_cluster_cc
-        ideal_cycles = useful_mac / total_peak
-        efficiency = 100.0 * ideal_cycles / timespan if timespan else 0.0
-
-        print("\nINDIVIDUAL EXPERT COMPUTE EFFICIENCY")
-        print(
-            "  definition=ideal_compute_cycles/first_active_slot_to_last_active_slot"
-        )
-        print(
-            f"  active_slots={len(active_slots)} clusters={active_clusters} "
-            f"routed_token_expert_pairs={routed_token_expert_pairs}"
-        )
-        print(
-            f"  useful_mac={useful_mac} "
-            f"({routed_token_expert_pairs} * 3 * {hidden_size} * {intermediate_size})"
-        )
-        print(
-            f"  peak={individual_cluster_count} * {peak_mac_per_cluster_cc:g} "
-            f"= {total_peak:g} MAC/cc ideal={ideal_cycles:.0f} cc"
-        )
-        print(
-            f"  first_slot_start={first_slot_start} last_slot_end={last_slot_end} "
-            f"timespan={timespan} cc"
-        )
-        print(f"  compute_efficiency={efficiency:.2f}%")
-        print("  note=vc_api/vc_hw busy cycles are diagnostics, not the numerator")
-
-    cluster_windows: dict[int, tuple[int, int]] = {}
-    print("\nCLUSTER WINDOWS")
-    for cluster in sorted(clusters):
-        group = clusters[cluster]
-        start, end = min(r["start"] for r in group), max(r["end"] for r in group)
-        cluster_windows[cluster] = (start, end)
-        cluster_slot_ids = sorted({r["slot"] for r in group})
-        routed_pairs = sum(
-            max(r["ntokens"] for r in group if r["slot"] == slot)
-            for slot in cluster_slot_ids
-        )
-        ideal_cycles = routed_pairs * mac_per_pair / peak_mac_per_cluster_cc
-        window = delta(end, start)
-        efficiency = 100.0 * ideal_cycles / window if window else 0.0
-        print(
-            f"  C{cluster} slots={len(cluster_slot_ids):2d} pairs={routed_pairs:3d} "
-            f"records={len(group):3d} start={start} end={end} window={delta(end, start)}"
-            f" ideal={ideal_cycles:.0f} efficiency={efficiency:.2f}%"
-        )
-
-    print("\nINTER-SLOT GAPS")
-    for cluster in sorted(clusters):
-        group = clusters[cluster]
-        windows = []
-        for slot in sorted({r["slot"] for r in group}):
-            slot_group = [r for r in group if r["slot"] == slot]
-            windows.append(
-                (
-                    min(r["start"] for r in slot_group),
-                    max(r["end"] for r in slot_group),
-                )
-            )
-        slot_window_sum = sum(delta(end, start) for start, end in windows)
-        inter_slot_gap = sum(
-            max(0, windows[idx][0] - windows[idx - 1][1])
-            for idx in range(1, len(windows))
-        )
-        cluster_start, cluster_end = cluster_windows[cluster]
-        cluster_window = delta(cluster_end, cluster_start)
-        gap_share = 100.0 * inter_slot_gap / cluster_window if cluster_window else 0.0
-        print(
-            f"  C{cluster} slot_windows={slot_window_sum:9d} "
-            f"inter_slot_gap={inter_slot_gap:9d} gap_share={gap_share:6.2f}%"
-        )
-
-    print("\nRESOURCE UTILIZATION IN CLUSTER WINDOW")
-    for (cluster, resource), intervals in sorted(resources.items()):
-        _, api_busy, _ = union_cycles(intervals)
-        cluster_start, cluster_end = cluster_windows[cluster]
-        window = delta(cluster_end, cluster_start)
-        if resource == "versacore":
-            hw_busy = sum(
-                r["units"]
-                for r in clusters[cluster]
-                if r["resource"] == 4
-            )
-            busy = hw_busy if hw_busy else api_busy
-            source = "hw" if hw_busy else "api-fallback"
-            idle = max(0, window - busy)
-            utilization = 100.0 * busy / window if window else 0.0
-            print(
-                f"  C{cluster} {resource:10s} records={len(intervals):3d} "
-                f"cluster_window={window:9d} api_busy={api_busy:9d} "
-                f"hw_busy={hw_busy:9d} idle={idle:9d} util={utilization:6.2f}% "
-                f"source={source}"
-            )
-        else:
-            idle = max(0, window - api_busy)
-            utilization = 100.0 * api_busy / window if window else 0.0
-            print(
-                f"  C{cluster} {resource:10s} records={len(intervals):3d} "
-                f"cluster_window={window:9d} busy={api_busy:9d} idle={idle:9d} "
-                f"util={utilization:6.2f}%"
-            )
-
-    if details:
-        print("\nSLOT NODE TIMELINES")
-        for key in sorted(slots):
-            group = sorted(slots[key], key=lambda item: (item["start"], item["stage"]))
-            slot_start = min(r["start"] for r in group)
-            slot_end = max(r["end"] for r in group)
-            first = group[0]
-            print(
-                f"  C{key[0]} slot={key[1]} eid={first['expert']} "
-                f"ntok={first['ntokens']} start={slot_start} end={slot_end}"
-            )
-            for r in group:
-                stage = STAGE_NAMES.get(r["stage"], "unknown")
-                resource = RESOURCE_NAMES.get(r["resource"], "unknown")
-                if r["body"]:
-                    resource_window = (
-                        f"resource_start={r['resource_start']} "
-                        f"resource_end={r['resource_end']}"
-                    )
-                else:
-                    resource_window = "resource_start=- resource_end=-"
-                if r["resource"] in (1, 2, 3):
-                    units = f"bytes={r['units']}"
-                elif r["resource"] == 4:
-                    units = f"vc_hw_cycles={r['units']}"
-                else:
-                    units = f"units={r['units']}"
+        if slot == 0:
+            gather = [record for record in group if record["stage"] == 1]
+            if gather:
+                g_start = min(int(record["start_offset"]) for record in gather)
+                g_end = max(int(record["end_offset"]) for record in gather)
                 print(
-                    f"    {stage:12s} block={r['block']:2d} core={r['core']} "
-                    f"start={r['start']} end={r['end']} resource={resource:10s} "
-                    f"{resource_window} peer_wait={r['peer_wait']} "
-                    f"{units} status={format_flags(r['flags'])} "
-                    f"rc={r['result']}"
+                    f"      INPUT  start={g_start:8d} end={g_end:8d} "
+                    f"wall={g_end - g_start:8d} "
+                    f"ticks={format_ticks(g_end - g_start, cycles_per_tick)}"
                 )
+        for name, stage_ids in STAGE_GROUPS:
+            stage_records = [r for r in group if r["stage"] in stage_ids]
+            if not stage_records:
+                print(f"      {name:6s} MISSING")
+                continue
+            stage_start = min(int(r["start_offset"]) for r in stage_records)
+            stage_end = max(int(r["end_offset"]) for r in stage_records)
+            print(
+                f"      {name:6s} start={stage_start:8d} end={stage_end:8d} "
+                f"wall={stage_end - stage_start:8d} "
+                f"ticks={format_ticks(stage_end - stage_start, cycles_per_tick)}"
+            )
+
+
+def print_task_details(
+    slots: dict[tuple[int, int], list[dict[str, int | None]]],
+    cycles_per_tick: float,
+) -> None:
+    print("\nDFG TASK TIMES")
+    for (cluster, slot), group in sorted(slots.items()):
+        print(f"  C{cluster} slot={slot}")
+        for record in sorted(
+            group,
+            key=lambda item: (int(item["start_offset"]), int(item["node"])),
+        ):
+            resource = RESOURCE_NAMES.get(int(record["resource"]), "unknown")
+            print(
+                f"    node={record['node']:4d} core={record['core']} "
+                f"stage={STAGE_NAMES.get(int(record['stage']), 'unknown'):12s} "
+                f"start={record['start_offset']:8d} end={record['end_offset']:8d} "
+                f"cycles={record['total']:7d} "
+                f"ticks={format_ticks(int(record['total']), cycles_per_tick)} "
+                f"resource={resource:10s} resource_span={record['resource_cycles']:7d} "
+                f"wait={record['peer_wait']:6d} flags={format_flags(int(record['flags']))} "
+                f"rc={record['result']}"
+            )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("log", type=Path, help="UART or simulator log")
     parser.add_argument(
-        "--details",
-        action="store_true",
-        help="print every slot node with node and resource start/end timestamps",
+        "--details", action="store_true", help="print every DFG task record"
     )
     parser.add_argument(
-        "--params",
-        type=Path,
-        default=DEFAULT_PARAMS,
-        help="workload params.hjson used for hidden/intermediate dimensions",
-    )
-    parser.add_argument(
-        "--peak-mac-per-cluster-cc",
+        "--cycles-per-tick",
         type=float,
-        default=512.0,
-        help="theoretical peak of one individual dual-VersaCore cluster",
+        default=8192.0,
+        help="cycles represented by one structural-model tick (default: 8192)",
     )
-    parser.add_argument(
-        "--individual-cluster-count",
-        type=int,
-        default=2,
-        help="number of available individual expert clusters (default: C2 and C3)",
-    )
+    # Accepted for command-line compatibility with the removed MAC-efficiency report.
+    parser.add_argument("--params", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--peak-mac-per-cluster-cc", type=float, help=argparse.SUPPRESS)
+    parser.add_argument("--individual-cluster-count", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.cycles_per_tick <= 0:
+        raise SystemExit("--cycles-per-tick must be positive")
 
     text = args.log.read_text(errors="replace")
     version_match = VERSION_RE.search(text)
     if version_match is None:
         raise SystemExit("no [MOE_TIMING_BEGIN] schema version found")
     version = int(version_match[1])
-    records = [decode_record(match, version) for match in RECORD_RE.finditer(text)]
-    phases = [
-        (match[1], int(match[2]), int(match[3]), int(match[4]))
-        for match in PHASE_RE.finditer(text)
-    ]
+    level_match = LEVEL_RE.search(text)
+    # Schema-v3 logs produced before timing levels were introduced are full
+    # captures and therefore have level-2 semantics.
+    timing_level = int(level_match[1]) if level_match else 2
+    records = parse_records(text, version)
     if not records:
-        raise SystemExit("no [MOE_TIMING_RECORD] entries found")
+        raise SystemExit(f"no schema-v{version} timing records found")
     end_match = END_RE.search(text)
-    expected = int(end_match[1]) if end_match else len(records)
-    print(f"TIMING RECORDS schema=v{version} parsed={len(records)} expected={expected}")
-    if len(records) != expected:
-        print("  WARNING: incomplete records detected; the capture likely truncated long UART lines")
-    hidden_size, intermediate_size = load_model_dimensions(args.params)
-    print_report(
-        records,
-        phases,
-        args.details,
-        hidden_size,
-        intermediate_size,
-        args.peak_mac_per_cluster_cc,
-        args.individual_cluster_count,
+    reported = int(end_match[1]) if end_match else None
+    expected_tasks = (
+        int(end_match[2]) if end_match and end_match[2] is not None else None
     )
+    uart_complete = reported is not None and reported == len(records)
+    task_capture_complete = (
+        version == 3
+        and reported is not None
+        and expected_tasks is not None
+        and reported == expected_tasks
+    )
+    reported_text = str(reported) if reported is not None else "missing-end-marker"
+    expected_text = str(expected_tasks) if expected_tasks is not None else "unavailable"
+    print(
+        f"TIMING RECORDS schema=v{version} level={timing_level} "
+        f"parsed={len(records)} "
+        f"printed={reported_text} expected_tasks={expected_text} "
+        f"uart_complete={'yes' if uart_complete else 'no'} "
+        f"task_capture_complete={'yes' if task_capture_complete else 'no'}"
+    )
+
+    if version == 2:
+        print_v2_rejection(records, args.details)
+        return
+
+    errors = validate_timing_level(records, timing_level)
+    scopes, scope_errors = find_scopes(records)
+    errors.extend(scope_errors)
+    errors.extend(add_scope_offsets(records, scopes))
+    slots = active_slots(records, scopes) if timing_level == 2 else {}
+    if timing_level == 2:
+        errors.extend(validate_slots(slots))
+    if not uart_complete:
+        errors.append("UART capture is incomplete")
+    if expected_tasks is None:
+        errors.append("schema-v3 end marker has no expected task count")
+    elif not task_capture_complete:
+        errors.append(
+            f"only {reported} of {expected_tasks} profiled DFG tasks wrote records"
+        )
+
+    print(f"\nVALIDATION status={'VALID' if not errors else 'INCOMPLETE'}")
+    print("  clock_domain=cluster-local mcycle")
+    print("  cross_cluster_timestamp_subtraction=forbidden")
+    for error in errors:
+        print(f"  ERROR: {error}")
+
+    print_global(scopes, args.cycles_per_tick)
+    if timing_level == 1:
+        print("\nDETAIL TIMING disabled at MOE_RUNTIME_TIMING=1")
+        print("  rebuild with MOE_RUNTIME_TIMING=2 for slot/stage/task records")
+        return
+    if slots:
+        print_slot_and_stage_report(slots, args.cycles_per_tick)
+        if args.details:
+            print_task_details(slots, args.cycles_per_tick)
+    else:
+        print("\nSLOT AND STAGE WALL TIMES unavailable: no active slot records")
 
 
 if __name__ == "__main__":

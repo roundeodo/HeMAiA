@@ -1,13 +1,7 @@
-/* moe_scheduler.h
- * --------------------------------------------------------------------------
- * Analytical greedy scheduler for HeMAiA two-cluster MoE workload.
- * Pure host-side (CVA6) function. No FP, no malloc, no OS deps.
- *
- * Pipeline-stage cycle constants (per 1 token, on a 1-cluster x 2-versacore
- * compute fabric @ 512 MAC/cc) are hard-coded in moe_scheduler.c and MUST
- * be kept in sync with Idea_Model/four_stage_scheduler.py.
- * --------------------------------------------------------------------------
- */
+/* Host-side mirror of Idea_Model/scheduler_rtl_distilled_policy.py.
+ * Pure C99: no FP, malloc, OS service, beam search, or runtime coefficient
+ * table.  Internal scheduling time is represented in exact 11,264-cycle
+ * lattice ticks; cycle units do not escape through the task ABI. */
 #ifndef MOE_SCHEDULER_H
 #define MOE_SCHEDULER_H
 
@@ -110,10 +104,11 @@ typedef struct {
     uint16_t     n_dma_ops;                 /* valid DMA ops count             */
     /* REMOVED: est_makespan_cc (timing no longer propagated to L3)            */
 } moe_schedule_t;
-/* ── RTL compact plan format -------------------------------------------------
- * This mirrors the pure-slave scheduler RTL output after commit_unit:
- * one entry is one actual cluster task.  Timing/snap fields are intentionally
- * absent; S4 prefetch legality is carried by allow_s4pf.
+/* ── Compact compatibility plan format --------------------------------------
+ * This exports one actual cluster task per entry for existing schedule-core
+ * comparison tests.  It does not feed the C policy.  New plans carry explicit
+ * DMA bindings and a concrete S4-prefetch target; allow_s4pf exists only for
+ * lowering older plan producers.
  */
 typedef struct {
     moe_cluster_t cluster;
@@ -125,12 +120,21 @@ typedef struct {
     uint8_t       skip_s1;
     uint8_t       skip_s3;
     uint8_t       has_s2pf;
+    /* The final distilled policy separates shape from physical DMA binding.
+     * These fields are explicit so Shape-B/BOTH and S2PF/BOTH survive lowering. */
+    moe_dma_binding_t dma_s1;
+    moe_dma_binding_t dma_s3;
+    moe_dma_binding_t s2pf_dma;
 } moe_hw_plan_desc_t;
 
 typedef struct {
     uint8_t            valid;
     moe_hw_plan_desc_t desc;
+    /* Legacy legality bit is retained for source compatibility.  New plans
+     * carry the concrete targeted prefetch below and leave this bit at zero. */
     uint8_t            allow_s4pf;
+    moe_dma_binding_t  s4pf_dma;
+    int16_t            s4pf_expert_id;
 } moe_hw_plan_entry_t;
 
 /* ── Return codes ─────────────────────────────────────────────────────── */
@@ -156,15 +160,16 @@ typedef enum {
  *          dispatch_to_cluster(&sch.tasks[i]); // mailbox / SPM write
  *      }
  *
- *  The function is deterministic and reentrant. Runtime depends on how many
- *  candidate branches are enumerated for the current request. No dynamic
- *  memory is used.
+ *  The function is deterministic and allocation-free. It uses one static
+ *  internal plan scratch buffer, matching the single scheduler invocation on
+ *  the host control core; concurrent callers must serialize this API.
  * ───────────────────────────────────────────────────────────────────────── */
 #ifndef MOE_ENABLE_HW_SCHEDULER
 moe_status_t moe_schedule(const moe_request_t *req, moe_schedule_t *out);
 
-/* Generate the same compact plan representation that the RTL scheduler emits.
- * This is intended as the software golden model for RTL schedule_core tests.
+/* Export the Python-derived C result in the compact representation consumed by
+ * RTL schedule-core tests. This compatibility format is not an input to the C
+ * policy and does not define scheduler decisions.
  */
 moe_status_t moe_make_hw_plan(const moe_request_t *req,
                               moe_hw_plan_entry_t *plan,
@@ -177,6 +182,14 @@ moe_status_t moe_lower_hw_plan(const moe_request_t *req,
                                const moe_hw_plan_entry_t *plan,
                                uint16_t n_plan,
                                moe_schedule_t *out);
+
+#ifdef MOE_SCHEDULER_TEST_API
+/* Native lockstep hook.  The value is in scheduler ticks, where one tick is
+ * exactly 11,264 reference cycles.  It is excluded from production builds. */
+moe_status_t moe_schedule_debug(const moe_request_t *req,
+                                moe_schedule_t *out,
+                                uint32_t *makespan_ticks);
+#endif
 #endif
 
 #ifdef __cplusplus

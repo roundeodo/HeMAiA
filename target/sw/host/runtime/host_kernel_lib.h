@@ -44,7 +44,8 @@
 #define MOE_HOST_TIMING_LOWER_DMA    14u
 #define MOE_HOST_TIMING_LOWER_FINAL  15u
 #define MOE_HOST_TIMING_LOWER_PRE    16u
-#define MOE_HOST_TIMING_COUNT        17u
+#define MOE_HOST_TIMING_SW_SCHED     17u
+#define MOE_HOST_TIMING_COUNT        18u
 
 typedef struct {
     uint64_t start;
@@ -81,6 +82,7 @@ static inline void __host_bingo_moe_print_phase_timing(void)
     MOE_HOST_TIMING_PRINT("RouterSched", MOE_HOST_TIMING_ROUTER_SCHED);
     MOE_HOST_TIMING_PRINT("MoEPrepare", MOE_HOST_TIMING_PREPARE);
     MOE_HOST_TIMING_PRINT("MoEExecute", MOE_HOST_TIMING_EXECUTE);
+    MOE_HOST_TIMING_PRINT("SW_SCHED", MOE_HOST_TIMING_SW_SCHED);
     MOE_HOST_TIMING_PRINT("HW_SCHED", MOE_HOST_TIMING_HW_SCHED);
 #if MOE_MCYCLE_DETAIL
     MOE_HOST_TIMING_PRINT("HW_SORT", MOE_HOST_TIMING_HW_SORT);
@@ -239,24 +241,123 @@ static inline uint64_t __host_bingo_kernel_check_result(void *arg){
     uint32_t err = 0;
 
     if (check_type == BINGO_CHECK_TYPE_BYTE_EXACT) {
-        // Byte-exact (original behavior — preserved verbatim)
+        uint64_t first_mismatch = data_size;
+        if ((((uintptr_t)output_data_addr | (uintptr_t)golden_data_addr) &
+             (sizeof(uint64_t) - 1u)) == 0u) {
+            typedef uint64_t bingo_check_word_t __attribute__((may_alias));
+            const bingo_check_word_t *output_words =
+                (const bingo_check_word_t *)(const void *)output_data_addr;
+            const bingo_check_word_t *golden_words =
+                (const bingo_check_word_t *)(const void *)golden_data_addr;
+            uint64_t word_count = data_size / sizeof(uint64_t);
+            for (uint64_t i = 0; i < word_count; i++) {
+                if (output_words[i] != golden_words[i]) {
+                    first_mismatch = i * sizeof(uint64_t);
+                    break;
+                }
+            }
+            if (first_mismatch == data_size) {
+                for (uint64_t i = word_count * sizeof(uint64_t);
+                     i < data_size; i++) {
+                    if (output_data_addr[i] != golden_data_addr[i]) {
+                        first_mismatch = i;
+                        break;
+                    }
+                }
+            }
+        } else {
+            for (uint64_t i = 0; i < data_size; i++) {
+                if (output_data_addr[i] != golden_data_addr[i]) {
+                    first_mismatch = i;
+                    break;
+                }
+            }
+        }
+
+        if (first_mismatch == data_size) {
+            BINGO_TRACE_MARKER(BINGO_TRACE_DUMMY_KERNEL_END);
+            sp->return_value = 0;
+            sp->num_return_values = 0;
+            printf_safe("[Host] Check [%s]: PASS (%d bytes)\r\n", name,
+                        data_size);
+            return 0;
+        }
+
+        enum {
+            CHECK_DIAG_MAX_SAMPLES = 8,
+            CHECK_DIAG_CHUNK_BYTES = 4096,
+            CHECK_DIAG_MAX_CHUNKS = 8,
+        };
+        uint64_t sample_idx[CHECK_DIAG_MAX_SAMPLES];
+        uint8_t sample_output[CHECK_DIAG_MAX_SAMPLES];
+        uint8_t sample_golden[CHECK_DIAG_MAX_SAMPLES];
+        uint32_t sample_count = 0;
+        uint32_t output_nonzero = 0;
+        uint32_t golden_nonzero = 0;
+        uint32_t output_hash = 2166136261u;
+        uint32_t golden_hash = 2166136261u;
+
         for (uint64_t i = 0; i < data_size; i++) {
-            if (output_data_addr[i] != golden_data_addr[i]) {
+            uint8_t output_byte = output_data_addr[i];
+            uint8_t golden_byte = golden_data_addr[i];
+            output_nonzero += output_byte != 0;
+            golden_nonzero += golden_byte != 0;
+            output_hash = (output_hash ^ output_byte) * 16777619u;
+            golden_hash = (golden_hash ^ golden_byte) * 16777619u;
+            if (output_byte != golden_byte) {
+                if (sample_count < CHECK_DIAG_MAX_SAMPLES) {
+                    sample_idx[sample_count] = i;
+                    sample_output[sample_count] = output_byte;
+                    sample_golden[sample_count] = golden_byte;
+                    sample_count++;
+                }
                 err++;
-                printf_safe("[%s] output[%d]=%d, golden[%d]=%d\n",
-                       name, i, output_data_addr[i], i, golden_data_addr[i]);
             }
         }
         BINGO_TRACE_MARKER(BINGO_TRACE_DUMMY_KERNEL_END);
         sp->return_value = err;
         sp->num_return_values = 0;
-        if (err == 0) {
-            printf_safe("[Host] Check [%s]: PASS (%d bytes)\r\n", name, data_size);
-            return 0;
-        } else {
-            printf_safe("[Host] Check [%s]: FAIL (%d / %d bytes)\r\n", name, err, data_size);
-            return EXIT_CODE_FAIL;
+        printf_safe("[CHECK_DIAG] %s bytes=%lu err=%u out_nz=%u golden_nz=%u out_hash=0x%08x golden_hash=0x%08x\r\n",
+                    name, data_size, err, output_nonzero, golden_nonzero,
+                    output_hash, golden_hash);
+        for (uint32_t i = 0; i < sample_count; i++) {
+            printf_safe("[CHECK_SAMPLE] %s idx=%lu out=0x%02x golden=0x%02x\r\n",
+                        name, sample_idx[i], (unsigned)sample_output[i],
+                        (unsigned)sample_golden[i]);
         }
+
+        uint32_t chunk_reports = 0;
+        uint32_t chunks_with_errors = 0;
+        for (uint64_t begin = 0; begin < data_size;
+             begin += CHECK_DIAG_CHUNK_BYTES) {
+            uint64_t end = begin + CHECK_DIAG_CHUNK_BYTES;
+            if (end > data_size) end = data_size;
+            uint32_t chunk_err = 0;
+            uint32_t chunk_output_nonzero = 0;
+            uint32_t chunk_golden_nonzero = 0;
+            for (uint64_t i = begin; i < end; i++) {
+                uint8_t output_byte = output_data_addr[i];
+                uint8_t golden_byte = golden_data_addr[i];
+                chunk_output_nonzero += output_byte != 0;
+                chunk_golden_nonzero += golden_byte != 0;
+                chunk_err += output_byte != golden_byte;
+            }
+            if (chunk_err == 0) continue;
+            chunks_with_errors++;
+            if (chunk_reports < CHECK_DIAG_MAX_CHUNKS) {
+                printf_safe("[CHECK_CHUNK] %s off=%lu size=%lu err=%u out_nz=%u golden_nz=%u\r\n",
+                            name, begin, end - begin, chunk_err,
+                            chunk_output_nonzero, chunk_golden_nonzero);
+                chunk_reports++;
+            }
+        }
+        if (chunks_with_errors > chunk_reports) {
+            printf_safe("[CHECK_CHUNK] %s shown=%u total_bad=%u\r\n",
+                        name, chunk_reports, chunks_with_errors);
+        }
+        printf_safe("[Host] Check [%s]: FAIL (%d / %d bytes)\r\n", name,
+                    err, data_size);
+        return EXIT_CODE_FAIL;
     } else if (check_type == BINGO_CHECK_TYPE_FP32_TOL) {
         // FP32 absolute-tolerance mode
         const float* out_f    = (const float*)output_data_addr;

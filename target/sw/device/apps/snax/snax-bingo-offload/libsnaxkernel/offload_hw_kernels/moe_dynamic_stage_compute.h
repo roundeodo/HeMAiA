@@ -6,7 +6,8 @@ __moe_run_s2_compute(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
     const __snax_bingo_moe_dynamic_expert_static_args_t *st,
-    uint32_t s4_csr_layout)
+    uint32_t s4_csr_layout,
+    uint32_t configure_block0)
 {
     MOE_PROFILE_BEGIN(profile);
     const __snax_bingo_moe_dyn_s2_call_args_t *call = &cfg->s2_call;
@@ -38,7 +39,7 @@ __moe_run_s2_compute(
                 compute_step < s2->transfer_count) {
                 __moe_pipeline_wait(&s2->prefetch_done, compute_step);
             }
-            if (mt == 0u && n == 0u &&
+            if (configure_block0 != 0u && mt == 0u && n == 0u &&
                 !__moe_csr_stage_is_prepared(blk, MOE_CSR_PREPARED_S2)) {
                 __moe_bank_configure_mode0(
                     __moe_bank_a_addr(
@@ -106,6 +107,7 @@ __moe_run_s2_compute(
 
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s2(void *arg)
 {
+    MOE_PROFILE_BEGIN(stage_profile);
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
     const __snax_bingo_moe_dynamic_expert_static_args_t *st =
@@ -114,10 +116,22 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s2(void *arg)
     __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg =
         (__snax_bingo_kernel_moe_dynamic_expert_args_t *)(uintptr_t)
         blk->task_arg_addr;
-    if (__moe_dyn_slot_active_this_round(cfg, st)) {
-        __moe_run_s2_compute(
-            blk, cfg, st, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
+    if (!__moe_dyn_slot_active_this_round(cfg, st) ||
+        cfg->s2_call.valid == 0u) {
+        MOE_PROFILE_COMMIT(
+            arg, cfg, stage_profile, MOE_PROFILE_STAGE_COMPUTE_S2,
+            MOE_PROFILE_RESOURCE_NONE, 0u, 0u,
+            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_CTRL_SKIP,
+            BINGO_RET_SUCC);
+        return BINGO_RET_SUCC;
     }
+    MOE_PROFILE_RESOURCE_BEGIN(stage_profile);
+    __moe_run_s2_compute(
+        blk, cfg, st, MOE_S4_CSR_LAYOUT_PHASE_BATCHED, 0u);
+    MOE_PROFILE_RESOURCE_END(stage_profile);
+    MOE_PROFILE_COMMIT(
+        arg, cfg, stage_profile, MOE_PROFILE_STAGE_COMPUTE_S2,
+        MOE_PROFILE_RESOURCE_VERSACORE, 0u, 0u, 0u, BINGO_RET_SUCC);
     return BINGO_RET_SUCC;
 }
 
@@ -125,6 +139,7 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s2(void *arg)
  * traverses every down-weight block resident in the selected bank phase. */
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
 {
+    MOE_PROFILE_BEGIN(profile);
     BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_START);
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk =
         (const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *)arg;
@@ -136,10 +151,14 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
         blk->task_arg_addr;
     if (!__moe_dyn_slot_active_this_round(cfg, st)) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
+        MOE_PROFILE_COMMIT(
+            arg, cfg, profile, MOE_PROFILE_STAGE_COMPUTE_S4,
+            MOE_PROFILE_RESOURCE_NONE, 0u, 0u,
+            MOE_PROFILE_FLAG_SKIPPED | MOE_PROFILE_FLAG_CTRL_SKIP,
+            BINGO_RET_SUCC);
         return BINGO_RET_SUCC;
     }
 
-    MOE_PROFILE_BEGIN(profile);
     const __snax_bingo_moe_dyn_s4_call_args_t *call = &cfg->s4_call;
     if (call->valid == 0u) {
         BINGO_TRACE_MARKER(BINGO_TRACE_KERNEL_ARG_PARSE_END);
@@ -164,11 +183,6 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_compute_s4(void *arg)
     uint32_t initial_phase = __moe_s4_block_initial_phase(st);
     uint32_t synchronize = MOE_DYN_VD_VALID(
         cfg->dma_slot_vd, MOE_DYN_DMA_SLOT_S4_PREFETCH);
-
-    if (!__moe_csr_stage_is_prepared(blk, MOE_CSR_PREPARED_S4)) {
-        (void)__moe_prepare_s4_csr(
-            blk, cfg, st, MOE_S4_CSR_LAYOUT_PHASE_BATCHED);
-    }
 
     for (uint32_t step = 0u; step < 2u; step++) {
         if (step != 0u && synchronize != 0u) {

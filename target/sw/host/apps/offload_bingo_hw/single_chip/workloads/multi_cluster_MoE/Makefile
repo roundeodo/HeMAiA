@@ -39,9 +39,9 @@ CONFIG_H = $(MK_DIR)/multi_cluster_MoE_config.h
 BINGO_KERNEL_ARGS_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_kernel_args.py
 BINGO_DFG_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_dfg.py
 MOE_DYNAMIC_SLOT_DFG_PY = $(MK_DIR)/../moe_dynamic_slot_dfg.py
-$(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
-	$(MOE_DYNAMIC_SLOT_DFG_PY) $(BINGO_DFG_PY) $(BINGO_KERNEL_ARGS_PY) \
-	$(DATA_CFG) $(HW_CFG)
+$(OFFLOAD_H) $(CONFIG_H) &: $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
+		$(MOE_DYNAMIC_SLOT_DFG_PY) $(BINGO_DFG_PY) $(BINGO_KERNEL_ARGS_PY) \
+		$(DATA_CFG) $(HW_CFG)
 	python3 $< --cfg $(DATA_CFG) --hwcfg $(HW_CFG) --output_dir $(MK_DIR) --output_offload_file_name $(notdir $(OFFLOAD_H))
 	rm -f $(MK_DIR)/*.png $(MK_DIR)/*.csv
 
@@ -65,8 +65,8 @@ $(OFFLOAD_H): $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
 #   PERF_TRACING=0      关闭默认启用的 NOP trace marker；仿真 trace 需要保持 1。
 #   MOE_MCYCLE_DETAIL=1 在最终节点打印细粒度 mcycle 统计。
 #   MOE_INDIV_BRINGUP=1 打印 individual descriptor、真实 token 搬运和各计算阶段。
-#   MOE_RUNTIME_TIMING=1 将 individual 执行时间写入各自 scratchpad，DFG
-#                        结束后由 CVA6 统一打印紧凑原始记录，离线脚本分析。
+#   MOE_RUNTIME_TIMING=1 只记录两个cluster的begin/end，用于低扰动global时间。
+#   MOE_RUNTIME_TIMING=2 记录全部slot/stage/task时间，供离线脚本详细分析。
 # 不再支持 HW/SW check、legacy scheduler 或 runtime fallback 开关。
 MOE_HW_SCHEDULER ?= 0
 MOE_MCYCLE_DETAIL ?= 0
@@ -83,6 +83,8 @@ INCDIRS += $(MK_DIR)
 PARTIAL_OUTPUTS += $(DATA_H)
 # Add the OFFLOAD_H to partial outputs
 PARTIAL_OUTPUTS += $(OFFLOAD_H)
+# main_bingo.py emits the workload config together with OFFLOAD_H.
+PARTIAL_OUTPUTS += $(CONFIG_H)
 
 .PHONY: clean-data clean-offload clean
 

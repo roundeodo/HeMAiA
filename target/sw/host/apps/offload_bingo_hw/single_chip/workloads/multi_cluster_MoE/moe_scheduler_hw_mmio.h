@@ -14,25 +14,29 @@
 #define MOE_SCHED_LOCAL_BASE 0x05010000ull
 #endif
 
-// top6 + reserve6 protocol. Writing WINDOW2_START atomically initializes and
-// starts a batch. EVENT_WAIT and TASK_STREAM are blocking reads.
+// Top9 + bottom5 window. EVENT_WAIT/TASK_STREAM are blocking reads.
 #define MOE_SCHED_CONFIG        0x00u
 #define MOE_SCHED_WINDOW0       0x08u
 #define MOE_SCHED_WINDOW1       0x10u
-#define MOE_SCHED_WINDOW2_START 0x18u
+#define MOE_SCHED_WINDOW2       0x18u
 #define MOE_SCHED_REFILL_QUAD   0x20u
 #define MOE_SCHED_EVENT_WAIT    0x28u
 #define MOE_SCHED_TASK_STREAM   0x30u
+#define MOE_SCHED_AGGREGATE     0x38u
+#define MOE_SCHED_WINDOW3_START 0x40u
 
-#define MOE_SCHED_INITIAL_WINDOW_ENTRIES 12u
+#define MOE_SCHED_INITIAL_WINDOW_ENTRIES 14u
 #define MOE_SCHED_QUAD_ENTRIES            4u
+#define MOE_SCHED_MAX_REFILL_ENTRIES       6u
+#define MOE_SCHED_MAX_REFILL_BEATS         2u
 #define MOE_SCHED_TASK_FIFO_DEPTH          8u
 
 #define MOE_SCHED_EVENT_BATCH_DONE_LSB   0u
 #define MOE_SCHED_EVENT_REFILL_REQ_LSB   1u
-#define MOE_SCHED_EVENT_REFILL_COUNT_LSB 2u
+#define MOE_SCHED_EVENT_REFILL_TOP_COUNT_LSB 2u
+#define MOE_SCHED_EVENT_REFILL_BOTTOM_COUNT_LSB 5u
 #define MOE_SCHED_EVENT_REFILL_COUNT_MASK 0x7ull
-#define MOE_SCHED_EVENT_TASK_COUNT_LSB   5u
+#define MOE_SCHED_EVENT_TASK_COUNT_LSB   8u
 #define MOE_SCHED_EVENT_TASK_COUNT_MASK  0xfull
 
 #define MOE_SCHED_CONFIG_ACTIVE_COUNT_LSB 16u
@@ -59,12 +63,14 @@
 #define MOE_SCHED_TASK_WORD_M_S2_LSB           38u
 #define MOE_SCHED_TASK_WORD_M_S4_LSB           47u
 #define MOE_SCHED_TASK_WORD_S4PF_DESC_LSB      56u
+#define MOE_SCHED_TASK_WORD_S1_BOTH_LSB        46u
+#define MOE_SCHED_TASK_WORD_LATE_BOTH_LSB      55u
 
 #define MOE_SCHED_TASK_WORD_NTOK_MASK          0x1ffull
 #define MOE_SCHED_TASK_WORD_EID_MASK           0x3full
 #define MOE_SCHED_TASK_WORD_SHAPE_MASK         0x3ull
 #define MOE_SCHED_TASK_WORD_LOCAL_SLOT_MASK    0x3full
-#define MOE_SCHED_TASK_WORD_M_EXEC_MASK        0x1ffull
+#define MOE_SCHED_TASK_WORD_M_EXEC_MASK        0xffull
 #define MOE_SCHED_TASK_WORD_CTRL_MASK          0x1fffull
 
 #define MOE_SCHED_TASK_CTRL_SKIP_S1_LSB    0u
@@ -144,6 +150,22 @@ static inline __attribute__((always_inline)) uint64_t moe_sched_pack_config(
          MOE_SCHED_CONFIG_SERIAL_WORK_LSB);
 }
 
+static inline __attribute__((always_inline)) uint64_t moe_sched_pack_aggregate(
+    uint32_t token_sum,
+    uint32_t odd_count,
+    uint32_t block_sum,
+    const uint32_t small_block_hist[4])
+{
+    uint64_t word = (uint64_t)(token_sum & 0x1ffu) |
+        ((uint64_t)(odd_count & 0x7fu) << 9u) |
+        ((uint64_t)(block_sum & 0x1ffu) << 16u);
+    for (uint32_t bucket = 0u; bucket < 4u; bucket++) {
+        word |= (uint64_t)(small_block_hist[bucket] & 0x7fu) <<
+                (25u + 7u * bucket);
+    }
+    return word;
+}
+
 static inline __attribute__((always_inline)) uint32_t
 moe_sched_event_batch_done(uint64_t event)
 {
@@ -157,9 +179,16 @@ moe_sched_event_refill_requested(uint64_t event)
 }
 
 static inline __attribute__((always_inline)) uint32_t
-moe_sched_event_refill_count(uint64_t event)
+moe_sched_event_refill_top_count(uint64_t event)
 {
-    return (uint32_t)((event >> MOE_SCHED_EVENT_REFILL_COUNT_LSB) &
+    return (uint32_t)((event >> MOE_SCHED_EVENT_REFILL_TOP_COUNT_LSB) &
+                      MOE_SCHED_EVENT_REFILL_COUNT_MASK);
+}
+
+static inline __attribute__((always_inline)) uint32_t
+moe_sched_event_refill_bottom_count(uint64_t event)
+{
+    return (uint32_t)((event >> MOE_SCHED_EVENT_REFILL_BOTTOM_COUNT_LSB) &
                       MOE_SCHED_EVENT_REFILL_COUNT_MASK);
 }
 

@@ -150,6 +150,15 @@ static inline void __moe_prepare_s1_xdma_shape(
         st->indiv_B_block_stride, MOE_XDMA_PREPARED_S1);
 }
 
+static inline void __moe_prepare_s2pf_xdma_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk)
+{
+    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
+    __moe_prepare_pair_xdma_shape(
+        blk, s2->binding, s2->block_bytes,
+        MOE_XDMA_PREPARED_S2PF);
+}
+
 static inline void __moe_prepare_s4pf_xdma_phase_shape(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     uint32_t block_bytes, uint32_t block_count, uint32_t phase)
@@ -201,20 +210,6 @@ static inline void __moe_prepare_s4pf_xdma_phase_shape(
     __moe_pipeline_publish(
         &__moe_s1_dma_ctrl(blk)->xdma_prepared_stage,
         MOE_XDMA_PREPARED_S4PF);
-}
-
-static inline void __moe_prepare_s4pf_xdma_shape(
-    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
-    const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
-    const __snax_bingo_moe_dynamic_expert_static_args_t *st)
-{
-    uint32_t slot = MOE_DYN_DMA_SLOT_S4_PREFETCH;
-    if (MOE_DYN_VD_VALID(cfg->dma_slot_vd, slot) == 0u) return;
-    uint32_t binding = MOE_DYN_VD_DMA(cfg->dma_slot_vd, slot);
-    if (__moe_dyn_binding_uses_xdma(binding) == 0u) return;
-    __moe_prepare_s4pf_xdma_phase_shape(
-        blk, st->indiv_B_block_stride, st->s1_block_count,
-        __moe_s4_block_initial_phase(st));
 }
 
 static inline uint32_t __moe_dyn_shape_m(uint32_t shape)

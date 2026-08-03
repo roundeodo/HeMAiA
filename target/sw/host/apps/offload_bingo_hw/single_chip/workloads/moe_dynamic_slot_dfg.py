@@ -188,6 +188,7 @@ def _build_optimized_slot_chain(
     kernels,
     add_node,
     add_edge,
+    add_descriptor_sequence,
     make_block_args,
     input_ready,
     dma_core_id,
@@ -215,6 +216,9 @@ def _build_optimized_slot_chain(
     add_edge(input_ready, s1_load)
     add_edge(input_ready, s1_config)
     add_edge(s1_config, s1_compute)
+    # The producer and consumer must be issued in this order, but they cannot
+    # have a completion dependency: load1 waits for compute0's ready cookie.
+    add_descriptor_sequence(s1_load, s1_compute)
 
     s2_prefetch = add_node(
         dma_core_id,
@@ -251,6 +255,7 @@ def _build_optimized_slot_chain(
         add_edge(predecessor, s3_load)
         add_edge(predecessor, s3_config)
     add_edge(s3_config, s3_compute)
+    add_descriptor_sequence(s3_load, s3_compute)
 
     s4_prepare = add_node(
         dma_core_id,
@@ -293,6 +298,7 @@ def build_dynamic_expert_slot_chain(
     *,
     add_node,
     add_edge,
+    add_descriptor_sequence,
     make_block_args,
     input_ready,
     s1_block_count,
@@ -328,4 +334,5 @@ def build_dynamic_expert_slot_chain(
     return _build_optimized_slot_chain(
         **common,
         kernels=OPTIMIZED_STAGE_KERNELS,
+        add_descriptor_sequence=add_descriptor_sequence,
     )
