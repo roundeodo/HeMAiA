@@ -34,6 +34,8 @@ typedef struct __attribute__((aligned(8))) {
     volatile uint32_t csr_prepared_stage;
     volatile uint32_t xdma_prepared_stage;
     volatile uint32_t csr_prepared_reserved;
+    volatile uint32_t load_done;
+    volatile uint32_t compute_done;
 } __moe_s1_dma_ctrl_t;
 
 typedef struct __attribute__((aligned(8))) {
@@ -42,19 +44,16 @@ typedef struct __attribute__((aligned(8))) {
     uint32_t half_bytes;
     uint32_t block_bytes;
     uint32_t block_count;
-    uint32_t s1_block_count;
     uint32_t binding;
     uint32_t valid;
     uint32_t sync_enabled;
-    uint32_t transfer_count;
-    uint32_t transfers_per_step;
     volatile uint32_t compute_done;
     volatile uint32_t prefetch_done;
     volatile uint32_t store_prepared;
     uint32_t reserved;
 } __moe_s2_prefetch_ctrl_t;
 
-_Static_assert(sizeof(__moe_s1_dma_ctrl_t) <= 64u,
+_Static_assert(sizeof(__moe_s1_dma_ctrl_t) == 64u,
                "S1 DMA control must remain inside banks 56..63");
 _Static_assert(sizeof(__moe_s2_prefetch_ctrl_t) <= 64u,
                "S2 prefetch control must remain inside banks 56..63");

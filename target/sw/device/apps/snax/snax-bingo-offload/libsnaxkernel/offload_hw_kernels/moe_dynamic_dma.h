@@ -379,7 +379,7 @@ __moe_dyn_prepare_s2pf_xdma(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk)
 {
     __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
-    __moe_prepare_s2pf_xdma_shape(blk);
+    __moe_prepare_s2pf_xdma_phase_shape(blk, 0u);
     if (s2->binding == MOE_DYN_DMA_BOTH) {
         __moe_dyn_prepare_s2pf_both_xdma_address(s2, 0u);
     } else {

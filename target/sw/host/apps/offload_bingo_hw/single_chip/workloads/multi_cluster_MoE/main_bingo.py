@@ -48,6 +48,10 @@ import hjson
 import networkx as nx
 
 from moe_layout import derive_mixed_workload_params
+from moe_scheduler_bench_cases import (
+    SCHEDULER_BENCH_CASES,
+    get_scheduler_bench_case,
+)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(
@@ -118,7 +122,7 @@ ENABLE_PHASE3_PHASE4 = True
 # runtime_state 同步和 L3->C2/C3 L1 dynamic args flush；只是不触发 C2/C3 上的
 # GEMM/DMA slot 任务。
 # 设为 True 时恢复完整 individual expert 执行链（默认完整 workload）。
-ENABLE_INDIVIDUAL_SLOTS = True
+ENABLE_INDIVIDUAL_SLOTS = False
 
 
 # Use the canonical ABI mirror from libbingo. request/schedule buffers are now
@@ -240,7 +244,7 @@ def validate_shared_individual_independence(
             )
 
 
-def write_moe_config_header(header_path: str, params) -> None:
+def write_moe_config_header(header_path: str, params, scheduler_bench_case=None) -> None:
     router_mesh_row = params["meshRow"]
     if router_mesh_row == 0 or (router_mesh_row & (router_mesh_row - 1)) != 0:
         raise ValueError("pure-HW Router path requires a power-of-two meshRow")
@@ -251,6 +255,7 @@ def write_moe_config_header(header_path: str, params) -> None:
     down_row_bytes = params["indiv_down_N1"] * params["meshCol"] * 2
     lines = [
         "#pragma once",
+        "#include <stdint.h>",
         "#ifndef MOE_ENABLE_HW_SCHEDULER",
         '#include "moe_router_host.h"',
         "#endif",
@@ -275,6 +280,29 @@ def write_moe_config_header(header_path: str, params) -> None:
         f"#define MOE_HW_WEIGHT_BACKING_MASK {params['indiv_weight_backing_mask']}u",
         "",
     ]
+    if scheduler_bench_case is not None:
+        counts = ", ".join(
+            f"{count}u" for count in scheduler_bench_case.padded_counts
+        )
+        topk_indices = ", ".join(
+            f"{expert_id}u"
+            for expert_id in scheduler_bench_case.token_major_topk_indices
+        )
+        lines += [
+            f'#define MOE_SCHED_BENCH_CASE_NAME "{scheduler_bench_case.name}"',
+            f"#define MOE_SCHED_BENCH_INPUT_TOKENS {scheduler_bench_case.input_tokens}u",
+            f"#define MOE_SCHED_BENCH_ACTIVE_EXPERTS {scheduler_bench_case.active_experts}u",
+            f"#define MOE_SCHED_BENCH_EXPERTS {scheduler_bench_case.n_experts}u",
+            "static const uint32_t moe_scheduler_bench_expert_counts["
+            "MOE_SCHED_BENCH_EXPERTS] __attribute__((aligned(64))) = {",
+            f"    {counts}",
+            "};",
+            "static const uint16_t moe_scheduler_bench_topk_indices["
+            "MOE_SCHED_BENCH_INPUT_TOKENS * 2u] __attribute__((aligned(64))) = {",
+            f"    {topk_indices}",
+            "};",
+            "",
+        ]
     with open(header_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -298,6 +326,11 @@ def get_args():
     parser.add_argument("--output_dir", type=str, default=".")
     parser.add_argument(
         "--output_offload_file_name", type=str, default="offload_bingo_hw.h"
+    )
+    parser.add_argument(
+        "--scheduler-bench-case",
+        choices=tuple(SCHEDULER_BENCH_CASES),
+        help="generate only the selected Prepare/Execute benchmark",
     )
     return parser.parse_args()
 
@@ -353,9 +386,7 @@ def define_memory_handles(params):
     mh["L3_Sym_Shared_Gate_B"] = BingoMemSymbol("shared_gate_B")
     mh["L3_Sym_Shared_Up_B"] = BingoMemSymbol("shared_up_B")
     mh["L3_Sym_Shared_Down_B"] = BingoMemSymbol("shared_down_B")
-    mh["L3_Sym_L15_Shared_Dev_Cfg"] = BingoMemSymbol(
-        "&l15_dev_shared_s0_cfg"
-    )
+    mh["L3_Sym_L15_Shared_Dev_Cfg"] = BingoMemSymbol("&l15_dev_shared_s0_cfg")
 
     # ------------------------------------------------------------------
     # L3 dynamic allocations
@@ -566,9 +597,210 @@ def define_memory_handles(params):
     return mh
 
 
+def define_scheduler_bench_memory_handles(params):
+    chip = 0
+    slot_count = params["dynamic_slot_count"]
+    slot_bytes = params["dynamic_arg_slot_bytes"]
+    runtime_bytes = MOE_RUNTIME_HEADER_BYTES + slot_count * slot_bytes
+    token_refs_bytes = (
+        params["num_indiv_experts"] * params["max_tokens_per_expert"] * 2
+    )
+    mh = {
+        "Counts": BingoMemSymbol("moe_scheduler_bench_expert_counts"),
+        "TopK": BingoMemSymbol("moe_scheduler_bench_topk_indices"),
+        "CAM": BingoMemAlloc("sched_bench_cam", size=8, mem_level="L3"),
+        "Request": BingoMemAlloc(
+            "sched_bench_request",
+            size=256,
+            mem_level="L3",
+            condition=MOE_SW_SCHED_ABI_COND,
+        ),
+        "Schedule": BingoMemAlloc(
+            "sched_bench_schedule",
+            size=MOE_SCHEDULE_BYTES,
+            mem_level="L3",
+            condition=MOE_SW_SCHED_ABI_COND,
+        ),
+        "Runtime": BingoMemAlloc(
+            "sched_bench_runtime", size=MOE_RUNTIME_STATE_BYTES, mem_level="L3"
+        ),
+        "Token_Refs": BingoMemAlloc(
+            "sched_bench_token_refs", size=token_refs_bytes, mem_level="L3"
+        ),
+        "C2_Stage": BingoMemAlloc(
+            "sched_bench_c2_stage", size=runtime_bytes, mem_level="L3"
+        ),
+        "C3_Stage": BingoMemAlloc(
+            "sched_bench_c3_stage", size=runtime_bytes, mem_level="L3"
+        ),
+    }
+    for prefix, cluster_id in (
+        ("C2", CLUSTER_INDIV_A),
+        ("C3", CLUSTER_INDIV_B),
+    ):
+        mh[f"{prefix}_Dyn"] = BingoMemAlloc(
+            f"sched_bench_{prefix.lower()}_dyn",
+            size=runtime_bytes,
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cluster_id,
+        )
+        mh[f"{prefix}_Static"] = BingoMemAlloc(
+            f"sched_bench_{prefix.lower()}_static",
+            size=params["static_arg_slot_bytes"],
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cluster_id,
+        )
+        mh[f"{prefix}_Token_Refs"] = BingoMemAlloc(
+            f"sched_bench_{prefix.lower()}_token_refs",
+            size=token_refs_bytes,
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cluster_id,
+        )
+        mh[f"{prefix}_L1_A"] = BingoMemAlloc(
+            f"sched_bench_{prefix.lower()}_l1_a",
+            size=64,
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cluster_id,
+            alignment=64,
+        )
+        mh[f"{prefix}_L1_D"] = BingoMemAlloc(
+            f"sched_bench_{prefix.lower()}_l1_d",
+            size=64,
+            mem_level="L1",
+            chip_id=chip,
+            cluster_id=cluster_id,
+            alignment=64,
+        )
+    return mh
+
+
 # =========================================================================
 # DFG construction
 # =========================================================================
+
+
+def create_scheduler_bench_dfg(params, mh, scheduler_bench_case):
+    bingo_dfg = BingoDFG(
+        num_chiplets=1,
+        num_clusters_per_chiplet=4,
+        num_cores_per_cluster=2,
+        is_host_as_acc=True,
+        chiplet_ids=[0x00],
+    )
+    experts = params["num_indiv_experts"]
+    token_refs_bytes = experts * params["max_tokens_per_expert"] * 2
+
+    node_prepare = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=HOST_CLUSTER_ID,
+        assigned_core_id=HOST_CORE_ID,
+        kernel_name="__host_bingo_kernel_moe_prepare_request",
+        kernel_args=HostBingoKernelMoEPrepareRequestArgs(
+            expert_token_counts_addr=mh["Counts"],
+            cam_state_addr=mh["CAM"],
+            request_out_addr=mh["Request"],
+            schedule_out_addr=mh["Schedule"],
+            expert_token_refs_addr=mh["Token_Refs"],
+            n_experts=experts,
+            topk_indices_l3=mh["TopK"],
+            M_total=params["M_total"],
+            top_k=2,
+            runtime_state_addr=mh["Runtime"],
+            c2_stage_base=addr_offset(mh["C2_Stage"], MOE_RUNTIME_HEADER_BYTES),
+            c3_stage_base=addr_offset(mh["C3_Stage"], MOE_RUNTIME_HEADER_BYTES),
+            dynamic_arg_slot_bytes=params["dynamic_arg_slot_bytes"],
+            c2_l1_a=mh["C2_L1_A"],
+            c2_l1_d=mh["C2_L1_D"],
+            c2_l1_down_d=0,
+            c3_l1_a=mh["C3_L1_A"],
+            c3_l1_d=mh["C3_L1_D"],
+            c3_l1_down_d=0,
+            max_tokens_per_expert=params["max_tokens_per_expert"],
+            initial_cache_eid_c2=scheduler_bench_case.initial_cache_eid_c2,
+            initial_cache_eid_c3=scheduler_bench_case.initial_cache_eid_c3,
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_prepare)
+
+    node_execute = BingoNode(
+        assigned_chiplet_id=0,
+        assigned_cluster_id=HOST_CLUSTER_ID,
+        assigned_core_id=HOST_CORE_ID,
+        kernel_name="__host_bingo_kernel_moe_execute",
+        kernel_args=HostBingoKernelMoEExecuteArgs(
+            schedule_addr=mh["Schedule"],
+            runtime_state_addr=mh["Runtime"],
+            expert_token_refs_addr=mh["Token_Refs"],
+            c2_token_refs_l1_addr=mh["C2_Token_Refs"],
+            c3_token_refs_l1_addr=mh["C3_Token_Refs"],
+            token_refs_bytes=token_refs_bytes,
+            cam_state_addr=mh["CAM"],
+            input_A_l3_base=0,
+            indiv_gate_B_l3=0,
+            indiv_up_B_l3=0,
+            indiv_down_B_l3=0,
+            c2_l1_b_gate=0,
+            c2_l1_b_up=0,
+            c2_l1_b_down=0,
+            c2_l1_a=mh["C2_L1_A"],
+            c2_l1_d=mh["C2_L1_D"],
+            c2_l1_down_d=0,
+            c2_l1_d1_scratch=0,
+            c3_l1_b_gate=0,
+            c3_l1_b_up=0,
+            c3_l1_b_down=0,
+            c3_l1_a=mh["C3_L1_A"],
+            c3_l1_d=mh["C3_L1_D"],
+            c3_l1_down_d=0,
+            c3_l1_d1_scratch=0,
+            output_l3_addr=0,
+            c2_active_state_l1_addr=mh["C2_Dyn"],
+            c3_active_state_l1_addr=mh["C3_Dyn"],
+            A_token_bytes=params["A_token_bytes"],
+            indiv_B_expert_stride=params["indiv_B_expert_stride"],
+            indiv_down_B_expert_stride=params["indiv_down_B_expert_stride"],
+            indiv_B_block_stride=params["indiv_B_block_stride"],
+            indiv_down_B_block_stride=params["indiv_down_B_block_stride"],
+            s1_block_count=params["indiv_N2"],
+            s3_block_count=params["indiv_down_N2"],
+            indiv_K1=params["indiv_K1"],
+            indiv_N_per_block=params["indiv_N1"] * params["meshCol"],
+            indiv_down_K1=params["indiv_down_K1"],
+            indiv_down_N_per_block=(
+                params["indiv_down_N1"] * params["meshCol"]
+            ),
+            mesh_row=params["meshRow"],
+            mesh_col=params["meshCol"],
+            tile_size=params["tileSize"],
+            output_expert_stride_bytes=(
+                params["max_tokens_per_expert"]
+                * params["A_token_row_stride_bytes"]
+            ),
+            max_tokens_per_expert=params["max_tokens_per_expert"],
+            rescale_mult=1,
+            rescale_shift=0,
+            c2_static_args_base=mh["C2_Static"],
+            c3_static_args_base=mh["C3_Static"],
+            c2_dynamic_args_base=addr_offset(
+                mh["C2_Dyn"], MOE_RUNTIME_HEADER_BYTES
+            ),
+            c3_dynamic_args_base=addr_offset(
+                mh["C3_Dyn"], MOE_RUNTIME_HEADER_BYTES
+            ),
+            dynamic_arg_slot_bytes=params["dynamic_arg_slot_bytes"],
+            dynamic_num_slots=params["dynamic_slot_count"],
+            c2_stage_base=mh["C2_Stage"],
+            c3_stage_base=mh["C3_Stage"],
+        ),
+    )
+    bingo_dfg.bingo_add_node(node_execute)
+    bingo_dfg.bingo_add_edge(node_prepare, node_execute)
+    enforce_in_order_completion_per_core(bingo_dfg)
+    return bingo_dfg
 
 
 def create_dfg(params, mh):
@@ -951,9 +1183,7 @@ def create_dfg(params, mh):
         assigned_core_id=GEMM_CORE_ID,
         kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_full",
         kernel_args=SnaxBingoKernelDualVcL15MoeFullArgs(
-            shape_cfg_addr=addr_offset(
-                mh["C0_L1_Layout"], params["l15_delta_cfg"]
-            ),
+            shape_cfg_addr=addr_offset(mh["C0_L1_Layout"], params["l15_delta_cfg"]),
             tcdm_base=mh["C0_L1_Layout"],
             rescale_mult=1,
             rescale_shift=0,
@@ -971,9 +1201,7 @@ def create_dfg(params, mh):
         assigned_core_id=GEMM_CORE_ID,
         kernel_name="__snax_bingo_kernel_dual_vc_l15_moe_full",
         kernel_args=SnaxBingoKernelDualVcL15MoeFullArgs(
-            shape_cfg_addr=addr_offset(
-                mh["C1_L1_Layout"], params["l15_delta_cfg"]
-            ),
+            shape_cfg_addr=addr_offset(mh["C1_L1_Layout"], params["l15_delta_cfg"]),
             tcdm_base=mh["C1_L1_Layout"],
             rescale_mult=1,
             rescale_shift=0,
@@ -1285,6 +1513,8 @@ def create_dfg(params, mh):
             s3_block_count=N2d,
             dma_core_id=DMA_CORE_ID,
             gemm_core_id=GEMM_CORE_ID,
+            emit_s2_prefetch_task=True,
+            s2pf_starts_after_s1_dma=True,
             implementation=SLOT_IMPLEMENTATION,
         )
         return chain["store"]
@@ -1296,12 +1526,16 @@ def create_dfg(params, mh):
         # round barrier: an algorithm round may contain only one cluster task,
         # and a later task on the other cluster is allowed to overlap it.
         c2_scope_begin = add_cluster_scope_node(
-            "C2_indiv", CLUSTER_INDIV_A,
-            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin", [node_execute]
+            "C2_indiv",
+            CLUSTER_INDIV_A,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin",
+            [node_execute],
         )
         c3_scope_begin = add_cluster_scope_node(
-            "C3_indiv", CLUSTER_INDIV_B,
-            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin", [node_execute]
+            "C3_indiv",
+            CLUSTER_INDIV_B,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_begin",
+            [node_execute],
         )
         prev_c2_stores = [c2_scope_begin]
         prev_c3_stores = [c3_scope_begin]
@@ -1315,12 +1549,16 @@ def create_dfg(params, mh):
             prev_c2_stores = [c2_store]
             prev_c3_stores = [c3_store]
         c2_scope_end = add_cluster_scope_node(
-            "C2_indiv", CLUSTER_INDIV_A,
-            "__snax_bingo_kernel_moe_dyn_opt_cluster_end", prev_c2_stores
+            "C2_indiv",
+            CLUSTER_INDIV_A,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_end",
+            prev_c2_stores,
         )
         c3_scope_end = add_cluster_scope_node(
-            "C3_indiv", CLUSTER_INDIV_B,
-            "__snax_bingo_kernel_moe_dyn_opt_cluster_end", prev_c3_stores
+            "C3_indiv",
+            CLUSTER_INDIV_B,
+            "__snax_bingo_kernel_moe_dyn_opt_cluster_end",
+            prev_c3_stores,
         )
         individual_tail_nodes = [c2_scope_end, c3_scope_end]
 
@@ -1386,17 +1624,41 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     cfg = load_workload_config(args)
     params = derive_mixed_workload_params(cfg)
+    scheduler_bench_case = None
+    if args.scheduler_bench_case is not None:
+        scheduler_bench_case = get_scheduler_bench_case(args.scheduler_bench_case)
+        params = dict(params)
+        params["num_indiv_experts"] = scheduler_bench_case.n_experts
+        params["M_total"] = scheduler_bench_case.input_tokens
+        params["max_tokens_per_expert"] = scheduler_bench_case.input_tokens
+        params["dynamic_slot_count"] = scheduler_bench_case.n_experts
     config_header_name = f"{params['app_name']}_config.h"
-    write_moe_config_header(os.path.join(args.output_dir, config_header_name), params)
-    mh = define_memory_handles(params)
-    dfg = create_dfg(params, mh)
+    write_moe_config_header(
+        os.path.join(args.output_dir, config_header_name),
+        params,
+        scheduler_bench_case,
+    )
+    if scheduler_bench_case is None:
+        mh = define_memory_handles(params)
+        dfg = create_dfg(params, mh)
+        post_execute_code = ["__host_bingo_moe_print_phase_timing();"]
+    else:
+        mh = define_scheduler_bench_memory_handles(params)
+        dfg = create_scheduler_bench_dfg(params, mh, scheduler_bench_case)
+        post_execute_code = [
+            'printf_safe("[MOE_SCHED_BENCH] case=%s tokens=%u active=%u '
+            'experts=%u\\r\\n", MOE_SCHED_BENCH_CASE_NAME, '
+            "MOE_SCHED_BENCH_INPUT_TOKENS, MOE_SCHED_BENCH_ACTIVE_EXPERTS, "
+            "MOE_SCHED_BENCH_EXPERTS);",
+            "__host_bingo_moe_print_phase_timing();",
+        ]
     data_header_name = f"{params['app_name']}_data.h"
     dfg.bingo_compile_dfg(
         params["app_name"],
         args.output_dir,
         args.output_offload_file_name,
         extra_include_header_list=[data_header_name, "moe_runtime_timing.h"],
-        post_execute_code=["__host_bingo_moe_print_phase_timing();"],
+        post_execute_code=post_execute_code,
         pre_host_include_header_list=[config_header_name],
         profile_kernel_prefix="__snax_bingo_kernel_moe_dyn_opt_",
         profile_condition="MOE_RUNTIME_TIMING",

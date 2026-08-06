@@ -278,8 +278,6 @@ static inline uint64_t __host_bingo_kernel_check_result(void *arg){
             BINGO_TRACE_MARKER(BINGO_TRACE_DUMMY_KERNEL_END);
             sp->return_value = 0;
             sp->num_return_values = 0;
-            printf_safe("[Host] Check [%s]: PASS (%d bytes)\r\n", name,
-                        data_size);
             return 0;
         }
 
@@ -381,14 +379,11 @@ static inline uint64_t __host_bingo_kernel_check_result(void *arg){
         sp->return_value = err;
         sp->num_return_values = 0;
         if (err == 0) {
-            printf_safe("[Host] Check [%s]: PASS (%d fp32 elems, tol_bits=0x%08x)\r\n",
-                   name, num_elements, tolerance_bits);
             return 0;
-        } else {
-            printf_safe("[Host] Check [%s]: FAIL (%d / %d fp32 elems, tol_bits=0x%08x)\r\n",
-                   name, err, num_elements, tolerance_bits);
-            return EXIT_CODE_FAIL;
         }
+        printf_safe("[Host] Check [%s]: FAIL (%d / %d fp32 elems, tol_bits=0x%08x)\r\n",
+               name, err, num_elements, tolerance_bits);
+        return EXIT_CODE_FAIL;
     } else if (check_type == BINGO_CHECK_TYPE_FP16_TOL) {
         // FP16 absolute-tolerance mode — promote each half to fp32, compare against fp32 tolerance
         const uint16_t* out_h    = (const uint16_t*)output_data_addr;
@@ -413,14 +408,11 @@ static inline uint64_t __host_bingo_kernel_check_result(void *arg){
         sp->return_value = err;
         sp->num_return_values = 0;
         if (err == 0) {
-            printf_safe("[Host] Check [%s]: PASS (%d fp16 elems, tol_bits=0x%08x)\r\n",
-                   name, num_elements, tolerance_bits);
             return 0;
-        } else {
-            printf_safe("[Host] Check [%s]: FAIL (%d / %d fp16 elems, tol_bits=0x%08x)\r\n",
-                   name, err, num_elements, tolerance_bits);
-            return EXIT_CODE_FAIL;
         }
+        printf_safe("[Host] Check [%s]: FAIL (%d / %d fp16 elems, tol_bits=0x%08x)\r\n",
+               name, err, num_elements, tolerance_bits);
+        return EXIT_CODE_FAIL;
     } else {
         // Unknown check_type — fail loudly
         BINGO_TRACE_MARKER(BINGO_TRACE_DUMMY_KERNEL_END);

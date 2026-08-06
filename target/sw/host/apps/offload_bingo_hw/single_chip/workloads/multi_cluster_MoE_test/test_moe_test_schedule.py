@@ -7,6 +7,36 @@ import moe_test_schedule as schedule
 
 
 class MoeTestScheduleTest(unittest.TestCase):
+    def test_s2pf_early_mode_requires_positive_s1_slack(self) -> None:
+        cases = (
+            (schedule.SHAPE_A, schedule.DMA_IDMA, 2),
+            (schedule.SHAPE_A, schedule.DMA_BOTH, 2),
+            (schedule.SHAPE_B, schedule.DMA_IDMA, 0),
+            (schedule.SHAPE_B, schedule.DMA_BOTH, 2),
+            (schedule.SHAPE_C, schedule.DMA_IDMA, 0),
+            (schedule.SHAPE_C, schedule.DMA_BOTH, 0),
+        )
+        for shape, dma, expected in cases:
+            with self.subTest(shape=shape, dma=dma):
+                self.assertEqual(
+                    expected,
+                    schedule.s2pf_s1_overlap_steps(
+                        skip_s1=False,
+                        s1_shape=shape,
+                        s1_dma=dma,
+                        s2_prefetch_dma=schedule.DMA_IDMA,
+                    ),
+                )
+        self.assertEqual(
+            0,
+            schedule.s2pf_s1_overlap_steps(
+                skip_s1=True,
+                s1_shape=schedule.SHAPE_A,
+                s1_dma=schedule.DMA_NONE,
+                s2_prefetch_dma=schedule.DMA_XDMA,
+            ),
+        )
+
     def test_s2pf_both_profile_is_available(self) -> None:
         self.assertIn(schedule.S2PF_BOTH_PROFILE, schedule.SCHEDULE_PROFILES)
 
@@ -78,6 +108,716 @@ class MoeTestScheduleTest(unittest.TestCase):
             audit["structural_lower_bound_quarter_ticks"] / 4,
         )
 
+    def test_m70_three_hot_static_desc_matches_case1_policy0(self) -> None:
+        queues = schedule.build_m70_three_hot_static_desc_schedule()
+        audit = schedule.audit_m70_three_hot_static_desc_schedule(queues)
+
+        self.assertEqual({"c0": 132, "c1": 126}, audit["queue_ticks"])
+        self.assertEqual({"c0": 10, "c1": 13}, audit["cluster_local_slots"])
+        self.assertEqual(23, audit["task_count"])
+        self.assertEqual(140, audit["routed_tokens"])
+        self.assertEqual((), audit["dma_release_edges"])
+        self.assertEqual(
+            (0, 2, 8, 10, 12, 14, 16, 18, 20, 22),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (1, 3, 4, 5, 6, 7, 9, 11, 13, 15, 17, 19, 21),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m70_three_hot_static_desc_uses_exported_routing(self) -> None:
+        routing = schedule.M70_THREE_HOT_TOKEN_IDS_BY_EXPERT
+        self.assertEqual((0, 1, 3, 4), routing[0][:4])
+        self.assertEqual((34, 38, 41, 45, 48, 60), routing[3])
+        self.assertEqual((58, 69), routing[22])
+        owners = [[] for _ in range(70)]
+        for expert_id, token_ids in enumerate(routing):
+            for token_id in token_ids:
+                owners[token_id].append(expert_id)
+        self.assertTrue(all(len(token_owners) == 2 for token_owners in owners))
+
+    def test_m70_three_hot_static_desc_structural_lower_bound_is_139_5_ticks(
+        self,
+    ) -> None:
+        queues = schedule.build_m70_three_hot_static_desc_schedule()
+        audit = schedule.audit_m70_three_hot_static_desc_schedule(queues)
+
+        self.assertEqual(
+            {"c0": 558, "c1": 543},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            139.5,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+
+    def test_m70_three_hot_dynamic_desc_matches_case1_policy1(self) -> None:
+        queues = schedule.build_m70_three_hot_dynamic_desc_schedule()
+        audit = schedule.audit_m70_three_hot_dynamic_desc_schedule(queues)
+
+        self.assertEqual({"c0": 126, "c1": 126}, audit["queue_ticks"])
+        self.assertEqual({"c0": 9, "c1": 14}, audit["cluster_local_slots"])
+        self.assertEqual(23, audit["task_count"])
+        self.assertEqual(140, audit["routed_tokens"])
+        self.assertEqual(
+            (0, 2, 9, 11, 13, 15, 17, 19, 21),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (1, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 18, 20, 22),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m70_skip_elided_profile_reuses_exact_dynamic_schedule(self) -> None:
+        self.assertEqual(
+            schedule.build_m70_three_hot_dynamic_desc_schedule(),
+            schedule.build_schedule_profile(
+                schedule.M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE
+            ),
+        )
+
+    def test_m70_three_hot_dynamic_desc_preserves_prefetch_contract(self) -> None:
+        queues = schedule.build_m70_three_hot_dynamic_desc_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {0: 2, 1: 2},
+            {eid: slots[eid].s2pf_s1_overlap_steps for eid in (0, 1)},
+        )
+        self.assertEqual(
+            {
+                0: (schedule.DMA_IDMA, 2),
+                1: (schedule.DMA_XDMA, 3),
+                3: (schedule.DMA_BOTH, 4),
+                4: (schedule.DMA_BOTH, 5),
+                5: (schedule.DMA_BOTH, 6),
+                6: (schedule.DMA_BOTH, 7),
+            },
+            {
+                eid: (slot.s4_prefetch_dma, slot.s4_prefetch_target_eid)
+                for eid, slot in slots.items()
+                if slot.s4_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertEqual(
+            {2, 3, 4, 5, 6, 7},
+            {eid for eid, slot in slots.items() if slot.skip_s1},
+        )
+
+    def test_m70_three_hot_dynamic_desc_dma_release_edges(self) -> None:
+        queues = schedule.build_m70_three_hot_dynamic_desc_schedule()
+        audit = schedule.audit_m70_three_hot_dynamic_desc_schedule(queues)
+
+        self.assertEqual(4, len(audit["dma_release_edges"]))
+        self.assertIn(
+            (("c1", 3, 5, "S4PF"), ("c0", 1, 2, "S3")),
+            audit["dma_release_edges"],
+        )
+        self.assertIn(
+            (("c1", 6, 8, "S3"), ("c0", 2, 9, "S1")),
+            audit["dma_release_edges"],
+        )
+
+    def test_m70_three_hot_dynamic_desc_structural_lower_bound_is_136_5_ticks(
+        self,
+    ) -> None:
+        queues = schedule.build_m70_three_hot_dynamic_desc_schedule()
+        audit = schedule.audit_m70_three_hot_dynamic_desc_schedule(queues)
+
+        self.assertEqual(
+            {"c0": 531, "c1": 546},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            136.5,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+
+    def test_m70_three_hot_dynamic_two_ended_matches_case1_policy2(self) -> None:
+        queues = schedule.build_m70_three_hot_dynamic_two_ended_schedule()
+        audit = schedule.audit_m70_three_hot_dynamic_two_ended_schedule(queues)
+
+        self.assertEqual({"c0": 127, "c1": 91}, audit["queue_ticks"])
+        self.assertEqual({"c0": 3, "c1": 20}, audit["cluster_local_slots"])
+        self.assertEqual(23, audit["task_count"])
+        self.assertEqual(140, audit["routed_tokens"])
+        self.assertEqual((0, 1, 2), tuple(slot.expert_id for slot in queues["c0"]))
+        self.assertEqual(
+            tuple(range(22, 2, -1)),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m70_three_hot_dynamic_two_ended_prefetch_contract(self) -> None:
+        queues = schedule.build_m70_three_hot_dynamic_two_ended_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {1, 2, 3, 4, 5, 6},
+            {eid for eid, slot in slots.items() if slot.s2_prefetch_dma},
+        )
+        self.assertTrue(all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values()))
+        self.assertTrue(all(not slot.skip_s1 for slot in slots.values()))
+
+    def test_m70_three_hot_dynamic_two_ended_structural_bound(self) -> None:
+        audit = schedule.audit_m70_three_hot_dynamic_two_ended_schedule(
+            schedule.build_m70_three_hot_dynamic_two_ended_schedule()
+        )
+
+        self.assertEqual(
+            {"c0": 517, "c1": 424},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(129.25, audit["structural_lower_bound_quarter_ticks"] / 4)
+        self.assertEqual(7, len(audit["dma_release_edges"]))
+
+    def test_m70_three_hot_full_scheduler_matches_case1_policy3(self) -> None:
+        queues = schedule.build_m70_three_hot_full_scheduler_schedule()
+        audit = schedule.audit_m70_three_hot_full_scheduler_schedule(queues)
+
+        self.assertEqual({"c0": 105, "c1": 105}, audit["queue_ticks"])
+        self.assertEqual({"c0": 7, "c1": 16}, audit["cluster_local_slots"])
+        self.assertEqual(23, audit["task_count"])
+        self.assertEqual(140, audit["routed_tokens"])
+        self.assertEqual(
+            (2, 4, 1, 10, 9, 8, 7),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (3, *range(22, 11, -1), 5, 6, 11, 0),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m70_three_hot_full_scheduler_prefetch_contract(self) -> None:
+        queues = schedule.build_m70_three_hot_full_scheduler_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {
+                0: schedule.DMA_BOTH,
+                1: schedule.DMA_IDMA,
+                2: schedule.DMA_IDMA,
+                3: schedule.DMA_XDMA,
+                4: schedule.DMA_IDMA,
+                5: schedule.DMA_XDMA,
+                6: schedule.DMA_XDMA,
+            },
+            {
+                eid: slot.s2_prefetch_dma for eid, slot in slots.items()
+                if slot.s2_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertEqual(2, slots[0].s2pf_s1_overlap_steps)
+        self.assertTrue(
+            all(slots[eid].s2pf_s1_overlap_steps == 0 for eid in range(1, 7))
+        )
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
+
+    def test_m70_three_hot_full_scheduler_structural_bound(self) -> None:
+        audit = schedule.audit_m70_three_hot_full_scheduler_schedule(
+            schedule.build_m70_three_hot_full_scheduler_schedule()
+        )
+
+        self.assertEqual(
+            {"c0": 441, "c1": 468},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(117.0, audit["structural_lower_bound_quarter_ticks"] / 4)
+        self.assertEqual(4, len(audit["dma_release_edges"]))
+
+    def test_m92_parameter_order_static_desc_matches_case2_policy0(self) -> None:
+        queues = schedule.build_m92_parameter_order_static_desc_schedule()
+        audit = schedule.audit_m92_parameter_order_static_desc_schedule(queues)
+
+        self.assertEqual({"c0": 198, "c1": 192}, audit["queue_ticks"])
+        self.assertEqual({"c0": 15, "c1": 23}, audit["cluster_local_slots"])
+        self.assertEqual(38, audit["task_count"])
+        self.assertEqual(184, audit["routed_tokens"])
+        self.assertEqual(
+            (0, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22,
+             24, 26, 28, 30, 32, 34, 36),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m92_parameter_order_static_desc_uses_exact_routing(self) -> None:
+        routing = schedule.M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT
+
+        self.assertEqual(tuple(range(76)), routing[0])
+        self.assertEqual((*range(39), 71), routing[1])
+        self.assertEqual((39, 72), routing[2])
+        self.assertEqual((90,), routing[34])
+        self.assertEqual((), routing[63])
+        owners = [[] for _ in range(92)]
+        for expert_id, token_ids in enumerate(routing):
+            for token_id in token_ids:
+                owners[token_id].append(expert_id)
+        self.assertTrue(all(len(token_owners) == 2 for token_owners in owners))
+
+    def test_m92_parameter_order_static_desc_structural_bound(self) -> None:
+        audit = schedule.audit_m92_parameter_order_static_desc_schedule(
+            schedule.build_m92_parameter_order_static_desc_schedule()
+        )
+
+        self.assertEqual(
+            {"c0": 837, "c1": 837},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            209.25,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual((), audit["dma_release_edges"])
+
+    def test_m60_high_skew_static_desc_matches_case3_policy0(self) -> None:
+        queues = schedule.build_m60_high_skew_static_desc_schedule()
+        audit = schedule.audit_m60_high_skew_static_desc_schedule(queues)
+
+        self.assertIn(
+            schedule.M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+            schedule.SCHEDULE_PROFILES,
+        )
+        self.assertEqual({"c0": 135, "c1": 138}, audit["queue_ticks"])
+        self.assertEqual({"c0": 14, "c1": 16}, audit["cluster_local_slots"])
+        self.assertEqual(30, audit["task_count"])
+        self.assertEqual(120, audit["routed_tokens"])
+        self.assertEqual((), audit["dma_release_edges"])
+        self.assertEqual(
+            (0, 3, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (1, 2, 4, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m60_high_skew_static_desc_uses_exact_routing(self) -> None:
+        routing = schedule.M60_HIGH_SKEW_TOKEN_IDS_BY_EXPERT
+
+        self.assertEqual((*range(35), 45), routing[0])
+        self.assertEqual((25, 28, 31, 34, 36, 46), routing[3])
+        self.assertEqual((59,), routing[29])
+        self.assertEqual((), routing[63])
+        owners = [[] for _ in range(60)]
+        for expert_id, token_ids in enumerate(routing):
+            for token_id in token_ids:
+                owners[token_id].append(expert_id)
+        self.assertTrue(all(len(token_owners) == 2 for token_owners in owners))
+
+    def test_m60_high_skew_static_desc_structural_bound(self) -> None:
+        queues = schedule.build_schedule_profile(
+            schedule.M60_HIGH_SKEW_STATIC_DESC_PROFILE
+        )
+        audit = schedule.audit_m60_high_skew_static_desc_schedule(queues)
+
+        self.assertEqual(
+            {"c0": 582, "c1": 600},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            150.0,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        for cluster_name, slots in queues.items():
+            expected_dma = (
+                schedule.DMA_IDMA
+                if cluster_name == "c0"
+                else schedule.DMA_XDMA
+            )
+            for slot in slots:
+                self.assertEqual(schedule.SHAPE_B, slot.s1_shape)
+                self.assertEqual(schedule.SHAPE_B, slot.s3_shape)
+                self.assertEqual(expected_dma, slot.s1_dma)
+                self.assertEqual(expected_dma, slot.s3_dma)
+                self.assertEqual(schedule.DMA_NONE, slot.s2_prefetch_dma)
+                self.assertEqual(schedule.DMA_NONE, slot.s4_prefetch_dma)
+
+    def test_m60_high_skew_dynamic_desc_matches_case3_policy1(self) -> None:
+        queues = schedule.build_m60_high_skew_dynamic_desc_schedule()
+        audit = schedule.audit_m60_high_skew_dynamic_desc_schedule(queues)
+
+        self.assertIn(
+            schedule.M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+            schedule.SCHEDULE_PROFILES,
+        )
+        self.assertEqual({"c0": 133, "c1": 130}, audit["queue_ticks"])
+        self.assertEqual({"c0": 14, "c1": 16}, audit["cluster_local_slots"])
+        self.assertEqual(30, audit["task_count"])
+        self.assertEqual(120, audit["routed_tokens"])
+        self.assertEqual(
+            (0, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (1, 2, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m60_high_skew_dynamic_desc_prefetch_contract(self) -> None:
+        queues = schedule.build_m60_high_skew_dynamic_desc_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {0: 2, 1: 2},
+            {eid: slots[eid].s2pf_s1_overlap_steps for eid in (0, 1)},
+        )
+        self.assertEqual(
+            {
+                0: (schedule.DMA_IDMA, 3),
+                1: (schedule.DMA_XDMA, 2),
+                2: (schedule.DMA_XDMA, 4),
+            },
+            {
+                eid: (slot.s4_prefetch_dma, slot.s4_prefetch_target_eid)
+                for eid, slot in slots.items()
+                if slot.s4_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertEqual(
+            {2, 3, 4},
+            {eid for eid, slot in slots.items() if slot.skip_s1},
+        )
+
+    def test_m60_high_skew_dynamic_desc_structural_bound(self) -> None:
+        audit = schedule.audit_m60_high_skew_dynamic_desc_schedule(
+            schedule.build_schedule_profile(
+                schedule.M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE
+            )
+        )
+
+        self.assertEqual(
+            {"c0": 574, "c1": 568},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            143.5,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual(26, len(audit["dma_release_edges"]))
+
+    def test_m60_high_skew_dynamic_two_ended_matches_case3_policy2(
+        self,
+    ) -> None:
+        queues = schedule.build_m60_high_skew_dynamic_two_ended_schedule()
+        audit = schedule.audit_m60_high_skew_dynamic_two_ended_schedule(queues)
+
+        self.assertIn(
+            schedule.M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+            schedule.SCHEDULE_PROFILES,
+        )
+        self.assertEqual({"c0": 111, "c1": 94}, audit["queue_ticks"])
+        self.assertEqual({"c0": 3, "c1": 27}, audit["cluster_local_slots"])
+        self.assertEqual(30, audit["task_count"])
+        self.assertEqual(120, audit["routed_tokens"])
+        self.assertEqual(
+            (0, 1, 2),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            tuple(range(29, 2, -1)),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m60_high_skew_dynamic_two_ended_prefetch_contract(self) -> None:
+        queues = schedule.build_m60_high_skew_dynamic_two_ended_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {1: 2, 2: 2, 3: 0},
+            {eid: slots[eid].s2pf_s1_overlap_steps for eid in (1, 2, 3)},
+        )
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
+        self.assertTrue(all(not slot.skip_s1 for slot in slots.values()))
+
+    def test_m60_high_skew_dynamic_two_ended_structural_bound(self) -> None:
+        audit = schedule.audit_m60_high_skew_dynamic_two_ended_schedule(
+            schedule.build_schedule_profile(
+                schedule.M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE
+            )
+        )
+
+        self.assertEqual(
+            {"c0": 453, "c1": 457},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            114.25,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual(6, len(audit["dma_release_edges"]))
+
+    def test_m60_high_skew_full_scheduler_matches_case3_policy3(self) -> None:
+        queues = schedule.build_m60_high_skew_full_scheduler_schedule()
+        audit = schedule.audit_m60_high_skew_full_scheduler_schedule(queues)
+
+        self.assertIn(
+            schedule.M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+            schedule.SCHEDULE_PROFILES,
+        )
+        self.assertEqual({"c0": 99, "c1": 99}, audit["queue_ticks"])
+        self.assertEqual({"c0": 10, "c1": 20}, audit["cluster_local_slots"])
+        self.assertEqual(30, audit["task_count"])
+        self.assertEqual(120, audit["routed_tokens"])
+        self.assertEqual(
+            (0, *range(13, 5, -1), 2),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (29, *range(28, 13, -1), 1, 5, 4, 3),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m60_high_skew_full_scheduler_prefetch_contract(self) -> None:
+        queues = schedule.build_m60_high_skew_full_scheduler_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {
+                0: schedule.DMA_IDMA,
+                1: schedule.DMA_BOTH,
+                2: schedule.DMA_BOTH,
+            },
+            {
+                eid: slot.s2_prefetch_dma
+                for eid, slot in slots.items()
+                if slot.s2_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertTrue(
+            all(slots[eid].s2pf_s1_overlap_steps == 2 for eid in (0, 1, 2))
+        )
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
+        self.assertTrue(all(not slot.skip_s1 for slot in slots.values()))
+
+    def test_m60_high_skew_full_scheduler_structural_bound(self) -> None:
+        audit = schedule.audit_m60_high_skew_full_scheduler_schedule(
+            schedule.build_schedule_profile(
+                schedule.M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE
+            )
+        )
+
+        self.assertEqual(
+            {"c0": 426, "c1": 456},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            114.0,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual(
+            {
+                (("c0", 0, 0, "S2PF"), ("c1", 1, 28, "S1")),
+                (("c1", 16, 1, "S2PF"), ("c0", 1, 13, "S1")),
+                (("c0", 9, 2, "S2PF"), ("c1", 17, 5, "S1")),
+            },
+            set(audit["dma_release_edges"]),
+        )
+
+    def test_m92_parameter_order_dynamic_desc_matches_case2_policy1(self) -> None:
+        queues = schedule.build_m92_parameter_order_dynamic_desc_schedule()
+        audit = schedule.audit_m92_parameter_order_dynamic_desc_schedule(queues)
+
+        self.assertEqual({"c0": 168, "c1": 168}, audit["queue_ticks"])
+        self.assertEqual({"c0": 10, "c1": 28}, audit["cluster_local_slots"])
+        self.assertEqual(38, audit["task_count"])
+        self.assertEqual(184, audit["routed_tokens"])
+        self.assertEqual(
+            (0, 20, 22, 24, 26, 28, 30, 32, 34, 36),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+             15, 16, 17, 18, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m92_parameter_order_dynamic_desc_prefetch_contract(self) -> None:
+        queues = schedule.build_m92_parameter_order_dynamic_desc_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(schedule.DMA_IDMA, slots[0].s2_prefetch_dma)
+        self.assertEqual(schedule.DMA_XDMA, slots[1].s2_prefetch_dma)
+        self.assertEqual(2, slots[0].s2pf_s1_overlap_steps)
+        self.assertEqual(2, slots[1].s2pf_s1_overlap_steps)
+        self.assertEqual(schedule.DMA_XDMA, slots[1].s4_prefetch_dma)
+        self.assertEqual(2, slots[1].s4_prefetch_target_eid)
+        self.assertTrue(slots[2].skip_s1)
+        self.assertEqual({2}, {eid for eid, slot in slots.items() if slot.skip_s1})
+
+    def test_m92_parameter_order_dynamic_desc_structural_bound(self) -> None:
+        audit = schedule.audit_m92_parameter_order_dynamic_desc_schedule(
+            schedule.build_m92_parameter_order_dynamic_desc_schedule()
+        )
+
+        self.assertEqual(
+            {"c0": 702, "c1": 756},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            189.0,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual(2, len(audit["dma_release_edges"]))
+
+    def test_m92_parameter_order_dynamic_two_ended_matches_case2_policy2(
+        self,
+    ) -> None:
+        queues = schedule.build_m92_parameter_order_dynamic_two_ended_schedule()
+        audit = schedule.audit_m92_parameter_order_dynamic_two_ended_schedule(
+            queues
+        )
+
+        self.assertEqual({"c0": 114, "c1": 172}, audit["queue_ticks"])
+        self.assertEqual({"c0": 1, "c1": 37}, audit["cluster_local_slots"])
+        self.assertEqual(38, audit["task_count"])
+        self.assertEqual(184, audit["routed_tokens"])
+        self.assertEqual((0,), tuple(slot.expert_id for slot in queues["c0"]))
+        self.assertEqual(
+            tuple(range(37, 0, -1)),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m92_parameter_order_dynamic_two_ended_prefetch_contract(
+        self,
+    ) -> None:
+        queues = schedule.build_m92_parameter_order_dynamic_two_ended_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(schedule.DMA_BOTH, slots[1].s2_prefetch_dma)
+        self.assertEqual(2, slots[1].s2pf_s1_overlap_steps)
+        self.assertEqual(
+            {1},
+            {
+                eid for eid, slot in slots.items()
+                if slot.s2_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
+        self.assertTrue(all(not slot.skip_s1 for slot in slots.values()))
+
+    def test_m92_parameter_order_dynamic_two_ended_structural_bound(
+        self,
+    ) -> None:
+        audit = schedule.audit_m92_parameter_order_dynamic_two_ended_schedule(
+            schedule.build_m92_parameter_order_dynamic_two_ended_schedule()
+        )
+
+        self.assertEqual(
+            {"c0": 459, "c1": 799},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            199.75,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual(3, len(audit["dma_release_edges"]))
+
+    def test_m92_parameter_order_full_scheduler_matches_case2_policy3(
+        self,
+    ) -> None:
+        queues = schedule.build_m92_parameter_order_full_scheduler_schedule()
+        audit = schedule.audit_m92_parameter_order_full_scheduler_schedule(
+            queues
+        )
+
+        self.assertEqual({"c0": 141, "c1": 144}, audit["queue_ticks"])
+        self.assertEqual({"c0": 10, "c1": 28}, audit["cluster_local_slots"])
+        self.assertEqual(38, audit["task_count"])
+        self.assertEqual(184, audit["routed_tokens"])
+        self.assertEqual(
+            (0, *range(10, 1, -1)),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (37, *range(36, 10, -1), 1),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_m92_parameter_order_full_scheduler_prefetch_contract(
+        self,
+    ) -> None:
+        queues = schedule.build_m92_parameter_order_full_scheduler_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {0: schedule.DMA_IDMA, 1: schedule.DMA_BOTH},
+            {
+                eid: slot.s2_prefetch_dma
+                for eid, slot in slots.items()
+                if slot.s2_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertEqual(2, slots[0].s2pf_s1_overlap_steps)
+        self.assertEqual(2, slots[1].s2pf_s1_overlap_steps)
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
+        self.assertTrue(all(not slot.skip_s1 for slot in slots.values()))
+
+    def test_m92_parameter_order_full_scheduler_structural_bound(
+        self,
+    ) -> None:
+        audit = schedule.audit_m92_parameter_order_full_scheduler_schedule(
+            schedule.build_m92_parameter_order_full_scheduler_schedule()
+        )
+
+        self.assertEqual(
+            {"c0": 594, "c1": 660},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            165.0,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+        self.assertEqual(2, len(audit["dma_release_edges"]))
+
     def test_dynamic_desc_matches_case0_policy1(self) -> None:
         queues = schedule.build_dynamic_desc_schedule()
         audit = schedule.audit_dynamic_desc_schedule(queues)
@@ -87,6 +827,24 @@ class MoeTestScheduleTest(unittest.TestCase):
         self.assertEqual(43, audit["task_count"])
         self.assertEqual(140, audit["routed_tokens"])
         self.assertEqual(21, len(audit["dma_release_edges"]))
+        early_s2pf = tuple(
+            slot
+            for slots in queues.values()
+            for slot in slots
+            if slot.s2pf_s1_overlap_steps != 0
+        )
+        self.assertEqual(20, len(early_s2pf))
+        self.assertTrue(
+            all(slot.s1_dma == slot.s2_prefetch_dma for slot in early_s2pf)
+        )
+        self.assertTrue(
+            all(
+                slot.s2pf_s1_overlap_steps == 2
+                for slots in queues.values()
+                for slot in slots
+                if slot.s2_prefetch_dma != schedule.DMA_NONE
+            )
+        )
 
     def test_dynamic_desc_preserves_preload_contract(self) -> None:
         queues = schedule.build_dynamic_desc_schedule()
@@ -146,6 +904,124 @@ class MoeTestScheduleTest(unittest.TestCase):
         )
         self.assertEqual(
             175.5,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+
+    def test_dynamic_two_ended_matches_case0_policy2(self) -> None:
+        queues = schedule.build_dynamic_two_ended_schedule()
+        audit = schedule.audit_dynamic_two_ended_schedule(queues)
+
+        self.assertEqual({"c0": 137, "c1": 134}, audit["queue_ticks"])
+        self.assertEqual({"c0": 12, "c1": 31}, audit["cluster_local_slots"])
+        self.assertEqual(43, audit["task_count"])
+        self.assertEqual(140, audit["routed_tokens"])
+        self.assertEqual(26, len(audit["dma_release_edges"]))
+        self.assertEqual(
+            tuple(range(12)),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            tuple(range(42, 11, -1)),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_dynamic_two_ended_preserves_prefetch_contract(self) -> None:
+        queues = schedule.build_dynamic_two_ended_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+        early_s2pf = tuple(
+            slot
+            for slot in slots.values()
+            if slot.s2pf_s1_overlap_steps != 0
+        )
+
+        self.assertEqual(19, len(early_s2pf))
+        self.assertTrue(
+            all(slot.s2pf_s1_overlap_steps == 2 for slot in early_s2pf)
+        )
+        self.assertEqual(
+            (schedule.DMA_BOTH, 20),
+            (slots[21].s4_prefetch_dma, slots[21].s4_prefetch_target_eid),
+        )
+        self.assertTrue(slots[20].skip_s1)
+        self.assertEqual(schedule.DMA_NONE, slots[20].s1_dma)
+        self.assertEqual(schedule.DMA_BOTH, slots[20].s3_dma)
+
+    def test_dynamic_two_ended_structural_lower_bound_is_157_25_ticks(
+        self,
+    ) -> None:
+        queues = schedule.build_dynamic_two_ended_schedule()
+        audit = schedule.audit_dynamic_two_ended_schedule(queues)
+
+        self.assertEqual(
+            {"c0": 584, "c1": 629},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            157.25,
+            audit["structural_lower_bound_quarter_ticks"] / 4,
+        )
+
+    def test_full_scheduler_matches_case0_policy3(self) -> None:
+        queues = schedule.build_full_scheduler_schedule()
+        audit = schedule.audit_full_scheduler_schedule(queues)
+
+        self.assertEqual({"c0": 129, "c1": 129}, audit["queue_ticks"])
+        self.assertEqual({"c0": 11, "c1": 32}, audit["cluster_local_slots"])
+        self.assertEqual(43, audit["task_count"])
+        self.assertEqual(140, audit["routed_tokens"])
+        self.assertEqual(6, len(audit["dma_release_edges"]))
+        self.assertEqual(
+            (0, 1, 2, 5, 8, 10, 12, 14, 16, 18, 20),
+            tuple(slot.expert_id for slot in queues["c0"]),
+        )
+        self.assertEqual(
+            (
+                4, *range(42, 33, -1), 6, *range(33, 26, -1), 3,
+                *range(26, 21, -1), 7, 9, 11, 13, 15, 17, 19, 21,
+            ),
+            tuple(slot.expert_id for slot in queues["c1"]),
+        )
+
+    def test_full_scheduler_preserves_prefetch_contract(self) -> None:
+        queues = schedule.build_full_scheduler_schedule()
+        slots = {
+            slot.expert_id: slot
+            for cluster_slots in queues.values()
+            for slot in cluster_slots
+        }
+
+        self.assertEqual(
+            {0, 1, 2},
+            {
+                expert_id for expert_id, slot in slots.items()
+                if slot.s2_prefetch_dma != schedule.DMA_NONE
+            },
+        )
+        self.assertEqual(
+            {0: 2, 1: 2, 2: 0},
+            {eid: slots[eid].s2pf_s1_overlap_steps for eid in (0, 1, 2)},
+        )
+        self.assertTrue(
+            all(slots[eid].s2_prefetch_dma == schedule.DMA_IDMA for eid in (0, 1, 2))
+        )
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
+
+    def test_full_scheduler_structural_lower_bound_is_153_ticks(self) -> None:
+        queues = schedule.build_full_scheduler_schedule()
+        audit = schedule.audit_full_scheduler_schedule(queues)
+
+        self.assertEqual(
+            {"c0": 549, "c1": 612},
+            audit["structural_cluster_quarter_ticks"],
+        )
+        self.assertEqual(
+            153,
             audit["structural_lower_bound_quarter_ticks"] / 4,
         )
 

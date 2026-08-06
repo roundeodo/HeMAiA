@@ -2204,7 +2204,6 @@ class HostBingoKernelCheckResultArgs(BingoKernelArgs):
         tolerance: absolute fp32 tolerance (only meaningful when check_type != 0).
                    For fp16 mode this is still fp32 — the C kernel promotes
                    fp16 to fp32 before comparing.
-
         Validates that exactly one of data_size/num_elements is given and that
         data_size is a whole multiple of the element size.
         """

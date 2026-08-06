@@ -22,7 +22,6 @@ __moe_run_s2_compute(
 
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_COMPUTE_GATE_UP_FULL_START);
     MOE_PROFILE_RESOURCE_BEGIN(profile);
-    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
     uint32_t m_tiles = call->M;
     uint32_t block_count = st->s1_block_count;
     uint32_t n_tiles = __moe_dyn_stage_block_n(call->N, block_count);
@@ -34,11 +33,6 @@ __moe_run_s2_compute(
     for (uint32_t mt = 0u; mt < m_tiles; mt++) {
         uint32_t token = token_start + mt * token_step;
         for (uint32_t n = 0u; n < block_count; n++) {
-            uint32_t compute_step = mt * block_count + n;
-            if (s2->sync_enabled != 0u && compute_step != 0u &&
-                compute_step < s2->transfer_count) {
-                __moe_pipeline_wait(&s2->prefetch_done, compute_step);
-            }
             if (configure_block0 != 0u && mt == 0u && n == 0u &&
                 !__moe_csr_stage_is_prepared(blk, MOE_CSR_PREPARED_S2)) {
                 __moe_bank_configure_mode0(
@@ -83,12 +77,6 @@ __moe_run_s2_compute(
             }
             moe_wait_dual_vc_and_streamer();
             BINGO_TRACE_MARKER(BINGO_TRACE_GEMM_FULL_RUN_END);
-
-            if (s2->sync_enabled != 0u &&
-                compute_step + 1u < s2->transfer_count) {
-                __moe_pipeline_publish(
-                    &s2->compute_done, compute_step + 1u);
-            }
         }
     }
 

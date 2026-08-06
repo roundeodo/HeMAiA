@@ -7,6 +7,29 @@ BASELINE_PROFILE = "baseline"
 S2PF_BOTH_PROFILE = "s2pf_both"
 STATIC_DESC_PROFILE = "static_desc"
 DYNAMIC_DESC_PROFILE = "dynamic_desc"
+DYNAMIC_TWO_ENDED_PROFILE = "dynamic_two_ended"
+FULL_SCHEDULER_PROFILE = "full_scheduler"
+M70_THREE_HOT_STATIC_DESC_PROFILE = "m70_three_hot_static_desc"
+M70_THREE_HOT_DYNAMIC_DESC_PROFILE = "m70_three_hot_dynamic_desc"
+M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE = "m70_three_hot_dynamic_two_ended"
+M70_THREE_HOT_FULL_SCHEDULER_PROFILE = "m70_three_hot_full_scheduler"
+M92_PARAMETER_ORDER_STATIC_DESC_PROFILE = "m92_parameter_order_static_desc"
+M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE = "m92_parameter_order_dynamic_desc"
+M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE = (
+    "m92_parameter_order_dynamic_two_ended"
+)
+M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE = (
+    "m92_parameter_order_full_scheduler"
+)
+M60_HIGH_SKEW_STATIC_DESC_PROFILE = "m60_high_skew_static_desc"
+M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE = "m60_high_skew_dynamic_desc"
+M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE = (
+    "m60_high_skew_dynamic_two_ended"
+)
+M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE = "m60_high_skew_full_scheduler"
+M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE = (
+    "m70_three_hot_dynamic_desc_skip_elided"
+)
 HIGH_TO_LOW_PROFILE = "high_to_low"
 LOW_TO_HIGH_PROFILE = "low_to_high"
 ENDS_INWARD_PROFILE = "ends_inward"
@@ -17,6 +40,21 @@ SCHEDULE_PROFILES = (
     S2PF_BOTH_PROFILE,
     STATIC_DESC_PROFILE,
     DYNAMIC_DESC_PROFILE,
+    DYNAMIC_TWO_ENDED_PROFILE,
+    FULL_SCHEDULER_PROFILE,
+    M70_THREE_HOT_STATIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+    M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+    M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+    M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+    M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
     HIGH_TO_LOW_PROFILE,
     LOW_TO_HIGH_PROFILE,
     ENDS_INWARD_PROFILE,
@@ -42,10 +80,25 @@ S2PF_TICKS = 2
 S2PF_BOTH_TICKS = 1
 S4PF_SINGLE_TICKS = 4
 S4PF_BOTH_TICKS = 2
+S2PF_EARLY_CTRL_BIT = 20
 
 EXPERT_COUNT = 64
 STATIC_DESC_EXPECTED_MAKESPAN_TICKS = 162
 DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS = 159
+DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS = 137
+FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS = 129
+M70_THREE_HOT_STATIC_DESC_EXPECTED_MAKESPAN_TICKS = 132
+M70_THREE_HOT_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS = 126
+M70_THREE_HOT_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS = 127
+M70_THREE_HOT_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS = 105
+M92_PARAMETER_ORDER_STATIC_DESC_EXPECTED_MAKESPAN_TICKS = 198
+M92_PARAMETER_ORDER_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS = 168
+M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS = 172
+M92_PARAMETER_ORDER_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS = 144
+M60_HIGH_SKEW_STATIC_DESC_EXPECTED_MAKESPAN_TICKS = 138
+M60_HIGH_SKEW_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS = 133
+M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS = 111
+M60_HIGH_SKEW_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS = 99
 HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS = 163
 LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS = 165
 ENDS_INWARD_EXPECTED_MAKESPAN_TICKS = 166
@@ -54,6 +107,20 @@ ENDS_INWARD_EXPECTED_MAKESPAN_TICKS = 166
 STRUCTURAL_API_QUARTER_TICKS_PER_SLOT = 3
 STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 711
 DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 702
+DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 629
+FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 612
+M70_THREE_HOT_STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 558
+M70_THREE_HOT_DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 546
+M70_THREE_HOT_DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 517
+M70_THREE_HOT_FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 468
+M92_PARAMETER_ORDER_STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 837
+M92_PARAMETER_ORDER_DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 756
+M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 799
+M92_PARAMETER_ORDER_FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 660
+M60_HIGH_SKEW_STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 600
+M60_HIGH_SKEW_DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 574
+M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 457
+M60_HIGH_SKEW_FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = 456
 HIGH_TO_LOW_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = (
     4 * HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS
     + 22 * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
@@ -66,6 +133,15 @@ ENDS_INWARD_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS = (
     4 * ENDS_INWARD_EXPECTED_MAKESPAN_TICKS
     + 22 * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
 )
+
+
+def s2pf_s1_overlap_steps(
+    *, skip_s1: bool, s1_shape: int, s1_dma: int, s2_prefetch_dma: int
+) -> int:
+    if skip_s1 or s2_prefetch_dma == DMA_NONE:
+        return 0
+    s1_dma_ticks = 2 if s1_dma == DMA_BOTH else 4
+    return 2 if S1_COMPUTE_TICKS[s1_shape] > s1_dma_ticks else 0
 
 
 def select_two_slot_s2pf_binding(
@@ -92,6 +168,27 @@ HIGH_TO_LOW_COUNTS = (
     + (0,) * 21
 )
 
+M70_THREE_HOT_COUNTS = (
+    (28,) * 3
+    + (6,) * 4
+    + (2,) * 16
+    + (0,) * 41
+)
+
+M92_PARAMETER_ORDER_COUNTS = (
+    (76, 40)
+    + (2,) * 32
+    + (1,) * 4
+    + (0,) * 26
+)
+
+M60_HIGH_SKEW_COUNTS = (
+    (36, 22, 13, 6)
+    + (2,) * 17
+    + (1,) * 9
+    + (0,) * 34
+)
+
 # Exact token routing exported for
 # certified_olmoe_triple_hot_long_cold_tail. Entries E43-E63 are inactive.
 STATIC_DESC_TOKEN_IDS_BY_EXPERT = (
@@ -110,6 +207,59 @@ STATIC_DESC_TOKEN_IDS_BY_EXPERT = (
     *(() for _ in range(21)),
 )
 
+# Exact Top-2 routing exported for synthetic_three_hot_medium_cold_m70.
+# Entries E23-E63 are inactive.
+M70_THREE_HOT_TOKEN_IDS_BY_EXPERT = (
+    (0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16, 18, 19, 21, 22, 24, 25,
+     27, 28, 30, 31, 33, 36, 40, 43, 47, 58),
+    (0, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 23, 24, 26,
+     27, 29, 30, 32, 33, 37, 40, 44, 47, 59),
+    (1, 2, 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, 19, 20, 22, 23, 25, 26,
+     28, 29, 31, 32, 34, 37, 41, 44, 48, 59),
+    (34, 38, 41, 45, 48, 60),
+    (35, 38, 42, 45, 49, 60),
+    (35, 39, 42, 46, 49, 61),
+    (36, 39, 43, 46, 50, 61),
+    (50, 62), (51, 62), (51, 63), (52, 63),
+    (52, 64), (53, 64), (53, 65), (54, 65),
+    (54, 66), (55, 66), (55, 67), (56, 67),
+    (56, 68), (57, 68), (57, 69), (58, 69),
+    *(() for _ in range(41)),
+)
+
+# Exact Top-2 routing exported for synthetic_parameter_and_order_stress_m92.
+# Entries E38-E63 are inactive.
+M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT = (
+    tuple(range(76)),
+    (*range(39), 71),
+    (39, 72), (40, 73), (41, 74), (42, 75), (43, 76),
+    (44, 76), (45, 77), (46, 77), (47, 78), (48, 78),
+    (49, 79), (50, 79), (51, 80), (52, 80), (53, 81),
+    (54, 81), (55, 82), (56, 82), (57, 83), (58, 83),
+    (59, 84), (60, 84), (61, 85), (62, 85), (63, 86),
+    (64, 86), (65, 87), (66, 87), (67, 88), (68, 88),
+    (69, 89), (70, 89), (90,), (90,), (91,), (91,),
+    *(() for _ in range(26)),
+)
+
+# Exact Top-2 routing exported for synthetic_high_skew_olmoe_style_m60.
+# Entries E30-E63 are inactive.
+M60_HIGH_SKEW_TOKEN_IDS_BY_EXPERT = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+     18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+     34, 45),
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 17, 19, 21, 23, 26,
+     29, 32, 35, 45),
+    (10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 33, 35, 46),
+    (25, 28, 31, 34, 36, 46),
+    (36, 47), (37, 47), (37, 48), (38, 48), (38, 49),
+    (39, 49), (39, 50), (40, 50), (40, 51), (41, 51),
+    (41, 52), (42, 52), (42, 53), (43, 53), (43, 54),
+    (44, 54), (44, 55),
+    (55,), (56,), (56,), (57,), (57,), (58,), (58,), (59,), (59,),
+    *(() for _ in range(34)),
+)
+
 # Literal cluster-local streams from case 0 / STATIC_DESC. Physical parameters
 # are intentionally absent here because this policy fixes every task to B/B,
 # C2 to IDMA, C3 to XDMA, and disables S2PF/S4PF.
@@ -118,6 +268,22 @@ STATIC_DESC_CLUSTER_EIDS = {
            31, 33, 35, 37, 39, 41),
     "c1": (1, 2, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30,
            32, 34, 36, 38, 40, 42),
+}
+
+M70_THREE_HOT_STATIC_DESC_CLUSTER_EIDS = {
+    "c0": (0, 2, 8, 10, 12, 14, 16, 18, 20, 22),
+    "c1": (1, 3, 4, 5, 6, 7, 9, 11, 13, 15, 17, 19, 21),
+}
+
+M92_PARAMETER_ORDER_STATIC_DESC_CLUSTER_EIDS = {
+    "c0": (0, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37),
+    "c1": (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22,
+           24, 26, 28, 30, 32, 34, 36),
+}
+
+M60_HIGH_SKEW_STATIC_DESC_CLUSTER_EIDS = {
+    "c0": (0, 3, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28),
+    "c1": (1, 2, 4, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29),
 }
 
 
@@ -209,7 +375,7 @@ class FixedOrderTask:
     skip_s1: bool = False
 
 
-def _dynamic_desc_task(
+def _case0_fixed_order_task(
     cluster_name: str,
     expert_id: int,
     start_tick: int,
@@ -241,43 +407,697 @@ def _dynamic_desc_task(
     )
 
 
+def _m70_fixed_order_task(
+    cluster_name: str,
+    expert_id: int,
+    start_tick: int,
+    end_tick: int,
+    s1_shape: int,
+    s3_shape: int,
+    s2_prefetch_dma: int,
+    s1_dma: int,
+    s3_dma: int,
+    s4_prefetch_dma: int = DMA_NONE,
+    s4_prefetch_target_eid: int = -1,
+    skip_s1: bool = False,
+) -> FixedOrderTask:
+    return FixedOrderTask(
+        cluster_name,
+        expert_id,
+        0,
+        M70_THREE_HOT_COUNTS[expert_id],
+        start_tick,
+        end_tick,
+        s1_shape,
+        s3_shape,
+        s2_prefetch_dma,
+        s1_dma,
+        s3_dma,
+        s4_prefetch_dma,
+        s4_prefetch_target_eid,
+        skip_s1,
+    )
+
+
+def _m92_fixed_order_task(
+    cluster_name: str,
+    expert_id: int,
+    start_tick: int,
+    end_tick: int,
+    s1_shape: int,
+    s3_shape: int,
+    s2_prefetch_dma: int,
+    s1_dma: int,
+    s3_dma: int,
+    s4_prefetch_dma: int = DMA_NONE,
+    s4_prefetch_target_eid: int = -1,
+    skip_s1: bool = False,
+) -> FixedOrderTask:
+    return FixedOrderTask(
+        cluster_name,
+        expert_id,
+        0,
+        M92_PARAMETER_ORDER_COUNTS[expert_id],
+        start_tick,
+        end_tick,
+        s1_shape,
+        s3_shape,
+        s2_prefetch_dma,
+        s1_dma,
+        s3_dma,
+        s4_prefetch_dma,
+        s4_prefetch_target_eid,
+        skip_s1,
+    )
+
+
+def _m60_fixed_order_task(
+    cluster_name: str,
+    expert_id: int,
+    start_tick: int,
+    end_tick: int,
+    s1_shape: int,
+    s3_shape: int,
+    s2_prefetch_dma: int,
+    s1_dma: int,
+    s3_dma: int,
+    s4_prefetch_dma: int = DMA_NONE,
+    s4_prefetch_target_eid: int = -1,
+    skip_s1: bool = False,
+) -> FixedOrderTask:
+    return FixedOrderTask(
+        cluster_name,
+        expert_id,
+        0,
+        M60_HIGH_SKEW_COUNTS[expert_id],
+        start_tick,
+        end_tick,
+        s1_shape,
+        s3_shape,
+        s2_prefetch_dma,
+        s1_dma,
+        s3_dma,
+        s4_prefetch_dma,
+        s4_prefetch_target_eid,
+        skip_s1,
+    )
+
+
 # Literal cluster-local replay of case 0 / DYNAMIC_DESC. The issue order is
 # descending, while shape, DMA, S2PF, S4PF, and cache-hit fields are selected
 # dynamically by the exported policy.
 DYNAMIC_DESC_HISTORY = (
-    _dynamic_desc_task("c0", 0, 0, 33, SHAPE_A, SHAPE_B, DMA_IDMA, DMA_IDMA, DMA_NONE),
-    _dynamic_desc_task("c0", 3, 33, 39, SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE, DMA_BOTH, 4),
-    _dynamic_desc_task("c0", 4, 39, 45, SHAPE_A, SHAPE_B, DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True),
+    _case0_fixed_order_task("c0", 0, 0, 33, SHAPE_A, SHAPE_B, DMA_IDMA, DMA_IDMA, DMA_NONE),
+    _case0_fixed_order_task("c0", 3, 33, 39, SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE, DMA_BOTH, 4),
+    _case0_fixed_order_task("c0", 4, 39, 45, SHAPE_A, SHAPE_B, DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True),
     *(
-        _dynamic_desc_task(
+        _case0_fixed_order_task(
             "c0", expert_id, 45 + slot * 6, 51 + slot * 6,
             SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
         )
         for slot, expert_id in enumerate(range(5, 22, 2))
     ),
     *(
-        _dynamic_desc_task(
+        _case0_fixed_order_task(
             "c0", expert_id, 99 + slot * 6, 105 + slot * 6,
             SHAPE_B, SHAPE_B, DMA_NONE, DMA_IDMA, DMA_IDMA,
         )
         for slot, expert_id in enumerate(range(23, 43, 2))
     ),
-    _dynamic_desc_task("c1", 1, 0, 27, SHAPE_A, SHAPE_B, DMA_XDMA, DMA_XDMA, DMA_NONE, DMA_XDMA, 2),
-    _dynamic_desc_task("c1", 2, 27, 48, SHAPE_A, SHAPE_B, DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True),
+    _case0_fixed_order_task("c1", 1, 0, 27, SHAPE_A, SHAPE_B, DMA_XDMA, DMA_XDMA, DMA_NONE, DMA_XDMA, 2),
+    _case0_fixed_order_task("c1", 2, 27, 48, SHAPE_A, SHAPE_B, DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True),
     *(
-        _dynamic_desc_task(
+        _case0_fixed_order_task(
             "c1", expert_id, 48 + slot * 6, 54 + slot * 6,
             SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
         )
         for slot, expert_id in enumerate(range(6, 22, 2))
     ),
-    _dynamic_desc_task("c1", 22, 96, 99, SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH),
+    _case0_fixed_order_task("c1", 22, 96, 99, SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH),
     *(
-        _dynamic_desc_task(
+        _case0_fixed_order_task(
             "c1", expert_id, 99 + slot * 6, 105 + slot * 6,
             SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
         )
         for slot, expert_id in enumerate(range(24, 43, 2))
+    ),
+)
+
+
+# Literal cluster-local replay of case 0 / DYNAMIC_TWO_ENDED. C2 takes the
+# hottest remaining expert and C3 the coldest; each local stream refills as
+# soon as its own task and the required shared-DMA release edges permit.
+DYNAMIC_TWO_ENDED_HISTORY = (
+    _case0_fixed_order_task(
+        "c0", 0, 0, 33, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_IDMA, DMA_BOTH,
+    ),
+    _case0_fixed_order_task(
+        "c0", 1, 34, 61, SHAPE_A, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+    _case0_fixed_order_task(
+        "c0", 2, 61, 82, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_IDMA, DMA_BOTH,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c0", expert_id, 83 + slot * 6, 89 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
+        )
+        for slot, expert_id in enumerate(range(3, 12))
+    ),
+    _case0_fixed_order_task(
+        "c1", 42, 0, 5, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_XDMA, DMA_BOTH,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 5 + slot * 3, 8 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(41, 36, -1))
+    ),
+    _case0_fixed_order_task(
+        "c1", 36, 20, 25, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 25 + slot * 3, 28 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(35, 32, -1))
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 37 + slot * 3, 40 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(32, 29, -1))
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 46 + slot * 3, 49 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(29, 24, -1))
+    ),
+    _case0_fixed_order_task(
+        "c1", 24, 61, 66, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_XDMA, DMA_BOTH,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 66 + slot * 3, 69 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(23, 21, -1))
+    ),
+    _case0_fixed_order_task(
+        "c1", 21, 72, 78, SHAPE_B, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE, DMA_BOTH, 20,
+    ),
+    _case0_fixed_order_task(
+        "c1", 20, 78, 84, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 86 + slot * 6, 92 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
+        )
+        for slot, expert_id in enumerate(range(19, 11, -1))
+    ),
+)
+
+
+# Literal cluster-local replay of case 0 / FULL_SCHEDULER. The scheduler first
+# pairs each hot expert with useful C3 work, drains the C/C tail while C2 is
+# busy, and then finishes the B/B experts in synchronized pairs.
+FULL_SCHEDULER_HISTORY = (
+    _case0_fixed_order_task(
+        "c0", 0, 0, 33, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    _case0_fixed_order_task(
+        "c0", 1, 33, 60, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    _case0_fixed_order_task(
+        "c0", 2, 60, 81, SHAPE_B, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c0", expert_id, 81 + slot * 6, 87 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_IDMA, DMA_IDMA,
+        )
+        for slot, expert_id in enumerate((5, 8, 10, 12, 14, 16, 18, 20))
+    ),
+    _case0_fixed_order_task(
+        "c1", 4, 0, 6, SHAPE_B, SHAPE_B,
+        DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 6 + slot * 3, 9 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(42, 33, -1))
+    ),
+    _case0_fixed_order_task(
+        "c1", 6, 33, 39, SHAPE_B, SHAPE_B,
+        DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 39 + slot * 3, 42 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(33, 26, -1))
+    ),
+    _case0_fixed_order_task(
+        "c1", 3, 60, 66, SHAPE_B, SHAPE_B,
+        DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 66 + slot * 3, 69 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(26, 21, -1))
+    ),
+    *(
+        _case0_fixed_order_task(
+            "c1", expert_id, 81 + slot * 6, 87 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
+        )
+        for slot, expert_id in enumerate((7, 9, 11, 13, 15, 17, 19, 21))
+    ),
+)
+
+
+# Literal cluster-local replay of case 1 / DYNAMIC_DESC. The descending order
+# is fixed while shape, DMA, S2PF, S4PF, and cache-hit fields remain dynamic.
+M70_THREE_HOT_DYNAMIC_DESC_HISTORY = (
+    _m70_fixed_order_task(
+        "c0", 0, 0, 42, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE, DMA_IDMA, 2,
+    ),
+    _m70_fixed_order_task(
+        "c0", 2, 42, 84, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c0", expert_id, 84 + slot * 6, 90 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_IDMA, DMA_IDMA,
+        )
+        for slot, expert_id in enumerate(range(9, 22, 2))
+    ),
+    _m70_fixed_order_task(
+        "c1", 1, 0, 42, SHAPE_A, SHAPE_B,
+        DMA_XDMA, DMA_XDMA, DMA_NONE, DMA_XDMA, 3,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 42 + slot * 9, 51 + slot * 9,
+            SHAPE_A, SHAPE_B, DMA_NONE, DMA_NONE, DMA_BOTH,
+            DMA_BOTH, expert_id + 1, skip_s1=True,
+        )
+        for slot, expert_id in enumerate(range(3, 7))
+    ),
+    _m70_fixed_order_task(
+        "c1", 7, 78, 81, SHAPE_A, SHAPE_C,
+        DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True,
+    ),
+    _m70_fixed_order_task(
+        "c1", 8, 81, 84, SHAPE_C, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 84 + slot * 6, 90 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
+        )
+        for slot, expert_id in enumerate(range(10, 23, 2))
+    ),
+)
+
+
+# Literal cluster-local replay of case 2 / DYNAMIC_DESC. Issue order remains
+# descending while physical parameters and the E1-to-E2 cache handoff are
+# selected dynamically by the exported policy.
+M92_PARAMETER_ORDER_DYNAMIC_DESC_HISTORY = (
+    _m92_fixed_order_task(
+        "c0", 0, 0, 114, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c0", expert_id, 114 + slot * 6, 120 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_IDMA, DMA_IDMA,
+        )
+        for slot, expert_id in enumerate(range(20, 38, 2))
+    ),
+    _m92_fixed_order_task(
+        "c1", 1, 0, 60, SHAPE_A, SHAPE_B,
+        DMA_XDMA, DMA_XDMA, DMA_NONE, DMA_XDMA, 2,
+    ),
+    _m92_fixed_order_task(
+        "c1", 2, 60, 63, SHAPE_A, SHAPE_C,
+        DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True,
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c1", expert_id, 63 + slot * 3, 66 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(3, 20))
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c1", expert_id, 114 + slot * 6, 120 + slot * 6,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
+        )
+        for slot, expert_id in enumerate(range(21, 38, 2))
+    ),
+)
+
+
+# Literal cluster-local replay of case 2 / DYNAMIC_TWO_ENDED. C2 holds the
+# hottest expert while C3 walks from the cold end back to E1.
+M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_HISTORY = (
+    _m92_fixed_order_task(
+        "c0", 0, 0, 114, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_IDMA, DMA_BOTH,
+    ),
+    _m92_fixed_order_task(
+        "c1", 37, 0, 5, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_XDMA, DMA_BOTH,
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c1", expert_id, 5 + slot * 3, 8 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(36, 13, -1))
+    ),
+    _m92_fixed_order_task(
+        "c1", 13, 74, 79, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c1", expert_id, 79 + slot * 3, 82 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(12, 1, -1))
+    ),
+    _m92_fixed_order_task(
+        "c1", 1, 112, 172, SHAPE_A, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+)
+
+
+# Literal cluster-local replay of case 2 / FULL_SCHEDULER. C2 keeps the hot E0
+# task resident while C3 drains the cold tail, then both clusters finish their
+# remaining streams without S4PF or cache-hit tasks.
+M92_PARAMETER_ORDER_FULL_SCHEDULER_HISTORY = (
+    _m92_fixed_order_task(
+        "c0", 0, 0, 114, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c0", expert_id, 114 + slot * 3, 117 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(10, 1, -1))
+    ),
+    _m92_fixed_order_task(
+        "c1", 37, 0, 6, SHAPE_B, SHAPE_B,
+        DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+    *(
+        _m92_fixed_order_task(
+            "c1", expert_id, 6 + slot * 3, 9 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(36, 10, -1))
+    ),
+    _m92_fixed_order_task(
+        "c1", 1, 84, 144, SHAPE_B, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+)
+
+
+# Literal cluster-local replay of case 3 / DYNAMIC_DESC. The descending order
+# is fixed while shape, DMA, S2PF, S4PF, and cache-hit fields remain dynamic.
+M60_HIGH_SKEW_DYNAMIC_DESC_HISTORY = (
+    _m60_fixed_order_task(
+        "c0", 0, 0, 54, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE, DMA_IDMA, 3,
+    ),
+    _m60_fixed_order_task(
+        "c0", 3, 54, 63, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True,
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c0", expert_id, 64 + slot * 6, 67 + slot * 6,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(7, 30, 2))
+    ),
+    _m60_fixed_order_task(
+        "c1", 1, 0, 33, SHAPE_A, SHAPE_B,
+        DMA_XDMA, DMA_XDMA, DMA_NONE, DMA_XDMA, 2,
+    ),
+    _m60_fixed_order_task(
+        "c1", 2, 33, 54, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_NONE, DMA_BOTH, DMA_XDMA, 4, skip_s1=True,
+    ),
+    _m60_fixed_order_task(
+        "c1", 4, 54, 57, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_NONE, DMA_BOTH, skip_s1=True,
+    ),
+    _m60_fixed_order_task(
+        "c1", 5, 57, 60, SHAPE_C, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c1", expert_id, 61 + slot * 6, 64 + slot * 6,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(6, 29, 2))
+    ),
+)
+
+
+# Literal cluster-local replay of case 3 / DYNAMIC_TWO_ENDED. C2 consumes the
+# hot end while C3 walks from the cold end back to E3.
+M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_HISTORY = (
+    _m60_fixed_order_task(
+        "c0", 0, 0, 54, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_IDMA, DMA_BOTH,
+    ),
+    _m60_fixed_order_task(
+        "c0", 1, 55, 88, SHAPE_A, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+    _m60_fixed_order_task(
+        "c0", 2, 90, 111, SHAPE_A, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+    _m60_fixed_order_task(
+        "c1", 29, 0, 5, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_XDMA, DMA_BOTH,
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c1", expert_id, 5 + slot * 3, 8 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(28, 18, -1))
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c1", expert_id, 37 + slot * 3, 40 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(18, 12, -1))
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c1", expert_id, 58 + slot * 3, 61 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(12, 3, -1))
+    ),
+    _m60_fixed_order_task(
+        "c1", 3, 85, 94, SHAPE_B, SHAPE_B,
+        DMA_BOTH, DMA_IDMA, DMA_NONE,
+    ),
+)
+
+
+# Literal cluster-local replay of case 3 / FULL_SCHEDULER. C2 executes E0,
+# drains E13 through E6, and finishes E2. C3 drains E29 through E14, executes
+# E1, and finishes E5 through E3. The exported policy has three S2PF events
+# and no S4PF/cache-hit tasks.
+M60_HIGH_SKEW_FULL_SCHEDULER_HISTORY = (
+    _m60_fixed_order_task(
+        "c0", 0, 0, 54, SHAPE_A, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c0", expert_id, 54 + slot * 3, 57 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(13, 5, -1))
+    ),
+    _m60_fixed_order_task(
+        "c0", 2, 78, 99, SHAPE_B, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+    _m60_fixed_order_task(
+        "c1", 29, 0, 6, SHAPE_B, SHAPE_B,
+        DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c1", expert_id, 6 + slot * 3, 9 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(28, 13, -1))
+    ),
+    _m60_fixed_order_task(
+        "c1", 1, 51, 84, SHAPE_B, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+    *(
+        _m60_fixed_order_task(
+            "c1", expert_id, 84 + slot * 3, 87 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate((5, 4))
+    ),
+    _m60_fixed_order_task(
+        "c1", 3, 90, 99, SHAPE_C, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+)
+
+
+# Literal cluster-local replay of case 1 / DYNAMIC_TWO_ENDED. C2 consumes the
+# three hot experts while C3 walks inward from the cold end. The exported
+# policy has six early S2PF events and no S4PF/cache-hit tasks.
+M70_THREE_HOT_DYNAMIC_TWO_ENDED_HISTORY = (
+    _m70_fixed_order_task(
+        "c0", 0, 0, 42, SHAPE_A, SHAPE_B,
+        DMA_NONE, DMA_IDMA, DMA_BOTH,
+    ),
+    _m70_fixed_order_task(
+        "c0", 1, 43, 85, SHAPE_A, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
+    ),
+    _m70_fixed_order_task(
+        "c0", 2, 85, 127, SHAPE_A, SHAPE_B,
+        DMA_BOTH, DMA_IDMA, DMA_NONE,
+    ),
+    _m70_fixed_order_task(
+        "c1", 22, 0, 5, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_XDMA, DMA_BOTH,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 5 + slot * 3, 8 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(21, 14, -1))
+    ),
+    _m70_fixed_order_task(
+        "c1", 14, 26, 31, SHAPE_B, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 31 + slot * 3, 34 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(13, 9, -1))
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 46 + slot * 3, 49 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(9, 6, -1))
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 55 + slot * 9, 64 + slot * 9,
+            SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
+        )
+        for slot, expert_id in enumerate(range(6, 2, -1))
+    ),
+)
+
+
+# Literal cluster-local replay of case 1 / FULL_SCHEDULER. The scheduler owns
+# task order, cluster assignment, shape, DMA binding, and S2PF selection.
+M70_THREE_HOT_FULL_SCHEDULER_HISTORY = (
+    _m70_fixed_order_task(
+        "c0", 2, 0, 42, SHAPE_B, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    _m70_fixed_order_task(
+        "c0", 4, 42, 51, SHAPE_B, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    _m70_fixed_order_task(
+        "c0", 1, 51, 93, SHAPE_B, SHAPE_B,
+        DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c0", expert_id, 93 + slot * 3, 96 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(10, 6, -1))
+    ),
+    _m70_fixed_order_task(
+        "c1", 3, 0, 9, SHAPE_B, SHAPE_B,
+        DMA_XDMA, DMA_XDMA, DMA_NONE,
+    ),
+    *(
+        _m70_fixed_order_task(
+            "c1", expert_id, 9 + slot * 3, 12 + slot * 3,
+            SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+        )
+        for slot, expert_id in enumerate(range(22, 11, -1))
+    ),
+    _m70_fixed_order_task(
+        "c1", 5, 42, 51, SHAPE_B, SHAPE_B,
+        DMA_XDMA, DMA_XDMA, DMA_NONE,
+    ),
+    _m70_fixed_order_task(
+        "c1", 6, 51, 60, SHAPE_B, SHAPE_B,
+        DMA_XDMA, DMA_XDMA, DMA_NONE,
+    ),
+    _m70_fixed_order_task(
+        "c1", 11, 60, 63, SHAPE_C, SHAPE_C,
+        DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    _m70_fixed_order_task(
+        "c1", 0, 63, 105, SHAPE_B, SHAPE_B,
+        DMA_BOTH, DMA_BOTH, DMA_NONE,
     ),
 )
 
@@ -424,6 +1244,23 @@ class SlotSpec:
         return DMA_BOTH if self.s3_shape == SHAPE_C else self.single_dma
 
     @property
+    def s2pf_s1_overlap_steps(self) -> int:
+        return s2pf_s1_overlap_steps(
+            skip_s1=self.skip_s1,
+            s1_shape=self.s1_shape,
+            s1_dma=self.s1_dma,
+            s2_prefetch_dma=self.s2_prefetch_dma,
+        )
+
+    @property
+    def s2pf_starts_after_s1_dma(self) -> bool:
+        return (
+            self.s2_prefetch_dma == DMA_NONE
+            or self.skip_s1
+            or self.s2pf_s1_overlap_steps != 0
+        )
+
+    @property
     def s2_token_start(self) -> int:
         return 0 if self.skip_s1 else SHAPE_M[self.s1_shape]
 
@@ -518,9 +1355,103 @@ def build_static_desc_schedule() -> dict[str, tuple[SlotSpec, ...]]:
     return frozen
 
 
-def build_dynamic_desc_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+def build_m70_three_hot_static_desc_schedule() -> dict[str, tuple[SlotSpec, ...]]:
     queues = {"c0": [], "c1": []}
-    for task in DYNAMIC_DESC_HISTORY:
+    for cluster_name in ("c0", "c1"):
+        cluster_index = 0 if cluster_name == "c0" else 1
+        dma = DMA_IDMA if cluster_index == 0 else DMA_XDMA
+        start_tick = 0
+        for expert_id in M70_THREE_HOT_STATIC_DESC_CLUSTER_EIDS[cluster_name]:
+            slot = SlotSpec(
+                cluster_name=cluster_name,
+                cluster_index=cluster_index,
+                local_slot=len(queues[cluster_name]),
+                expert_id=expert_id,
+                ntokens=M70_THREE_HOT_COUNTS[expert_id],
+                profile="B/B",
+                s1_shape=SHAPE_B,
+                s3_shape=SHAPE_B,
+                s2_prefetch_dma=DMA_NONE,
+                reference_start_tick=start_tick,
+                reference_end_tick=-1,
+                s1_dma_override=dma,
+                s3_dma_override=dma,
+            )
+            end_tick = _task_timeline(slot, start_tick).task_end
+            queues[cluster_name].append(replace(slot, reference_end_tick=end_tick))
+            start_tick = end_tick
+    frozen = {name: tuple(slots) for name, slots in queues.items()}
+    audit_m70_three_hot_static_desc_schedule(frozen)
+    return frozen
+
+
+def build_m92_parameter_order_static_desc_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    queues = {"c0": [], "c1": []}
+    for cluster_name in ("c0", "c1"):
+        cluster_index = 0 if cluster_name == "c0" else 1
+        dma = DMA_IDMA if cluster_index == 0 else DMA_XDMA
+        start_tick = 0
+        for expert_id in M92_PARAMETER_ORDER_STATIC_DESC_CLUSTER_EIDS[cluster_name]:
+            slot = SlotSpec(
+                cluster_name=cluster_name,
+                cluster_index=cluster_index,
+                local_slot=len(queues[cluster_name]),
+                expert_id=expert_id,
+                ntokens=M92_PARAMETER_ORDER_COUNTS[expert_id],
+                profile="B/B",
+                s1_shape=SHAPE_B,
+                s3_shape=SHAPE_B,
+                s2_prefetch_dma=DMA_NONE,
+                reference_start_tick=start_tick,
+                reference_end_tick=-1,
+                s1_dma_override=dma,
+                s3_dma_override=dma,
+            )
+            end_tick = _task_timeline(slot, start_tick).task_end
+            queues[cluster_name].append(replace(slot, reference_end_tick=end_tick))
+            start_tick = end_tick
+    frozen = {name: tuple(slots) for name, slots in queues.items()}
+    audit_m92_parameter_order_static_desc_schedule(frozen)
+    return frozen
+
+
+def build_m60_high_skew_static_desc_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    queues = {"c0": [], "c1": []}
+    for cluster_name in ("c0", "c1"):
+        cluster_index = 0 if cluster_name == "c0" else 1
+        dma = DMA_IDMA if cluster_index == 0 else DMA_XDMA
+        start_tick = 0
+        for expert_id in M60_HIGH_SKEW_STATIC_DESC_CLUSTER_EIDS[cluster_name]:
+            slot = SlotSpec(
+                cluster_name=cluster_name,
+                cluster_index=cluster_index,
+                local_slot=len(queues[cluster_name]),
+                expert_id=expert_id,
+                ntokens=M60_HIGH_SKEW_COUNTS[expert_id],
+                profile="B/B",
+                s1_shape=SHAPE_B,
+                s3_shape=SHAPE_B,
+                s2_prefetch_dma=DMA_NONE,
+                reference_start_tick=start_tick,
+                reference_end_tick=-1,
+                s1_dma_override=dma,
+                s3_dma_override=dma,
+            )
+            end_tick = _task_timeline(slot, start_tick).task_end
+            queues[cluster_name].append(replace(slot, reference_end_tick=end_tick))
+            start_tick = end_tick
+    frozen = {name: tuple(slots) for name, slots in queues.items()}
+    audit_m60_high_skew_static_desc_schedule(frozen)
+    return frozen
+
+
+def _build_fixed_order_schedule(
+    history: tuple[FixedOrderTask, ...],
+) -> dict[str, tuple[SlotSpec, ...]]:
+    queues = {"c0": [], "c1": []}
+    for task in history:
         cluster_index = 0 if task.cluster_name == "c0" else 1
         queues[task.cluster_name].append(
             SlotSpec(
@@ -548,8 +1479,92 @@ def build_dynamic_desc_schedule() -> dict[str, tuple[SlotSpec, ...]]:
                 skip_s1=task.skip_s1,
             )
         )
-    frozen = {name: tuple(slots) for name, slots in queues.items()}
+    return {name: tuple(slots) for name, slots in queues.items()}
+
+
+def build_dynamic_desc_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(DYNAMIC_DESC_HISTORY)
     audit_dynamic_desc_schedule(frozen)
+    return frozen
+
+
+def build_dynamic_two_ended_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(DYNAMIC_TWO_ENDED_HISTORY)
+    audit_dynamic_two_ended_schedule(frozen)
+    return frozen
+
+
+def build_full_scheduler_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(FULL_SCHEDULER_HISTORY)
+    audit_full_scheduler_schedule(frozen)
+    return frozen
+
+
+def build_m70_three_hot_dynamic_desc_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M70_THREE_HOT_DYNAMIC_DESC_HISTORY)
+    audit_m70_three_hot_dynamic_desc_schedule(frozen)
+    return frozen
+
+
+def build_m92_parameter_order_dynamic_desc_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M92_PARAMETER_ORDER_DYNAMIC_DESC_HISTORY)
+    audit_m92_parameter_order_dynamic_desc_schedule(frozen)
+    return frozen
+
+
+def build_m60_high_skew_dynamic_desc_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M60_HIGH_SKEW_DYNAMIC_DESC_HISTORY)
+    audit_m60_high_skew_dynamic_desc_schedule(frozen)
+    return frozen
+
+
+def build_m60_high_skew_dynamic_two_ended_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_HISTORY
+    )
+    audit_m60_high_skew_dynamic_two_ended_schedule(frozen)
+    return frozen
+
+
+def build_m60_high_skew_full_scheduler_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M60_HIGH_SKEW_FULL_SCHEDULER_HISTORY)
+    audit_m60_high_skew_full_scheduler_schedule(frozen)
+    return frozen
+
+
+def build_m92_parameter_order_dynamic_two_ended_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_HISTORY
+    )
+    audit_m92_parameter_order_dynamic_two_ended_schedule(frozen)
+    return frozen
+
+
+def build_m92_parameter_order_full_scheduler_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_HISTORY
+    )
+    audit_m92_parameter_order_full_scheduler_schedule(frozen)
+    return frozen
+
+
+def build_m70_three_hot_dynamic_two_ended_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M70_THREE_HOT_DYNAMIC_TWO_ENDED_HISTORY)
+    audit_m70_three_hot_dynamic_two_ended_schedule(frozen)
+    return frozen
+
+
+def build_m70_three_hot_full_scheduler_schedule(
+) -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M70_THREE_HOT_FULL_SCHEDULER_HISTORY)
+    audit_m70_three_hot_full_scheduler_schedule(frozen)
     return frozen
 
 
@@ -676,10 +1691,41 @@ def build_s1_stage_smoke_schedule() -> dict[str, tuple[SlotSpec, ...]]:
 
 
 def build_schedule_profile(profile: str) -> dict[str, tuple[SlotSpec, ...]]:
+    if profile in (
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    ):
+        return build_m70_three_hot_dynamic_desc_schedule()
+    if profile == M70_THREE_HOT_STATIC_DESC_PROFILE:
+        return build_m70_three_hot_static_desc_schedule()
+    if profile == M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE:
+        return build_m70_three_hot_dynamic_two_ended_schedule()
+    if profile == M70_THREE_HOT_FULL_SCHEDULER_PROFILE:
+        return build_m70_three_hot_full_scheduler_schedule()
+    if profile == M92_PARAMETER_ORDER_STATIC_DESC_PROFILE:
+        return build_m92_parameter_order_static_desc_schedule()
+    if profile == M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE:
+        return build_m92_parameter_order_dynamic_desc_schedule()
+    if profile == M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE:
+        return build_m92_parameter_order_dynamic_two_ended_schedule()
+    if profile == M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE:
+        return build_m92_parameter_order_full_scheduler_schedule()
+    if profile == M60_HIGH_SKEW_STATIC_DESC_PROFILE:
+        return build_m60_high_skew_static_desc_schedule()
+    if profile == M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE:
+        return build_m60_high_skew_dynamic_desc_schedule()
+    if profile == M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE:
+        return build_m60_high_skew_dynamic_two_ended_schedule()
+    if profile == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
+        return build_m60_high_skew_full_scheduler_schedule()
     if profile == STATIC_DESC_PROFILE:
         return build_static_desc_schedule()
     if profile == DYNAMIC_DESC_PROFILE:
         return build_dynamic_desc_schedule()
+    if profile == DYNAMIC_TWO_ENDED_PROFILE:
+        return build_dynamic_two_ended_schedule()
+    if profile == FULL_SCHEDULER_PROFILE:
+        return build_full_scheduler_schedule()
     if profile == HIGH_TO_LOW_PROFILE:
         return build_high_to_low_schedule()
     if profile == LOW_TO_HIGH_PROFILE:
@@ -766,6 +1812,46 @@ def cross_cluster_dma_release_edges(
     return tuple(sorted(edges))
 
 
+def _audit_m70_three_hot_distribution() -> None:
+    if len(M70_THREE_HOT_COUNTS) != EXPERT_COUNT or sum(M70_THREE_HOT_COUNTS) != 140:
+        raise AssertionError("M70 distribution contract changed")
+    routed_counts = tuple(
+        len(M70_THREE_HOT_TOKEN_IDS_BY_EXPERT[eid])
+        for eid in range(EXPERT_COUNT)
+    )
+    if routed_counts != M70_THREE_HOT_COUNTS:
+        raise AssertionError("M70 routing does not match expert loads")
+
+    token_owners = [[] for _ in range(70)]
+    for expert_id, token_ids in enumerate(M70_THREE_HOT_TOKEN_IDS_BY_EXPERT):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError("M70 must route every input token twice")
+
+
+def _audit_m60_high_skew_distribution() -> None:
+    if len(M60_HIGH_SKEW_COUNTS) != EXPERT_COUNT:
+        raise AssertionError("M60 must define 64 conceptual experts")
+    if sum(M60_HIGH_SKEW_COUNTS) != 120:
+        raise AssertionError("M60 assignment total must be 120")
+    if tuple(
+        len(token_ids) for token_ids in M60_HIGH_SKEW_TOKEN_IDS_BY_EXPERT
+    ) != M60_HIGH_SKEW_COUNTS:
+        raise AssertionError("M60 routing does not match expert loads")
+
+    token_owners = [[] for _ in range(60)]
+    for expert_id, token_ids in enumerate(M60_HIGH_SKEW_TOKEN_IDS_BY_EXPERT):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError("M60 must route every input token twice")
+
+
 def audit_static_desc_schedule(
     queues: dict[str, tuple[SlotSpec, ...]],
 ) -> dict[str, object]:
@@ -846,6 +1932,1493 @@ def audit_static_desc_schedule(
         "structural_cluster_quarter_ticks": cluster_quarter_ticks,
         "structural_lower_bound_quarter_ticks": structural_quarters,
         "dma_release_edges": (),
+    }
+
+
+def audit_m70_three_hot_static_desc_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m70_three_hot_distribution()
+
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (10, 13):
+        raise AssertionError("M70 STATIC_DESC must contain C2=10 and C3=13 slots")
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 23 or set(slots_by_eid) != set(range(23)):
+        raise AssertionError("M70 STATIC_DESC must cover E0 through E22 once")
+
+    for cluster_name, expected_eids in M70_THREE_HOT_STATIC_DESC_CLUSTER_EIDS.items():
+        if tuple(slot.expert_id for slot in queues[cluster_name]) != expected_eids:
+            raise AssertionError(f"{cluster_name} M70 STATIC_DESC stream changed")
+        if queues[cluster_name][0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(queues[cluster_name], queues[cluster_name][1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(f"{cluster_name} M70 STATIC_DESC stream has a gap")
+
+    for expert_id, slot in slots_by_eid.items():
+        expected_dma = DMA_IDMA if slot.cluster_name == "c0" else DMA_XDMA
+        if slot.ntokens != M70_THREE_HOT_COUNTS[expert_id]:
+            raise AssertionError(f"E{expert_id} token count changed")
+        if (
+            slot.s1_shape != SHAPE_B
+            or slot.s3_shape != SHAPE_B
+            or slot.s1_dma != expected_dma
+            or slot.s3_dma != expected_dma
+            or slot.s2_prefetch_dma != DMA_NONE
+            or slot.s4_prefetch_dma != DMA_NONE
+            or slot.skip_s1
+            or slot.skip_s3
+        ):
+            raise AssertionError(f"E{expert_id} is not fixed B/B without prefetch")
+        if _task_timeline(slot, slot.reference_start_tick).task_end != slot.reference_end_tick:
+            raise AssertionError(f"E{expert_id} M70 STATIC_DESC timeline changed")
+
+    if cross_cluster_dma_release_edges(queues):
+        raise AssertionError("M70 STATIC_DESC dedicated DMA lanes need no release edges")
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 132, "c1": 126}:
+        raise AssertionError(f"M70 STATIC_DESC queue endpoints changed: {queue_ticks}")
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if structural_quarters != M70_THREE_HOT_STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS:
+        raise AssertionError("M70 STATIC_DESC structural lower bound must be 139.5 ticks")
+    return {
+        "distribution": M70_THREE_HOT_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M70_THREE_HOT_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": (),
+    }
+
+
+def audit_m92_parameter_order_static_desc_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    if len(M92_PARAMETER_ORDER_COUNTS) != EXPERT_COUNT:
+        raise AssertionError("M92 STATIC_DESC must define 64 conceptual experts")
+    if sum(M92_PARAMETER_ORDER_COUNTS) != 184:
+        raise AssertionError("M92 STATIC_DESC assignment total must be 184")
+    if tuple(
+        len(token_ids) for token_ids in M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT
+    ) != M92_PARAMETER_ORDER_COUNTS:
+        raise AssertionError("M92 STATIC_DESC routing does not match expert loads")
+
+    token_owners = [[] for _ in range(92)]
+    for expert_id, token_ids in enumerate(M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError("M92 STATIC_DESC must route every input token twice")
+
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (15, 23):
+        raise AssertionError(
+            "M92 STATIC_DESC must contain C2=15 and C3=23 slots"
+        )
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 38 or set(slots_by_eid) != set(range(38)):
+        raise AssertionError("M92 STATIC_DESC must cover active E0 through E37 once")
+
+    for cluster_name, expected_eids in M92_PARAMETER_ORDER_STATIC_DESC_CLUSTER_EIDS.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(f"{cluster_name} M92 STATIC_DESC stream changed")
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(f"{cluster_name} M92 STATIC_DESC stream has a gap")
+
+    for expert_id, slot in slots_by_eid.items():
+        expected_dma = DMA_IDMA if slot.cluster_name == "c0" else DMA_XDMA
+        if slot.ntokens != M92_PARAMETER_ORDER_COUNTS[expert_id]:
+            raise AssertionError(f"E{expert_id} token count changed")
+        if (
+            slot.s1_shape != SHAPE_B
+            or slot.s3_shape != SHAPE_B
+            or slot.s1_dma != expected_dma
+            or slot.s3_dma != expected_dma
+            or slot.s2_prefetch_dma != DMA_NONE
+            or slot.s4_prefetch_dma != DMA_NONE
+            or slot.skip_s1
+            or slot.skip_s3
+        ):
+            raise AssertionError(f"E{expert_id} is not fixed B/B without prefetch")
+        if _task_timeline(slot, slot.reference_start_tick).task_end != slot.reference_end_tick:
+            raise AssertionError(f"E{expert_id} M92 STATIC_DESC timeline changed")
+
+    if cross_cluster_dma_release_edges(queues):
+        raise AssertionError("M92 STATIC_DESC dedicated DMA lanes need no release edges")
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 198, "c1": 192}:
+        raise AssertionError(
+            f"M92 STATIC_DESC queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M92_PARAMETER_ORDER_STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M92 STATIC_DESC structural lower bound must be 209.25 ticks"
+        )
+    return {
+        "distribution": M92_PARAMETER_ORDER_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M92_PARAMETER_ORDER_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": (),
+    }
+
+
+def audit_m60_high_skew_static_desc_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m60_high_skew_distribution()
+
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (14, 16):
+        raise AssertionError("M60 STATIC_DESC must contain C2=14 and C3=16 slots")
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 30 or set(slots_by_eid) != set(range(30)):
+        raise AssertionError("M60 STATIC_DESC must cover active E0 through E29 once")
+
+    for cluster_name, expected_eids in M60_HIGH_SKEW_STATIC_DESC_CLUSTER_EIDS.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(f"{cluster_name} M60 STATIC_DESC stream changed")
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(f"{cluster_name} M60 STATIC_DESC stream has a gap")
+
+    for expert_id, slot in slots_by_eid.items():
+        expected_dma = DMA_IDMA if slot.cluster_name == "c0" else DMA_XDMA
+        if slot.ntokens != M60_HIGH_SKEW_COUNTS[expert_id]:
+            raise AssertionError(f"E{expert_id} token count changed")
+        if (
+            slot.s1_shape != SHAPE_B
+            or slot.s3_shape != SHAPE_B
+            or slot.s1_dma != expected_dma
+            or slot.s3_dma != expected_dma
+            or slot.s2_prefetch_dma != DMA_NONE
+            or slot.s4_prefetch_dma != DMA_NONE
+            or slot.skip_s1
+            or slot.skip_s3
+        ):
+            raise AssertionError(f"E{expert_id} is not fixed B/B without prefetch")
+        if (
+            _task_timeline(slot, slot.reference_start_tick).task_end
+            != slot.reference_end_tick
+        ):
+            raise AssertionError(f"E{expert_id} M60 STATIC_DESC timeline changed")
+
+    if cross_cluster_dma_release_edges(queues):
+        raise AssertionError("M60 STATIC_DESC dedicated DMA lanes need no release edges")
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 135, "c1": 138}:
+        raise AssertionError(f"M60 STATIC_DESC queue endpoints changed: {queue_ticks}")
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M60_HIGH_SKEW_STATIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError("M60 STATIC_DESC structural lower bound must be 150 ticks")
+    return {
+        "distribution": M60_HIGH_SKEW_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M60_HIGH_SKEW_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": (),
+    }
+
+
+def audit_m60_high_skew_dynamic_desc_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m60_high_skew_distribution()
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (14, 16):
+        raise AssertionError("M60 DYNAMIC_DESC must contain C2=14 and C3=16 slots")
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 30 or set(slots_by_eid) != set(range(30)):
+        raise AssertionError("M60 DYNAMIC_DESC must cover active E0 through E29 once")
+    expected_streams = {
+        "c0": (0, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29),
+        "c1": (1, 2, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(f"{cluster_name} M60 DYNAMIC_DESC stream changed")
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+
+    history_by_eid = {
+        task.expert_id: task for task in M60_HIGH_SKEW_DYNAMIC_DESC_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M60_HIGH_SKEW_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            task.s4_prefetch_dma,
+            task.s4_prefetch_target_eid,
+            task.skip_s1,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(f"E{expert_id} M60 DYNAMIC_DESC fields changed")
+        if (
+            _task_timeline(slot, slot.reference_start_tick).task_end
+            != slot.reference_end_tick
+        ):
+            raise AssertionError(f"E{expert_id} M60 DYNAMIC_DESC timeline changed")
+
+    if {
+        eid for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    } != {0, 1}:
+        raise AssertionError("M60 DYNAMIC_DESC S2PF choices changed")
+    if {eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in (0, 1)} != {
+        0: 2,
+        1: 2,
+    }:
+        raise AssertionError("M60 DYNAMIC_DESC early S2PF events changed")
+    expected_s4pf = {
+        0: (DMA_IDMA, 3),
+        1: (DMA_XDMA, 2),
+        2: (DMA_XDMA, 4),
+    }
+    actual_s4pf = {
+        eid: (slot.s4_prefetch_dma, slot.s4_prefetch_target_eid)
+        for eid, slot in slots_by_eid.items()
+        if slot.s4_prefetch_dma != DMA_NONE
+    }
+    if actual_s4pf != expected_s4pf:
+        raise AssertionError("M60 DYNAMIC_DESC S4PF choices changed")
+    if {eid for eid, slot in slots_by_eid.items() if slot.skip_s1} != {2, 3, 4}:
+        raise AssertionError("M60 DYNAMIC_DESC cache-hit tasks changed")
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S4PF"), ("c1", 1, 2, "S3")),
+        (("c0", 1, 3, "S3"), ("c1", 4, 6, "S1")),
+        (("c1", 3, 5, "S3"), ("c0", 1, 3, "S3")),
+        *(
+            (("c0", slot, 2 * slot + 3, "S3"),
+             ("c1", slot + 3, 2 * slot + 4, "S1"))
+            for slot in range(2, 13)
+        ),
+        *(
+            (("c1", slot, 2 * slot - 2, "S3"),
+             ("c0", slot - 2, 2 * slot - 1, "S1"))
+            for slot in range(4, 16)
+        ),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("M60 DYNAMIC_DESC DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 133, "c1": 130}:
+        raise AssertionError(f"M60 DYNAMIC_DESC queue endpoints changed: {queue_ticks}")
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M60_HIGH_SKEW_DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError("M60 DYNAMIC_DESC structural lower bound must be 143.5 ticks")
+    return {
+        "distribution": M60_HIGH_SKEW_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M60_HIGH_SKEW_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m60_high_skew_dynamic_two_ended_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m60_high_skew_distribution()
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (3, 27):
+        raise AssertionError(
+            "M60 DYNAMIC_TWO_ENDED must contain C2=3 and C3=27 slots"
+        )
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 30 or set(slots_by_eid) != set(range(30)):
+        raise AssertionError(
+            "M60 DYNAMIC_TWO_ENDED must cover active E0 through E29 once"
+        )
+    expected_streams = {
+        "c0": (0, 1, 2),
+        "c1": tuple(range(29, 2, -1)),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(
+                f"{cluster_name} M60 DYNAMIC_TWO_ENDED stream changed"
+            )
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+
+    history_by_eid = {
+        task.expert_id: task
+        for task in M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M60_HIGH_SKEW_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            task.s4_prefetch_dma,
+            task.s4_prefetch_target_eid,
+            task.skip_s1,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(
+                f"E{expert_id} M60 DYNAMIC_TWO_ENDED fields changed"
+            )
+        if (
+            _task_timeline(slot, slot.reference_start_tick).task_end
+            != slot.reference_end_tick
+        ):
+            raise AssertionError(
+                f"E{expert_id} M60 DYNAMIC_TWO_ENDED timeline changed"
+            )
+
+    if {
+        eid for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    } != {1, 2, 3}:
+        raise AssertionError("M60 DYNAMIC_TWO_ENDED S2PF choices changed")
+    if {
+        eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in (1, 2, 3)
+    } != {1: 2, 2: 2, 3: 0}:
+        raise AssertionError("M60 DYNAMIC_TWO_ENDED S2PF timing changed")
+    if any(slot.s4_prefetch_dma != DMA_NONE for slot in all_slots):
+        raise AssertionError("M60 DYNAMIC_TWO_ENDED must not use S4PF")
+    if any(slot.skip_s1 for slot in all_slots):
+        raise AssertionError("M60 DYNAMIC_TWO_ENDED must not skip S1")
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S1"), ("c1", 0, 29, "S3")),
+        (("c0", 0, 0, "S3"), ("c1", 11, 18, "S1")),
+        (("c0", 1, 1, "S2PF"), ("c1", 17, 12, "S1")),
+        (("c1", 10, 19, "S3"), ("c0", 0, 0, "S3")),
+        (("c1", 16, 13, "S3"), ("c0", 1, 1, "S1")),
+        (("c1", 26, 3, "S2PF"), ("c0", 2, 2, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("M60 DYNAMIC_TWO_ENDED DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 111, "c1": 94}:
+        raise AssertionError(
+            f"M60 DYNAMIC_TWO_ENDED queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M60 DYNAMIC_TWO_ENDED structural lower bound must be 114.25 ticks"
+        )
+    return {
+        "distribution": M60_HIGH_SKEW_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M60_HIGH_SKEW_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m60_high_skew_full_scheduler_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m60_high_skew_distribution()
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (10, 20):
+        raise AssertionError(
+            "M60 FULL_SCHEDULER must contain C2=10 and C3=20 slots"
+        )
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 30 or set(slots_by_eid) != set(range(30)):
+        raise AssertionError(
+            "M60 FULL_SCHEDULER must cover active E0 through E29 once"
+        )
+    expected_streams = {
+        "c0": (0, *range(13, 5, -1), 2),
+        "c1": (29, *range(28, 13, -1), 1, 5, 4, 3),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(
+                f"{cluster_name} M60 FULL_SCHEDULER stream changed"
+            )
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(
+                    f"{cluster_name} M60 FULL_SCHEDULER stream has a gap"
+                )
+
+    history_by_eid = {
+        task.expert_id: task for task in M60_HIGH_SKEW_FULL_SCHEDULER_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.token_start_rank,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M60_HIGH_SKEW_COUNTS[expert_id],
+            0,
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            task.s4_prefetch_dma,
+            task.s4_prefetch_target_eid,
+            task.skip_s1,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(f"E{expert_id} M60 FULL_SCHEDULER fields changed")
+        timeline = _task_timeline(slot, slot.reference_start_tick)
+        if timeline.task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{expert_id} M60 FULL_SCHEDULER timeline ends at "
+                f"{timeline.task_end}, expected {slot.reference_end_tick}"
+            )
+
+    expected_s2pf = {0: DMA_IDMA, 1: DMA_BOTH, 2: DMA_BOTH}
+    actual_s2pf = {
+        slot.expert_id: slot.s2_prefetch_dma
+        for slot in all_slots
+        if slot.s2_prefetch_dma != DMA_NONE
+    }
+    if actual_s2pf != expected_s2pf:
+        raise AssertionError("M60 FULL_SCHEDULER S2PF choices changed")
+    if any(
+        slots_by_eid[eid].s2pf_s1_overlap_steps != 2
+        for eid in expected_s2pf
+    ):
+        raise AssertionError("M60 FULL_SCHEDULER early S2PF events changed")
+    if any(slot.s4_prefetch_dma != DMA_NONE for slot in all_slots):
+        raise AssertionError("M60 FULL_SCHEDULER must not use S4PF")
+    if any(slot.skip_s1 for slot in all_slots):
+        raise AssertionError("M60 FULL_SCHEDULER must not skip S1")
+
+    intervals = [
+        interval
+        for slot in all_slots
+        for interval in _dma_intervals(slot)
+    ]
+    if len(intervals) != 60:
+        raise AssertionError(
+            f"M60 FULL_SCHEDULER must contain 60 DMA ops, got {len(intervals)}"
+        )
+    expected_release_edges = {
+        (("c0", 0, 0, "S2PF"), ("c1", 1, 28, "S1")),
+        (("c1", 16, 1, "S2PF"), ("c0", 1, 13, "S1")),
+        (("c0", 9, 2, "S2PF"), ("c1", 17, 5, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError(
+            "M60 FULL_SCHEDULER cross-cluster DMA release edges changed"
+        )
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 99, "c1": 99}:
+        raise AssertionError(
+            f"M60 FULL_SCHEDULER queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M60_HIGH_SKEW_FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M60 FULL_SCHEDULER structural lower bound must be 114 ticks"
+        )
+    return {
+        "distribution": M60_HIGH_SKEW_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M60_HIGH_SKEW_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {
+            name: len(queues[name]) for name in ("c0", "c1")
+        },
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m70_three_hot_dynamic_desc_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m70_three_hot_distribution()
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (9, 14):
+        raise AssertionError("M70 DYNAMIC_DESC must contain C2=9 and C3=14 slots")
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 23 or set(slots_by_eid) != set(range(23)):
+        raise AssertionError("M70 DYNAMIC_DESC must cover E0 through E22 once")
+    expected_streams = {
+        "c0": (0, 2, 9, 11, 13, 15, 17, 19, 21),
+        "c1": (1, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 18, 20, 22),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(f"{cluster_name} M70 DYNAMIC_DESC stream changed")
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(f"{cluster_name} M70 DYNAMIC_DESC stream has a gap")
+
+    history_by_eid = {
+        task.expert_id: task for task in M70_THREE_HOT_DYNAMIC_DESC_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M70_THREE_HOT_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            task.s4_prefetch_dma,
+            task.s4_prefetch_target_eid,
+            task.skip_s1,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(f"E{expert_id} M70 DYNAMIC_DESC fields changed")
+        if _task_timeline(slot, slot.reference_start_tick).task_end != slot.reference_end_tick:
+            raise AssertionError(f"E{expert_id} M70 DYNAMIC_DESC timeline changed")
+
+    if {
+        eid for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    } != {0, 1}:
+        raise AssertionError("M70 DYNAMIC_DESC S2PF choices changed")
+    if {eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in (0, 1)} != {
+        0: 2, 1: 2,
+    }:
+        raise AssertionError("M70 DYNAMIC_DESC early S2PF events changed")
+    expected_s4pf = {
+        0: (DMA_IDMA, 2),
+        1: (DMA_XDMA, 3),
+        3: (DMA_BOTH, 4),
+        4: (DMA_BOTH, 5),
+        5: (DMA_BOTH, 6),
+        6: (DMA_BOTH, 7),
+    }
+    actual_s4pf = {
+        eid: (slot.s4_prefetch_dma, slot.s4_prefetch_target_eid)
+        for eid, slot in slots_by_eid.items()
+        if slot.s4_prefetch_dma != DMA_NONE
+    }
+    if actual_s4pf != expected_s4pf:
+        raise AssertionError("M70 DYNAMIC_DESC S4PF choices changed")
+    if {eid for eid, slot in slots_by_eid.items() if slot.skip_s1} != {
+        2, 3, 4, 5, 6, 7,
+    }:
+        raise AssertionError("M70 DYNAMIC_DESC cache-hit tasks changed")
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S4PF"), ("c1", 1, 3, "S3")),
+        (("c0", 1, 2, "S3"), ("c1", 4, 6, "S3")),
+        (("c1", 3, 5, "S4PF"), ("c0", 1, 2, "S3")),
+        (("c1", 6, 8, "S3"), ("c0", 2, 9, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("M70 DYNAMIC_DESC DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 126, "c1": 126}:
+        raise AssertionError(f"M70 DYNAMIC_DESC queue endpoints changed: {queue_ticks}")
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if structural_quarters != M70_THREE_HOT_DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS:
+        raise AssertionError("M70 DYNAMIC_DESC structural lower bound must be 136.5 ticks")
+    return {
+        "distribution": M70_THREE_HOT_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M70_THREE_HOT_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m92_parameter_order_dynamic_desc_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    if len(M92_PARAMETER_ORDER_COUNTS) != EXPERT_COUNT:
+        raise AssertionError("M92 DYNAMIC_DESC must define 64 conceptual experts")
+    if sum(M92_PARAMETER_ORDER_COUNTS) != 184:
+        raise AssertionError("M92 DYNAMIC_DESC assignment total must be 184")
+    if tuple(
+        len(token_ids) for token_ids in M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT
+    ) != M92_PARAMETER_ORDER_COUNTS:
+        raise AssertionError("M92 DYNAMIC_DESC routing does not match expert loads")
+
+    token_owners = [[] for _ in range(92)]
+    for expert_id, token_ids in enumerate(M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError("M92 DYNAMIC_DESC must route every input token twice")
+
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (10, 28):
+        raise AssertionError(
+            "M92 DYNAMIC_DESC must contain C2=10 and C3=28 slots"
+        )
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 38 or set(slots_by_eid) != set(range(38)):
+        raise AssertionError(
+            "M92 DYNAMIC_DESC must cover active E0 through E37 once"
+        )
+
+    expected_streams = {
+        "c0": (0, 20, 22, 24, 26, 28, 30, 32, 34, 36),
+        "c1": (
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+            15, 16, 17, 18, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37,
+        ),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(f"{cluster_name} M92 DYNAMIC_DESC stream changed")
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(
+                    f"{cluster_name} M92 DYNAMIC_DESC stream has a gap"
+                )
+
+    history_by_eid = {
+        task.expert_id: task for task in M92_PARAMETER_ORDER_DYNAMIC_DESC_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M92_PARAMETER_ORDER_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            task.s4_prefetch_dma,
+            task.s4_prefetch_target_eid,
+            task.skip_s1,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(f"E{expert_id} M92 DYNAMIC_DESC fields changed")
+        if (
+            _task_timeline(slot, slot.reference_start_tick).task_end
+            != slot.reference_end_tick
+        ):
+            raise AssertionError(f"E{expert_id} M92 DYNAMIC_DESC timeline changed")
+
+    if {
+        eid for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    } != {0, 1}:
+        raise AssertionError("M92 DYNAMIC_DESC S2PF choices changed")
+    if {eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in (0, 1)} != {
+        0: 2, 1: 2,
+    }:
+        raise AssertionError("M92 DYNAMIC_DESC early S2PF events changed")
+    actual_s4pf = {
+        eid: (slot.s4_prefetch_dma, slot.s4_prefetch_target_eid)
+        for eid, slot in slots_by_eid.items()
+        if slot.s4_prefetch_dma != DMA_NONE
+    }
+    if actual_s4pf != {1: (DMA_XDMA, 2)}:
+        raise AssertionError("M92 DYNAMIC_DESC S4PF choices changed")
+    if {eid for eid, slot in slots_by_eid.items() if slot.skip_s1} != {2}:
+        raise AssertionError("M92 DYNAMIC_DESC cache-hit tasks changed")
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S2PF"), ("c1", 1, 2, "S3")),
+        (("c1", 18, 19, "S3"), ("c0", 1, 20, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("M92 DYNAMIC_DESC DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 168, "c1": 168}:
+        raise AssertionError(
+            f"M92 DYNAMIC_DESC queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M92_PARAMETER_ORDER_DYNAMIC_DESC_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M92 DYNAMIC_DESC structural lower bound must be 189 ticks"
+        )
+    return {
+        "distribution": M92_PARAMETER_ORDER_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M92_PARAMETER_ORDER_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {
+            name: len(queues[name]) for name in ("c0", "c1")
+        },
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m92_parameter_order_dynamic_two_ended_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    if len(M92_PARAMETER_ORDER_COUNTS) != EXPERT_COUNT:
+        raise AssertionError(
+            "M92 DYNAMIC_TWO_ENDED must define 64 conceptual experts"
+        )
+    if sum(M92_PARAMETER_ORDER_COUNTS) != 184:
+        raise AssertionError("M92 DYNAMIC_TWO_ENDED assignment total must be 184")
+    if tuple(
+        len(token_ids) for token_ids in M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT
+    ) != M92_PARAMETER_ORDER_COUNTS:
+        raise AssertionError(
+            "M92 DYNAMIC_TWO_ENDED routing does not match expert loads"
+        )
+
+    token_owners = [[] for _ in range(92)]
+    for expert_id, token_ids in enumerate(M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError(
+            "M92 DYNAMIC_TWO_ENDED must route every input token twice"
+        )
+
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (1, 37):
+        raise AssertionError(
+            "M92 DYNAMIC_TWO_ENDED must contain C2=1 and C3=37 slots"
+        )
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 38 or set(slots_by_eid) != set(range(38)):
+        raise AssertionError(
+            "M92 DYNAMIC_TWO_ENDED must cover active E0 through E37 once"
+        )
+
+    expected_streams = {
+        "c0": (0,),
+        "c1": tuple(range(37, 0, -1)),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(
+                f"{cluster_name} M92 DYNAMIC_TWO_ENDED stream changed"
+            )
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(
+                    f"{cluster_name} M92 DYNAMIC_TWO_ENDED stream has a gap"
+                )
+
+    history_by_eid = {
+        task.expert_id: task
+        for task in M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M92_PARAMETER_ORDER_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            task.s4_prefetch_dma,
+            task.s4_prefetch_target_eid,
+            task.skip_s1,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(
+                f"E{expert_id} M92 DYNAMIC_TWO_ENDED fields changed"
+            )
+        if (
+            _task_timeline(slot, slot.reference_start_tick).task_end
+            != slot.reference_end_tick
+        ):
+            raise AssertionError(
+                f"E{expert_id} M92 DYNAMIC_TWO_ENDED timeline changed"
+            )
+
+    if {
+        eid for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    } != {1}:
+        raise AssertionError("M92 DYNAMIC_TWO_ENDED S2PF choices changed")
+    if slots_by_eid[1].s2pf_s1_overlap_steps != 2:
+        raise AssertionError("M92 DYNAMIC_TWO_ENDED early S2PF event changed")
+    if any(slot.s4_prefetch_dma != DMA_NONE for slot in all_slots):
+        raise AssertionError("M92 DYNAMIC_TWO_ENDED must not use S4PF")
+    if any(slot.skip_s1 for slot in all_slots):
+        raise AssertionError("M92 DYNAMIC_TWO_ENDED must not use cache hits")
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S1"), ("c1", 0, 37, "S3")),
+        (("c0", 0, 0, "S3"), ("c1", 24, 13, "S3")),
+        (("c1", 24, 13, "S1"), ("c0", 0, 0, "S3")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("M92 DYNAMIC_TWO_ENDED DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 114, "c1": 172}:
+        raise AssertionError(
+            f"M92 DYNAMIC_TWO_ENDED queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M92 DYNAMIC_TWO_ENDED structural lower bound must be 199.75 ticks"
+        )
+    return {
+        "distribution": M92_PARAMETER_ORDER_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M92_PARAMETER_ORDER_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {
+            name: len(queues[name]) for name in ("c0", "c1")
+        },
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m92_parameter_order_full_scheduler_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    if len(M92_PARAMETER_ORDER_COUNTS) != EXPERT_COUNT:
+        raise AssertionError("M92 FULL_SCHEDULER expert count changed")
+    if sum(M92_PARAMETER_ORDER_COUNTS) != 184:
+        raise AssertionError("M92 FULL_SCHEDULER routed-token count changed")
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (10, 28):
+        raise AssertionError(
+            "M92 FULL_SCHEDULER must contain C2=10 and C3=28 slots"
+        )
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 38 or set(slots_by_eid) != set(range(38)):
+        raise AssertionError(
+            "M92 FULL_SCHEDULER must cover E0 through E37 once"
+        )
+    expected_streams = {
+        "c0": (0, *range(10, 1, -1)),
+        "c1": (37, *range(36, 10, -1), 1),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(
+                f"{cluster_name} M92 FULL_SCHEDULER stream changed"
+            )
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(
+                    f"{cluster_name} M92 FULL_SCHEDULER stream has a gap"
+                )
+
+    for expert_id, slot in slots_by_eid.items():
+        if slot.ntokens != M92_PARAMETER_ORDER_COUNTS[expert_id]:
+            raise AssertionError(f"M92 E{expert_id} token count changed")
+        if slot.token_start_rank != 0 or slot.skip_s1:
+            raise AssertionError(f"M92 E{expert_id} must execute one complete task")
+        timeline = _task_timeline(slot, slot.reference_start_tick)
+        if timeline.task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"M92 E{expert_id} timeline ends at {timeline.task_end}, "
+                f"expected {slot.reference_end_tick}"
+            )
+
+    expected_s2pf = {0: DMA_IDMA, 1: DMA_BOTH}
+    actual_s2pf = {
+        slot.expert_id: slot.s2_prefetch_dma
+        for slot in all_slots
+        if slot.s2_prefetch_dma != DMA_NONE
+    }
+    if actual_s2pf != expected_s2pf:
+        raise AssertionError("M92 FULL_SCHEDULER S2PF choices changed")
+    if any(slots_by_eid[eid].s2pf_s1_overlap_steps != 2 for eid in expected_s2pf):
+        raise AssertionError("M92 FULL_SCHEDULER early S2PF events changed")
+    if any(slot.s4_prefetch_dma != DMA_NONE for slot in all_slots):
+        raise AssertionError("M92 FULL_SCHEDULER must not contain S4PF")
+
+    if (
+        slots_by_eid[0].s1_shape,
+        slots_by_eid[0].s3_shape,
+        slots_by_eid[0].s1_dma,
+        slots_by_eid[0].s3_dma,
+    ) != (SHAPE_A, SHAPE_B, DMA_IDMA, DMA_NONE):
+        raise AssertionError("M92 E0 physical profile changed")
+    if (
+        slots_by_eid[1].s1_shape,
+        slots_by_eid[1].s3_shape,
+        slots_by_eid[1].s1_dma,
+        slots_by_eid[1].s3_dma,
+    ) != (SHAPE_B, SHAPE_B, DMA_BOTH, DMA_NONE):
+        raise AssertionError("M92 E1 physical profile changed")
+    if (
+        slots_by_eid[37].s1_shape,
+        slots_by_eid[37].s3_shape,
+        slots_by_eid[37].s1_dma,
+        slots_by_eid[37].s3_dma,
+    ) != (SHAPE_B, SHAPE_B, DMA_XDMA, DMA_XDMA):
+        raise AssertionError("M92 E37 physical profile changed")
+    for expert_id in range(2, 37):
+        slot = slots_by_eid[expert_id]
+        if (
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s1_dma,
+            slot.s3_dma,
+        ) != (SHAPE_C, SHAPE_C, DMA_BOTH, DMA_BOTH):
+            raise AssertionError(f"M92 E{expert_id} C/C profile changed")
+
+    intervals = [
+        interval
+        for slot in all_slots
+        for interval in _dma_intervals(slot)
+    ]
+    if len(intervals) != 76:
+        raise AssertionError(
+            f"M92 FULL_SCHEDULER must contain 76 DMA ops, got {len(intervals)}"
+        )
+    expected_release_edges = {
+        (("c0", 0, 0, "S2PF"), ("c1", 1, 36, "S1")),
+        (("c1", 27, 1, "S2PF"), ("c0", 1, 10, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError(
+            "M92 FULL_SCHEDULER cross-cluster DMA release edges changed"
+        )
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 141, "c1": 144}:
+        raise AssertionError(
+            f"M92 FULL_SCHEDULER queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M92_PARAMETER_ORDER_FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M92 FULL_SCHEDULER structural lower bound must be 165 ticks"
+        )
+    return {
+        "distribution": M92_PARAMETER_ORDER_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M92_PARAMETER_ORDER_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {
+            name: len(queues[name]) for name in ("c0", "c1")
+        },
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m70_three_hot_dynamic_two_ended_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m70_three_hot_distribution()
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (3, 20):
+        raise AssertionError(
+            "M70 DYNAMIC_TWO_ENDED must contain C2=3 and C3=20 slots"
+        )
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 23 or set(slots_by_eid) != set(range(23)):
+        raise AssertionError(
+            "M70 DYNAMIC_TWO_ENDED must cover E0 through E22 once"
+        )
+    expected_streams = {
+        "c0": (0, 1, 2),
+        "c1": tuple(range(22, 2, -1)),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        slots = queues[cluster_name]
+        if tuple(slot.expert_id for slot in slots) != expected_eids:
+            raise AssertionError(
+                f"{cluster_name} M70 DYNAMIC_TWO_ENDED stream changed"
+            )
+
+    history_by_eid = {
+        task.expert_id: task
+        for task in M70_THREE_HOT_DYNAMIC_TWO_ENDED_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M70_THREE_HOT_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            DMA_NONE,
+            False,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(
+                f"E{expert_id} M70 DYNAMIC_TWO_ENDED fields changed"
+            )
+        if _task_timeline(slot, slot.reference_start_tick).task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{expert_id} M70 DYNAMIC_TWO_ENDED timeline changed"
+            )
+
+    expected_s2pf = {1, 2, 3, 4, 5, 6}
+    if {
+        eid for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    } != expected_s2pf:
+        raise AssertionError("M70 DYNAMIC_TWO_ENDED S2PF choices changed")
+    if {
+        eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in expected_s2pf
+    } != {eid: 2 for eid in expected_s2pf}:
+        raise AssertionError(
+            "M70 DYNAMIC_TWO_ENDED early S2PF events changed"
+        )
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S1"), ("c1", 0, 22, "S3")),
+        (("c0", 0, 0, "S3"), ("c1", 8, 14, "S3")),
+        (("c0", 1, 1, "S2PF"), ("c1", 13, 9, "S1")),
+        (("c1", 8, 14, "S1"), ("c0", 0, 0, "S3")),
+        (("c1", 12, 10, "S3"), ("c0", 1, 1, "S1")),
+        (("c1", 19, 3, "S2PF"), ("c0", 2, 2, "S1")),
+        (("c1", 19, 3, "S2PF"), ("c0", 2, 2, "S2PF")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError(
+            "M70 DYNAMIC_TWO_ENDED DMA release edges changed"
+        )
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 127, "c1": 91}:
+        raise AssertionError(
+            f"M70 DYNAMIC_TWO_ENDED queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M70_THREE_HOT_DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M70 DYNAMIC_TWO_ENDED structural lower bound must be 129.25 ticks"
+        )
+    return {
+        "distribution": M70_THREE_HOT_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M70_THREE_HOT_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_m70_three_hot_full_scheduler_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    _audit_m70_three_hot_distribution()
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (7, 16):
+        raise AssertionError(
+            "M70 FULL_SCHEDULER must contain C2=7 and C3=16 slots"
+        )
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 23 or set(slots_by_eid) != set(range(23)):
+        raise AssertionError(
+            "M70 FULL_SCHEDULER must cover E0 through E22 once"
+        )
+    expected_streams = {
+        "c0": (2, 4, 1, 10, 9, 8, 7),
+        "c1": (3, *range(22, 11, -1), 5, 6, 11, 0),
+    }
+    for cluster_name, expected_eids in expected_streams.items():
+        if tuple(slot.expert_id for slot in queues[cluster_name]) != expected_eids:
+            raise AssertionError(
+                f"{cluster_name} M70 FULL_SCHEDULER stream changed"
+            )
+
+    history_by_eid = {
+        task.expert_id: task for task in M70_THREE_HOT_FULL_SCHEDULER_HISTORY
+    }
+    for expert_id, slot in slots_by_eid.items():
+        task = history_by_eid[expert_id]
+        if (
+            slot.ntokens,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s2_prefetch_dma,
+            slot.s1_dma,
+            slot.s3_dma,
+            slot.s4_prefetch_dma,
+            slot.skip_s1,
+            slot.reference_start_tick,
+            slot.reference_end_tick,
+        ) != (
+            M70_THREE_HOT_COUNTS[expert_id],
+            task.s1_shape,
+            task.s3_shape,
+            task.s2_prefetch_dma,
+            task.s1_dma,
+            task.s3_dma,
+            DMA_NONE,
+            False,
+            task.start_tick,
+            task.end_tick,
+        ):
+            raise AssertionError(
+                f"E{expert_id} M70 FULL_SCHEDULER fields changed"
+            )
+        if _task_timeline(slot, slot.reference_start_tick).task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{expert_id} M70 FULL_SCHEDULER timeline changed"
+            )
+
+    expected_s2pf = {
+        0: DMA_BOTH,
+        1: DMA_IDMA,
+        2: DMA_IDMA,
+        3: DMA_XDMA,
+        4: DMA_IDMA,
+        5: DMA_XDMA,
+        6: DMA_XDMA,
+    }
+    actual_s2pf = {
+        eid: slot.s2_prefetch_dma for eid, slot in slots_by_eid.items()
+        if slot.s2_prefetch_dma != DMA_NONE
+    }
+    if actual_s2pf != expected_s2pf:
+        raise AssertionError("M70 FULL_SCHEDULER S2PF choices changed")
+    if {
+        eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in expected_s2pf
+    } != {0: 2, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}:
+        raise AssertionError("M70 FULL_SCHEDULER S2PF start events changed")
+
+    expected_release_edges = {
+        (("c0", 0, 2, "S2PF"), ("c1", 1, 22, "S1")),
+        (("c0", 2, 1, "S2PF"), ("c1", 14, 11, "S1")),
+        (("c1", 11, 12, "S3"), ("c0", 1, 4, "S1")),
+        (("c1", 15, 0, "S2PF"), ("c0", 3, 10, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("M70 FULL_SCHEDULER DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 105, "c1": 105}:
+        raise AssertionError(
+            f"M70 FULL_SCHEDULER queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != M70_THREE_HOT_FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "M70 FULL_SCHEDULER structural lower bound must be 117 ticks"
+        )
+    return {
+        "distribution": M70_THREE_HOT_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(M70_THREE_HOT_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
     }
 
 
@@ -975,6 +3548,333 @@ def audit_dynamic_desc_schedule(
         "queue_ticks": queue_ticks,
         "makespan_ticks": max(queue_ticks.values()),
         "cluster_local_slots": {name: len(queues[name]) for name in ("c0", "c1")},
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_dynamic_two_ended_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    if len(HIGH_TO_LOW_COUNTS) != EXPERT_COUNT or sum(HIGH_TO_LOW_COUNTS) != 140:
+        raise AssertionError("DYNAMIC_TWO_ENDED distribution contract changed")
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (12, 31):
+        raise AssertionError(
+            "DYNAMIC_TWO_ENDED must contain C2=12 and C3=31 slots"
+        )
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 43 or set(slots_by_eid) != set(range(43)):
+        raise AssertionError(
+            "DYNAMIC_TWO_ENDED must cover E0 through E42 once"
+        )
+    if tuple(slot.expert_id for slot in queues["c0"]) != tuple(range(12)):
+        raise AssertionError("C2 must consume the hot end in ascending EID order")
+    if tuple(slot.expert_id for slot in queues["c1"]) != tuple(
+        range(42, 11, -1)
+    ):
+        raise AssertionError("C3 must consume the cold end in descending EID order")
+
+    for expert_id, slot in slots_by_eid.items():
+        if slot.ntokens != HIGH_TO_LOW_COUNTS[expert_id]:
+            raise AssertionError(f"E{expert_id} token count changed")
+        if slot.token_start_rank != 0:
+            raise AssertionError(f"E{expert_id} must cover its complete token slice")
+        timeline = _task_timeline(slot, slot.reference_start_tick)
+        if timeline.task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{expert_id} timeline ends at {timeline.task_end}, "
+                f"expected {slot.reference_end_tick}"
+            )
+        if slot.s4_prefetch_dma != DMA_NONE:
+            s4pf_ticks = (
+                S4PF_BOTH_TICKS
+                if slot.s4_prefetch_dma == DMA_BOTH
+                else S4PF_SINGLE_TICKS
+            )
+            if timeline.dma3_end + s4pf_ticks > timeline.task_end:
+                raise AssertionError(f"E{expert_id} S4PF exceeds its task")
+
+    expected_s2pf_eids = {1, *range(3, 20), 21}
+    actual_s2pf_eids = {
+        slot.expert_id
+        for slot in all_slots
+        if slot.s2_prefetch_dma != DMA_NONE
+    }
+    if actual_s2pf_eids != expected_s2pf_eids:
+        raise AssertionError("DYNAMIC_TWO_ENDED S2PF choices changed")
+    if any(
+        slot.s2pf_s1_overlap_steps != 2
+        for slot in all_slots
+        if slot.s2_prefetch_dma != DMA_NONE
+    ):
+        raise AssertionError("DYNAMIC_TWO_ENDED S2PF must use the early path")
+
+    expected_s4pf = {21: (DMA_BOTH, 20)}
+    actual_s4pf = {
+        slot.expert_id: (
+            slot.s4_prefetch_dma,
+            slot.s4_prefetch_target_eid,
+        )
+        for slot in all_slots
+        if slot.s4_prefetch_dma != DMA_NONE
+    }
+    if actual_s4pf != expected_s4pf:
+        raise AssertionError("DYNAMIC_TWO_ENDED S4PF choice changed")
+    if {slot.expert_id for slot in all_slots if slot.skip_s1} != {20}:
+        raise AssertionError("DYNAMIC_TWO_ENDED S4PF cache hit changed")
+
+    expected_special = {
+        0: (SHAPE_A, SHAPE_B, DMA_IDMA, DMA_BOTH, DMA_NONE),
+        1: (SHAPE_A, SHAPE_B, DMA_BOTH, DMA_NONE, DMA_BOTH),
+        2: (SHAPE_A, SHAPE_B, DMA_IDMA, DMA_BOTH, DMA_NONE),
+        42: (SHAPE_B, SHAPE_C, DMA_XDMA, DMA_BOTH, DMA_NONE),
+        36: (SHAPE_B, SHAPE_C, DMA_BOTH, DMA_BOTH, DMA_NONE),
+        24: (SHAPE_B, SHAPE_C, DMA_XDMA, DMA_BOTH, DMA_NONE),
+        21: (SHAPE_B, SHAPE_B, DMA_BOTH, DMA_NONE, DMA_BOTH),
+        20: (SHAPE_A, SHAPE_B, DMA_NONE, DMA_BOTH, DMA_NONE),
+    }
+    actual_special = {
+        expert_id: (
+            slots_by_eid[expert_id].s1_shape,
+            slots_by_eid[expert_id].s3_shape,
+            slots_by_eid[expert_id].s1_dma,
+            slots_by_eid[expert_id].s3_dma,
+            slots_by_eid[expert_id].s2_prefetch_dma,
+        )
+        for expert_id in expected_special
+    }
+    if actual_special != expected_special:
+        raise AssertionError(
+            "DYNAMIC_TWO_ENDED special shape/DMA profiles changed"
+        )
+
+    for cluster_name, slots in queues.items():
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick < previous.reference_end_tick:
+                raise AssertionError(
+                    f"{cluster_name} DYNAMIC_TWO_ENDED local tasks overlap"
+                )
+
+    intervals = [
+        (start, end, dma, slot.cluster_name, slot.expert_id, stage)
+        for slot in all_slots
+        for start, end, dma, stage in _dma_intervals(slot)
+    ]
+    if len(intervals) != 86:
+        raise AssertionError(
+            f"DYNAMIC_TWO_ENDED must contain 86 DMA ops, got {len(intervals)}"
+        )
+    for index, left in enumerate(intervals):
+        for right in intervals[index + 1:]:
+            if left[2] & right[2] and max(left[0], right[0]) < min(
+                left[1], right[1]
+            ):
+                raise AssertionError(
+                    f"DMA overlap {left[3]}/E{left[4]}:{left[5]} {left[:2]} "
+                    f"and {right[3]}/E{right[4]}:{right[5]} {right[:2]}"
+                )
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S1"), ("c1", 0, 42, "S3")),
+        (("c0", 0, 0, "S3"), ("c1", 6, 36, "S3")),
+        (("c0", 1, 1, "S2PF"), ("c1", 10, 32, "S1")),
+        (("c0", 2, 2, "S1"), ("c1", 18, 24, "S3")),
+        (("c0", 2, 2, "S3"), ("c1", 21, 21, "S4PF")),
+        (("c1", 6, 36, "S1"), ("c0", 0, 0, "S3")),
+        (("c1", 9, 33, "S3"), ("c0", 1, 1, "S1")),
+        (("c1", 17, 25, "S3"), ("c0", 2, 2, "S1")),
+        (("c1", 21, 21, "S2PF"), ("c0", 2, 2, "S3")),
+        (("c1", 22, 20, "S3"), ("c0", 3, 3, "S1")),
+        *{
+            (
+                ("c0", expert_id, expert_id, "S2PF"),
+                ("c1", expert_id + 20, 22 - expert_id, "S1"),
+            )
+            for expert_id in range(3, 11)
+        },
+        *{
+            (
+                ("c1", source_slot, source_eid, "S2PF"),
+                ("c0", target_eid, target_eid, "S1"),
+            )
+            for source_slot, source_eid, target_eid in zip(
+                range(23, 31), range(19, 11, -1), range(4, 12)
+            )
+        },
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError(
+            "DYNAMIC_TWO_ENDED cross-cluster DMA release edges changed"
+        )
+
+    queue_ticks = {
+        name: max(slot.reference_end_tick for slot in slots)
+        for name, slots in queues.items()
+    }
+    if queue_ticks != {"c0": 137, "c1": 134}:
+        raise AssertionError(
+            f"DYNAMIC_TWO_ENDED queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if (
+        structural_quarters
+        != DYNAMIC_TWO_ENDED_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS
+    ):
+        raise AssertionError(
+            "DYNAMIC_TWO_ENDED structural lower bound must be 157.25 ticks"
+        )
+    return {
+        "distribution": HIGH_TO_LOW_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(HIGH_TO_LOW_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {
+            name: len(queues[name]) for name in ("c0", "c1")
+        },
+        "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
+        "structural_cluster_quarter_ticks": cluster_quarter_ticks,
+        "structural_lower_bound_quarter_ticks": structural_quarters,
+        "dma_release_edges": release_edges,
+    }
+
+
+def audit_full_scheduler_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+) -> dict[str, object]:
+    if len(HIGH_TO_LOW_COUNTS) != EXPERT_COUNT or sum(HIGH_TO_LOW_COUNTS) != 140:
+        raise AssertionError("FULL_SCHEDULER distribution contract changed")
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (11, 32):
+        raise AssertionError("FULL_SCHEDULER must contain C2=11 and C3=32 slots")
+
+    all_slots = queues["c0"] + queues["c1"]
+    slots_by_eid = {slot.expert_id: slot for slot in all_slots}
+    if len(all_slots) != 43 or set(slots_by_eid) != set(range(43)):
+        raise AssertionError("FULL_SCHEDULER must cover E0 through E42 once")
+    expected_streams = {
+        "c0": (0, 1, 2, 5, 8, 10, 12, 14, 16, 18, 20),
+        "c1": (
+            4, *range(42, 33, -1), 6, *range(33, 26, -1), 3,
+            *range(26, 21, -1), 7, 9, 11, 13, 15, 17, 19, 21,
+        ),
+    }
+    for cluster_name, expected in expected_streams.items():
+        actual = tuple(slot.expert_id for slot in queues[cluster_name])
+        if actual != expected:
+            raise AssertionError(
+                f"{cluster_name} FULL_SCHEDULER stream changed"
+            )
+
+    for expert_id, slot in slots_by_eid.items():
+        if slot.ntokens != HIGH_TO_LOW_COUNTS[expert_id]:
+            raise AssertionError(f"E{expert_id} token count changed")
+        if slot.token_start_rank != 0 or slot.skip_s1:
+            raise AssertionError(f"E{expert_id} must execute one complete task")
+        timeline = _task_timeline(slot, slot.reference_start_tick)
+        if timeline.task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{expert_id} timeline ends at {timeline.task_end}, "
+                f"expected {slot.reference_end_tick}"
+            )
+
+    expected_s2pf = {0, 1, 2}
+    actual_s2pf = {
+        slot.expert_id for slot in all_slots
+        if slot.s2_prefetch_dma != DMA_NONE
+    }
+    if actual_s2pf != expected_s2pf:
+        raise AssertionError("FULL_SCHEDULER S2PF choices changed")
+    if any(slots_by_eid[eid].s2_prefetch_dma != DMA_IDMA for eid in expected_s2pf):
+        raise AssertionError("FULL_SCHEDULER hot S2PF must use IDMA")
+    if {
+        eid: slots_by_eid[eid].s2pf_s1_overlap_steps for eid in expected_s2pf
+    } != {0: 2, 1: 2, 2: 0}:
+        raise AssertionError("FULL_SCHEDULER S2PF start events changed")
+    if any(slot.s4_prefetch_dma != DMA_NONE for slot in all_slots):
+        raise AssertionError("FULL_SCHEDULER must not contain S4PF")
+
+    for expert_id in (0, 1):
+        slot = slots_by_eid[expert_id]
+        if (
+            slot.s1_shape, slot.s3_shape, slot.s1_dma, slot.s3_dma
+        ) != (SHAPE_A, SHAPE_B, DMA_IDMA, DMA_NONE):
+            raise AssertionError(f"E{expert_id} hot physical profile changed")
+    e2 = slots_by_eid[2]
+    if (e2.s1_shape, e2.s3_shape, e2.s1_dma, e2.s3_dma) != (
+        SHAPE_B, SHAPE_B, DMA_IDMA, DMA_NONE,
+    ):
+        raise AssertionError("E2 hot physical profile changed")
+
+    for expert_id in range(22, 43):
+        slot = slots_by_eid[expert_id]
+        if (
+            slot.cluster_name,
+            slot.s1_shape,
+            slot.s3_shape,
+            slot.s1_dma,
+            slot.s3_dma,
+        ) != ("c1", SHAPE_C, SHAPE_C, DMA_BOTH, DMA_BOTH):
+            raise AssertionError(f"E{expert_id} C/C tail profile changed")
+
+    for cluster_name, slots in queues.items():
+        if slots[0].reference_start_tick != 0:
+            raise AssertionError(f"{cluster_name} must start at tick 0")
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick != previous.reference_end_tick:
+                raise AssertionError(
+                    f"{cluster_name} FULL_SCHEDULER stream has a gap"
+                )
+
+    expected_release_edges = {
+        (("c0", 0, 0, "S2PF"), ("c1", 1, 42, "S1")),
+        (("c0", 1, 1, "S2PF"), ("c1", 11, 33, "S1")),
+        (("c0", 2, 2, "S2PF"), ("c1", 19, 26, "S1")),
+        (("c1", 9, 34, "S3"), ("c0", 1, 1, "S1")),
+        (("c1", 17, 27, "S3"), ("c0", 2, 2, "S1")),
+        (("c1", 23, 22, "S3"), ("c0", 3, 5, "S1")),
+    }
+    release_edges = cross_cluster_dma_release_edges(queues)
+    if set(release_edges) != expected_release_edges:
+        raise AssertionError("FULL_SCHEDULER DMA release edges changed")
+
+    queue_ticks = {
+        name: queues[name][-1].reference_end_tick for name in ("c0", "c1")
+    }
+    if queue_ticks != {"c0": 129, "c1": 129}:
+        raise AssertionError(
+            f"FULL_SCHEDULER queue endpoints changed: {queue_ticks}"
+        )
+    cluster_quarter_ticks = {
+        name: 4 * queue_ticks[name]
+        + len(queues[name]) * STRUCTURAL_API_QUARTER_TICKS_PER_SLOT
+        for name in ("c0", "c1")
+    }
+    structural_quarters = max(cluster_quarter_ticks.values())
+    if structural_quarters != FULL_SCHEDULER_STRUCTURAL_LOWER_BOUND_QUARTER_TICKS:
+        raise AssertionError("FULL_SCHEDULER structural lower bound must be 153 ticks")
+    return {
+        "distribution": HIGH_TO_LOW_COUNTS,
+        "active_experts": len(all_slots),
+        "task_count": len(all_slots),
+        "routed_tokens": sum(HIGH_TO_LOW_COUNTS),
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": max(queue_ticks.values()),
+        "cluster_local_slots": {
+            name: len(queues[name]) for name in ("c0", "c1")
+        },
         "api_quarter_ticks_per_slot": STRUCTURAL_API_QUARTER_TICKS_PER_SLOT,
         "structural_cluster_quarter_ticks": cluster_quarter_ticks,
         "structural_lower_bound_quarter_ticks": structural_quarters,
@@ -1303,12 +4203,207 @@ def audit_ends_inward_schedule(
 def format_schedule_manifest(
     queues: dict[str, tuple[SlotSpec, ...]], profile: str = HIGH_TO_LOW_PROFILE
 ) -> str:
-    if profile == DYNAMIC_DESC_PROFILE:
+    if profile == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
+        audit = audit_m60_high_skew_full_scheduler_schedule(queues)
+        title = "M60 HIGH_SKEW FULL_SCHEDULER schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=36,22,13,6,2x17,1x9; input_tokens=60; "
+            "scheduler=order,cluster,shape,DMA,S2PF; certified_model=99 ticks\n"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE:
+        audit = audit_m60_high_skew_dynamic_two_ended_schedule(queues)
+        title = "M60 HIGH_SKEW DYNAMIC_TWO_ENDED schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=36,22,13,6,2x17,1x9; input_tokens=60; "
+            "C2=hot-end,C3=cold-end; dynamic_physical=shape,DMA,S2PF\n"
+            "  certified_model=111 ticks; "
+            f"dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE:
+        audit = audit_m60_high_skew_dynamic_desc_schedule(queues)
+        title = "M60 HIGH_SKEW DYNAMIC_DESC schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=36,22,13,6,2x17,1x9; input_tokens=60; "
+            "dynamic_physical=shape,DMA,S2PF,S4PF,cache\n"
+            "  certified_model=133 ticks; "
+            f"dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M60_HIGH_SKEW_STATIC_DESC_PROFILE:
+        audit = audit_m60_high_skew_static_desc_schedule(queues)
+        title = "M60 HIGH_SKEW STATIC_DESC schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=36,22,13,6,2x17,1x9; input_tokens=60; "
+            "fixed_physical=S1:B,S3:B,C2:IDMA,C3:XDMA,prefetch:off\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE:
+        audit = audit_m92_parameter_order_full_scheduler_schedule(queues)
+        title = "M92 PARAMETER_ORDER FULL_SCHEDULER schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=76,40,2x32,1x4; input_tokens=92; "
+            "scheduler=order,cluster,shape,DMA,S2PF; certified_model=144 ticks\n"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE:
+        audit = audit_m92_parameter_order_dynamic_two_ended_schedule(queues)
+        title = "M92 PARAMETER_ORDER DYNAMIC_TWO_ENDED schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=76,40,2x32,1x4; input_tokens=92; "
+            "C2=hot-end,C3=cold-end; dynamic_physical=shape,DMA,S2PF\n"
+            "  certified_model=172 ticks; "
+            f"dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE:
+        audit = audit_m92_parameter_order_dynamic_desc_schedule(queues)
+        title = "M92 PARAMETER_ORDER DYNAMIC_DESC schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=76,40,2x32,1x4; input_tokens=92; "
+            "dynamic_physical=shape,DMA,S2PF,S4PF,cache\n"
+            "  certified_model=168 ticks; "
+            f"dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M92_PARAMETER_ORDER_STATIC_DESC_PROFILE:
+        audit = audit_m92_parameter_order_static_desc_schedule(queues)
+        title = "M92 PARAMETER_ORDER STATIC_DESC schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=76,40,2x32,1x4; input_tokens=92; "
+            "fixed_physical=S1:B,S3:B,C2:IDMA,C3:XDMA,prefetch:off\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M70_THREE_HOT_FULL_SCHEDULER_PROFILE:
+        audit = audit_m70_three_hot_full_scheduler_schedule(queues)
+        title = "M70 THREE_HOT FULL_SCHEDULER schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=28x3,6x4,2x16; "
+            "scheduler=order,cluster,shape,DMA,S2PF; certified_model=105 ticks\n"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE:
+        audit = audit_m70_three_hot_dynamic_two_ended_schedule(queues)
+        title = "M70 THREE_HOT DYNAMIC_TWO_ENDED schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=28x3,6x4,2x16; "
+            "dynamic_physical=shape,DMA,S2PF; C2=hot-end,C3=cold-end\n"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile in (
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    ):
+        audit = audit_m70_three_hot_dynamic_desc_schedule(queues)
+        title = (
+            "M70 THREE_HOT DYNAMIC_DESC skip-elided schedule:"
+            if profile == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE
+            else "M70 THREE_HOT DYNAMIC_DESC schedule:"
+        )
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        rejection_detail = (
+            "  bingo_rejects=empty_S1_stage_tasks\n"
+            if profile == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE
+            else ""
+        )
+        detail = (
+            "  distribution=28x3,6x4,2x16; "
+            "dynamic_physical=shape,DMA,S2PF,S4PF\n"
+            f"{rejection_detail}"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == M70_THREE_HOT_STATIC_DESC_PROFILE:
+        audit = audit_m70_three_hot_static_desc_schedule(queues)
+        title = "M70 THREE_HOT STATIC_DESC fixed schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  distribution=28x3,6x4,2x16; "
+            "fixed_physical=S1:B,S3:B,C2:IDMA,C3:XDMA,prefetch:off\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == DYNAMIC_DESC_PROFILE:
         audit = audit_dynamic_desc_schedule(queues)
         title = "DYNAMIC_DESC high-to-low schedule:"
         cluster_bounds = audit["structural_cluster_quarter_ticks"]
         detail = (
             "  dynamic_physical=shape,DMA,S2PF,S4PF; fixed_order=descending\n"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == DYNAMIC_TWO_ENDED_PROFILE:
+        audit = audit_dynamic_two_ended_schedule(queues)
+        title = "DYNAMIC_TWO_ENDED hot/cold schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  dynamic_physical=shape,DMA,S2PF,S4PF; "
+            "C2=hot-end,C3=cold-end\n"
+            f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
+            "  structural_lower_bound=max("
+            f"C2={cluster_bounds['c0'] / 4:.2f}, "
+            f"C3={cluster_bounds['c1'] / 4:.2f}) = "
+            f"{audit['structural_lower_bound_quarter_ticks'] / 4:.2f} ticks"
+        )
+    elif profile == FULL_SCHEDULER_PROFILE:
+        audit = audit_full_scheduler_schedule(queues)
+        title = "FULL_SCHEDULER certified schedule:"
+        cluster_bounds = audit["structural_cluster_quarter_ticks"]
+        detail = (
+            "  scheduler=order,cluster,shape,DMA,S2PF; certified_model=129 ticks\n"
             f"  dma_release_edges={len(audit['dma_release_edges'])}\n"
             "  structural_lower_bound=max("
             f"C2={cluster_bounds['c0'] / 4:.2f}, "

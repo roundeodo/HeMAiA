@@ -96,6 +96,27 @@ the output buffers before the device path starts.
 The fixed-order scheduler experiments are separate workload profiles. The new
 case-0 policy-0 workload is selected with `MOE_TEST_SCHEDULE=static_desc`.
 Case-0 policy-1 uses `MOE_TEST_SCHEDULE=dynamic_desc`.
+Case-0 policy-2 uses `MOE_TEST_SCHEDULE=dynamic_two_ended`.
+Case-0 policy-3 uses `MOE_TEST_SCHEDULE=full_scheduler`.
+Case-1 policy-0 uses `MOE_TEST_SCHEDULE=m70_three_hot_static_desc`.
+Case-1 policy-1 uses `MOE_TEST_SCHEDULE=m70_three_hot_dynamic_desc`.
+Case-1 policy-2 uses `MOE_TEST_SCHEDULE=m70_three_hot_dynamic_two_ended`.
+Case-1 policy-3 uses `MOE_TEST_SCHEDULE=m70_three_hot_full_scheduler`.
+Case-2 policy-0 uses `MOE_TEST_SCHEDULE=m92_parameter_order_static_desc`.
+Case-2 policy-1 uses `MOE_TEST_SCHEDULE=m92_parameter_order_dynamic_desc`.
+Case-2 policy-2 uses
+`MOE_TEST_SCHEDULE=m92_parameter_order_dynamic_two_ended`.
+Case-2 policy-3 uses
+`MOE_TEST_SCHEDULE=m92_parameter_order_full_scheduler`.
+Case-3 policy-0 uses `MOE_TEST_SCHEDULE=m60_high_skew_static_desc`.
+Case-3 policy-1 uses `MOE_TEST_SCHEDULE=m60_high_skew_dynamic_desc`.
+Case-3 policy-2 uses
+`MOE_TEST_SCHEDULE=m60_high_skew_dynamic_two_ended`.
+Case-3 policy-3 uses
+`MOE_TEST_SCHEDULE=m60_high_skew_full_scheduler`.
+The Bingo-rejection experiment uses
+`MOE_TEST_SCHEDULE=m70_three_hot_dynamic_desc_skip_elided` with the exact same
+policy-1 schedule.
 The earlier experiments remain available with `MOE_TEST_SCHEDULE=high_to_low` or
 `MOE_TEST_SCHEDULE=low_to_high` or `MOE_TEST_SCHEDULE=ends_inward`; the default
 remains `baseline`:
@@ -121,6 +142,121 @@ make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
 make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
   WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
   MOE_TEST_SCHEDULE=dynamic_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=dynamic_two_ended MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=dynamic_two_ended MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=full_scheduler MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=full_scheduler MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_static_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_static_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_dynamic_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_dynamic_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_dynamic_two_ended MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_dynamic_two_ended MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_full_scheduler MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_full_scheduler MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_static_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_static_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_dynamic_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_dynamic_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_dynamic_two_ended \
+  MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_dynamic_two_ended \
+  MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_full_scheduler \
+  MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m92_parameter_order_full_scheduler \
+  MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_static_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_static_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_dynamic_desc MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_dynamic_desc MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_dynamic_two_ended \
+  MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_dynamic_two_ended \
+  MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_full_scheduler \
+  MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m60_high_skew_full_scheduler \
+  MOE_RUNTIME_TIMING=1
+
+make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_dynamic_desc_skip_elided \
+  MOE_RUNTIME_TIMING=1
+make apps HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
+  WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
+  MOE_TEST_SCHEDULE=m70_three_hot_dynamic_desc_skip_elided \
+  MOE_RUNTIME_TIMING=1
 
 make single-sw HOST_APP_TYPE=offload_bingo_hw CHIP_TYPE=single_chip \
   WORKLOAD=multi_cluster_MoE_test DEV_APP=snax-bingo-offload \
@@ -187,6 +323,157 @@ global lower bound = max(C2, C3) = 175.50 ticks
 At 8192 cycles per focused-workload tick this is 1,437,696 cycles. The pure
 four-stage policy result is 159 ticks; 175.50 ticks is the FPGA DFG/API-adjusted
 structural reference.
+
+The `dynamic_two_ended` profile replays case-0 policy-2. C2 repeatedly takes the
+hottest remaining expert and executes E0 through E11. C3 independently takes
+the coldest remaining expert and executes E42 through E12. There is no global
+slot barrier. The profile preserves all exported physical choices, including
+19 early S2 prefetches, E21's BOTH S4 prefetch for E20, E20's skipped S1, and
+the 26 cross-cluster DMA release edges.
+
+The pure four-stage streams end at tick 137 on C2 and tick 134 on C3. Applying
+the established per-slot DFG/API allowance independently to each cluster gives:
+
+```text
+C2: 137 + 12 * 3/4 = 146.00 ticks
+C3: 134 + 31 * 3/4 = 157.25 ticks
+global lower bound = max(C2, C3) = 157.25 ticks
+```
+
+At 8192 cycles per focused-workload tick this is 1,288,192 cycles. The policy's
+ideal model makespan is 137 ticks; 157.25 ticks is the FPGA DFG/API-adjusted
+structural reference.
+
+The `full_scheduler` profile replays case-0 policy-3. The certified scheduler
+jointly chooses issue order, cluster assignment, shape, DMA binding, and S2PF.
+C2 executes 11 slots and C3 executes 32 slots. E0, E1, and E2 use IDMA S2PF;
+E0 and E1 use the early S1-overlap event, while E2 starts S2PF at S1 end. The
+remaining cold tail uses C/C with BOTH on C3, and the replay contains six
+cross-cluster DMA release edges.
+
+Both pure four-stage streams end at tick 129. Applying the same per-slot
+DFG/API allowance independently to each cluster gives:
+
+```text
+C2: 129 + 11 * 3/4 = 137.25 ticks
+C3: 129 + 32 * 3/4 = 153.00 ticks
+global lower bound = max(C2, C3) = 153.00 ticks
+```
+
+At 8192 cycles per focused-workload tick this is 1,253,376 cycles. The
+certified scheduler-model lower bound is 129 ticks; 153 ticks is the current
+FPGA DFG/API-adjusted structural reference.
+
+The `m70_three_hot_static_desc` profile is the second distribution's policy-0
+replay. Its exact distribution is `[28x3, 6x4, 2x16, 0x41]`, with 70 source
+tokens and 140 Top-2 routes. Every task uses B/B, C2 uses IDMA, C3 uses XDMA,
+and S2PF/S4PF are disabled. C2 executes E0,E2,E8,E10,...,E22 in 10 local slots
+and ends at tick 132. C3 executes E1,E3,E4,E5,E6,E7,E9,...,E21 in 13 local
+slots and ends at tick 126.
+
+The model makespan is therefore 132 ticks. Applying the established 3/4-tick
+DFG/API allowance separately to the two cluster-local streams gives:
+
+```text
+C2: 132 + 10 * 3/4 = 139.50 ticks
+C3: 126 + 13 * 3/4 = 135.75 ticks
+global lower bound = max(C2, C3) = 139.50 ticks
+```
+
+At 8192 cycles per focused-workload tick, the model makespan is 1,081,344
+cycles and the production structural lower bound is 1,142,784 cycles.
+
+The `m70_three_hot_dynamic_desc` profile replays case-1 policy-1 with the same
+distribution, exact routing, descending issue order, and dynamic physical
+selection. E0 and E1 use early S2PF and preload E2 and E3 respectively. E3
+through E6 continue the S4PF chain through E7, so E2 through E7 skip S1. E8
+uses C/C with BOTH, and the remaining two-token tail returns to B/B with the
+cluster-local DMA lane. Four cross-cluster DMA release edges preserve the
+exported IDMA/XDMA operation order without adding a global slot barrier.
+
+Both model streams end at tick 126. C2 has 9 local slots and C3 has 14. Applying
+the established per-slot DFG/API allowance independently to each cluster gives:
+
+```text
+C2: 126 + 9 * 3/4 = 132.75 ticks
+C3: 126 + 14 * 3/4 = 136.50 ticks
+global lower bound = max(C2, C3) = 136.50 ticks
+```
+
+At 8192 cycles per focused-workload tick, the model makespan is 1,032,192
+cycles and the production structural reference is 1,118,208 cycles.
+
+The `m70_three_hot_dynamic_desc_skip_elided` experiment keeps those queues,
+DMA bindings, prefetches, and release edges unchanged. It models Bingo rejecting
+the three statically empty S1 stage tasks before dispatch for each `skip_s1`
+slot: 3 stage nodes disappear on C2 and 15 on the critical C3 stream. All S2,
+S3, S4, prefetch/prepare, and store nodes remain unchanged so this run isolates
+only the cost of issuing the six cache-hit S1 skips.
+
+The `m60_high_skew_static_desc` profile replays case-3 policy-0. Its exact
+64-expert distribution is `[36,22,13,6,2x17,1x9,0x34]`, with 60 input tokens,
+120 Top-2 routes, and 30 active experts. Every task uses B/B without prefetch;
+C2 has 14 IDMA slots and ends at tick 135, while C3 has 16 XDMA slots and ends
+at tick 138. The dedicated lanes require no cross-cluster DMA release edges.
+
+```text
+C2: 135 + 14 * 3/4 = 145.50 ticks
+C3: 138 + 16 * 3/4 = 150.00 ticks
+global lower bound = max(C2, C3) = 150.00 ticks
+```
+
+At 8192 cycles per focused-workload tick, the model makespan is 1,130,496
+cycles and the production structural lower bound is 1,228,800 cycles.
+
+The `m60_high_skew_dynamic_desc` profile replays case-3 policy-1 with the same
+distribution and exact Top-2 routing. E0/E1 use early S2PF; their S4PF events
+preload E3/E2, and E2 preloads E4. Therefore E2, E3, and E4 skip S1. The
+remaining tail uses C/C with BOTH and follows the exported shared-DMA order.
+Its 26 cross-cluster DMA release edges are lowered directly into the DFG.
+
+```text
+C2: 133 + 14 * 3/4 = 143.50 ticks
+C3: 130 + 16 * 3/4 = 142.00 ticks
+global lower bound = max(C2, C3) = 143.50 ticks
+```
+
+At 8192 cycles per focused-workload tick, the model makespan is 1,089,536
+cycles and the production structural lower bound is 1,175,552 cycles.
+
+The `m60_high_skew_dynamic_two_ended` profile replays case-3 policy-2. C2
+executes the hot-end stream E0,E1,E2, while C3 executes the cold-end stream
+E29,E28,...,E3. E1 and E2 use early S2PF; E3 uses S2PF after its B-shape S1
+DMA completes. The profile has no S4PF or cache-hit task, and its six exact
+cross-cluster DMA release edges are lowered into the DFG.
+
+The pure four-stage streams end at tick 111 on C2 and tick 94 on C3. Applying
+the established per-slot DFG/API allowance independently to each cluster gives:
+
+```text
+C2: 111 + 3 * 3/4 = 113.25 ticks
+C3: 94 + 27 * 3/4 = 114.25 ticks
+global lower bound = max(C2, C3) = 114.25 ticks
+```
+
+At 8192 cycles per focused-workload tick, the model makespan is 909,312 cycles
+and the production structural lower bound is 935,936 cycles.
+
+The `m60_high_skew_full_scheduler` profile replays case-3 policy-3. C2 executes
+E0,E13,E12,...,E6,E2, while C3 executes E29,E28,...,E14,E1,E5,E4,E3. E0 uses
+IDMA S2PF; E1 and E2 use BOTH S2PF. The profile has no S4PF or cache-hit task,
+and its three exact cross-cluster DMA release edges are lowered into the DFG.
+
+Both pure four-stage streams end at tick 99. Applying the established per-slot
+DFG/API allowance independently to each cluster gives:
+
+```text
+C2: 99 + 10 * 3/4 = 106.50 ticks
+C3: 99 + 20 * 3/4 = 114.00 ticks
+global lower bound = max(C2, C3) = 114.00 ticks
+```
+
+At 8192 cycles per focused-workload tick, the model makespan is 811,008 cycles
+and the production structural lower bound is 933,888 cycles.
 
 The high-to-low profile uses the exact 64-expert distribution
 `[22, 18, 14, 3x19, 2x8, 1x13, 0x21]`. The left-to-right issue order is split

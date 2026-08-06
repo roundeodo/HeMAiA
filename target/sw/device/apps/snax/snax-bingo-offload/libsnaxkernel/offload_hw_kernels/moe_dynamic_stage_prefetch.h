@@ -1,59 +1,45 @@
 // Internal dynamic-MoE module; include through moe_dynamic.h.
 #pragma once
 
-__attribute__((always_inline)) static inline uint32_t
-__moe_s2pf_step_runs(
+__attribute__((always_inline)) static inline void
+__moe_s2pf_submit_idma_phase(
     const __moe_s2_prefetch_ctrl_t *s2,
-    uint32_t slices_per_block,
-    uint32_t step)
+    uint32_t phase,
+    uint32_t side)
 {
-    uint32_t phase = step & 1u;
-    uint32_t phase_group = step >> 1u;
-    uint32_t phase_runs = slices_per_block *
-        __moe_s4_blocks_in_phase(s2->block_count, phase);
-    uint32_t first = phase_group * s2->transfers_per_step;
-    if (first >= phase_runs) return 0u;
-    uint32_t remaining = phase_runs - first;
-    return remaining < s2->transfers_per_step ?
-        remaining : s2->transfers_per_step;
+    uint32_t repeats = s2->block_bytes / MOE_BANK_WEIGHT_ROW_BYTES;
+    for (uint32_t block = phase; block < s2->block_count; block += 2u) {
+        uint64_t dst = 0u;
+        uint64_t src = 0u;
+        __moe_dyn_s2pf_single_address(s2, block, side, &dst, &src);
+        snrt_dma_start_2d_wideptr(
+            dst, src, MOE_BANK_WEIGHT_ROW_BYTES,
+            MOE_BANK_TCDM_ROW_BYTES, MOE_BANK_WEIGHT_ROW_BYTES, repeats);
+    }
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_s2pf_start_both_phase(
+    const __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t phase)
+{
+    int32_t previous = __moe_dyn_xdma_start_remote_begin();
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
+    __moe_s2pf_submit_idma_phase(s2, phase, 0u);
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+    return __moe_dyn_xdma_start_remote_commit(previous);
 }
 
 __attribute__((always_inline)) static inline void
-__moe_s2pf_run_coords(
-    const __moe_s2_prefetch_ctrl_t *s2,
-    uint32_t step,
-    uint32_t sub,
-    uint32_t *block,
-    uint32_t *side)
+__moe_s2pf_prepare_next_xdma_phase_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    const __moe_s2_prefetch_ctrl_t *s2)
 {
-    uint32_t phase = step & 1u;
-    uint32_t phase_blocks =
-        __moe_s4_blocks_in_phase(s2->block_count, phase);
-    uint32_t ordinal =
-        (step >> 1u) * s2->transfers_per_step + sub;
-    *side = ordinal / phase_blocks;
-    *block = phase + 2u * (ordinal % phase_blocks);
-}
-
-__attribute__((always_inline)) static inline void
-__moe_s2pf_next_run_coords(
-    const __moe_s2_prefetch_ctrl_t *s2,
-    uint32_t slices_per_block,
-    uint32_t step,
-    uint32_t sub,
-    uint32_t step_runs,
-    uint32_t *block,
-    uint32_t *side)
-{
-    if (sub + 1u < step_runs) {
-        __moe_s2pf_run_coords(s2, step, sub + 1u, block, side);
-        return;
+    uint32_t phase0_blocks = __moe_s4_blocks_in_phase(s2->block_count, 0u);
+    uint32_t phase1_blocks = __moe_s4_blocks_in_phase(s2->block_count, 1u);
+    if (phase0_blocks != phase1_blocks) {
+        __moe_prepare_s2pf_xdma_phase_shape(blk, 1u);
     }
-    uint32_t next_step = step + 1u;
-    if (__moe_s2pf_step_runs(s2, slices_per_block, next_step) == 0u) {
-        next_step++;
-    }
-    __moe_s2pf_run_coords(s2, next_step, 0u, block, side);
 }
 
 __attribute__((always_inline)) static inline void
@@ -61,120 +47,55 @@ __moe_s2pf_run_both(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
     const __snax_bingo_moe_dynamic_expert_static_args_t *st,
-    __moe_s2_prefetch_ctrl_t *s2)
+    const __moe_s2_prefetch_ctrl_t *s2)
 {
-    uint32_t total_runs = s2->block_count;
-    uint32_t runs_started = 0u;
-    for (uint32_t step = 0u; step < s2->transfer_count; step++) {
-        if (s2->sync_enabled != 0u && step != 0u) {
-            __moe_pipeline_wait(&s2->compute_done, step);
-        }
-        uint32_t step_runs = __moe_s2pf_step_runs(s2, 1u, step);
-        for (uint32_t sub = 0u; sub < step_runs; sub++) {
-            uint32_t block = 0u;
-            uint32_t side = 0u;
-            __moe_s2pf_run_coords(s2, step, sub, &block, &side);
-
-            uint64_t dst0 = 0u;
-            uint64_t src0 = 0u;
-            uint64_t dst1 = 0u;
-            uint64_t src1 = 0u;
-            __moe_dyn_s2pf_both_addresses(
-                s2, block, &dst0, &src0, &dst1, &src1);
-            int32_t xdma_task = __moe_dyn_start_both_2d_preloaded_xdma(
-                dst0, src0, s2->block_bytes);
-
-            runs_started++;
-            if (runs_started < total_runs) {
-                uint32_t next_block = 0u;
-                uint32_t next_side = 0u;
-                __moe_s2pf_next_run_coords(
-                    s2, 1u, step, sub, step_runs,
-                    &next_block, &next_side);
-                __moe_dyn_prepare_s2pf_both_xdma_address(
-                    s2, next_block);
-            } else {
-                __moe_dyn_prepare_after_s2pf_xdma(blk, cfg, st);
-            }
-            __moe_dyn_wait_both_2d(xdma_task);
-        }
-        if (s2->sync_enabled != 0u) {
-            __moe_pipeline_publish(&s2->prefetch_done, step + 1u);
-        }
+    int32_t last_xdma_task = __moe_s2pf_start_both_phase(s2, 0u);
+    if (__moe_s4_blocks_in_phase(s2->block_count, 1u) != 0u) {
+        __moe_s2pf_prepare_next_xdma_phase_shape(blk, s2);
+        __moe_dyn_prepare_s2pf_both_xdma_address(s2, 1u);
+        last_xdma_task = __moe_s2pf_start_both_phase(s2, 1u);
     }
+    __moe_dyn_prepare_after_s2pf_xdma(blk, cfg, st);
+    __moe_dyn_wait_both_2d(last_xdma_task);
+}
+
+__attribute__((always_inline)) static inline int32_t
+__moe_s2pf_submit_xdma_phase(
+    const __moe_s2_prefetch_ctrl_t *s2,
+    uint32_t phase)
+{
+    (void)__moe_dyn_start_single_2d_preloaded_xdma();
+    __moe_dyn_prepare_s2pf_single_xdma_address(s2, phase, 1u);
+    return __moe_dyn_start_single_2d_preloaded_xdma();
 }
 
 __attribute__((always_inline)) static inline void
-__moe_s2pf_run_xdma_single(
+__moe_s2pf_run_xdma(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
     const __snax_bingo_kernel_moe_dynamic_expert_args_t *cfg,
     const __snax_bingo_moe_dynamic_expert_static_args_t *st,
-    __moe_s2_prefetch_ctrl_t *s2)
+    const __moe_s2_prefetch_ctrl_t *s2)
 {
-    uint32_t total_runs = 2u * s2->block_count;
-    uint32_t runs_started = 0u;
-    for (uint32_t step = 0u; step < s2->transfer_count; step++) {
-        if (s2->sync_enabled != 0u && step != 0u) {
-            __moe_pipeline_wait(&s2->compute_done, step);
-        }
-        uint32_t step_runs = __moe_s2pf_step_runs(s2, 2u, step);
-        for (uint32_t sub = 0u; sub < step_runs; sub++) {
-            uint32_t block = 0u;
-            uint32_t side = 0u;
-            __moe_s2pf_run_coords(s2, step, sub, &block, &side);
-
-            uint64_t dst0 = 0u;
-            uint64_t src0 = 0u;
-            __moe_dyn_s2pf_single_address(
-                s2, block, side, &dst0, &src0);
-            int32_t xdma_task =
-                __moe_dyn_start_single_2d_preloaded_xdma();
-
-            runs_started++;
-            if (runs_started < total_runs) {
-                uint32_t next_block = 0u;
-                uint32_t next_side = 0u;
-                __moe_s2pf_next_run_coords(
-                    s2, 2u, step, sub, step_runs,
-                    &next_block, &next_side);
-                __moe_dyn_prepare_s2pf_single_xdma_address(
-                    s2, next_block, next_side);
-            } else {
-                __moe_dyn_prepare_after_s2pf_xdma(blk, cfg, st);
-            }
-            __moe_dyn_wait_single_2d_xdma(xdma_task);
-        }
-        if (s2->sync_enabled != 0u) {
-            __moe_pipeline_publish(&s2->prefetch_done, step + 1u);
-        }
+    int32_t last_xdma_task = __moe_s2pf_submit_xdma_phase(s2, 0u);
+    if (__moe_s4_blocks_in_phase(s2->block_count, 1u) != 0u) {
+        __moe_s2pf_prepare_next_xdma_phase_shape(blk, s2);
+        __moe_dyn_prepare_s2pf_single_xdma_address(s2, 1u, 0u);
+        last_xdma_task = __moe_s2pf_submit_xdma_phase(s2, 1u);
     }
+    __moe_dyn_prepare_after_s2pf_xdma(blk, cfg, st);
+    __moe_dyn_wait_single_2d_xdma(last_xdma_task);
 }
 
 __attribute__((always_inline)) static inline void
-__moe_s2pf_run_idma_single(
-    __moe_s2_prefetch_ctrl_t *s2)
+__moe_s2pf_run_idma(const __moe_s2_prefetch_ctrl_t *s2)
 {
-    for (uint32_t step = 0u; step < s2->transfer_count; step++) {
-        if (s2->sync_enabled != 0u && step != 0u) {
-            __moe_pipeline_wait(&s2->compute_done, step);
-        }
-        uint32_t step_runs = __moe_s2pf_step_runs(s2, 2u, step);
-        for (uint32_t sub = 0u; sub < step_runs; sub++) {
-            uint32_t block = 0u;
-            uint32_t side = 0u;
-            __moe_s2pf_run_coords(s2, step, sub, &block, &side);
-            uint64_t dst0 = 0u;
-            uint64_t src0 = 0u;
-            __moe_dyn_s2pf_single_address(
-                s2, block, side, &dst0, &src0);
-            __moe_dyn_start_single_2d_idma(
-                dst0, src0, s2->block_bytes);
-            __moe_dyn_wait_single_2d_idma();
-        }
-        if (s2->sync_enabled != 0u) {
-            __moe_pipeline_publish(&s2->prefetch_done, step + 1u);
-        }
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_START);
+    for (uint32_t phase = 0u; phase < 2u; phase++) {
+        __moe_s2pf_submit_idma_phase(s2, phase, 0u);
+        __moe_s2pf_submit_idma_phase(s2, phase, 1u);
     }
+    BINGO_TRACE_MARKER(BINGO_TRACE_IDMA_CFG_END);
+    __moe_dyn_wait_single_2d_idma();
 }
 
 SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(void *arg)
@@ -197,6 +118,12 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(void *arg)
             BINGO_RET_SUCC);
         return BINGO_RET_SUCC;
     }
+    if (MOE_DYN_CTRL_S2PF_EARLY(cfg->ctrl) == 0u &&
+        MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE(cfg->ctrl) != 0u &&
+        __moe_s1_dma_ctrl(blk)->valid != 0u) {
+        __moe_s1_dma_ctrl_t *s1 = __moe_s1_dma_ctrl(blk);
+        __moe_pipeline_wait(&s1->compute_done, s1->block_count);
+    }
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_PREFETCH_S2_START);
     uint32_t half_bytes = s2->half_bytes;
     uint32_t dma_binding = s2->binding;
@@ -204,9 +131,9 @@ SNAX_LIB_DEFINE uint32_t __snax_bingo_kernel_moe_dyn_opt_prefetch_s2(void *arg)
     if (dma_binding == MOE_DYN_DMA_BOTH) {
         __moe_s2pf_run_both(blk, cfg, st, s2);
     } else if (dma_binding == MOE_DYN_DMA_XDMA) {
-        __moe_s2pf_run_xdma_single(blk, cfg, st, s2);
+        __moe_s2pf_run_xdma(blk, cfg, st, s2);
     } else {
-        __moe_s2pf_run_idma_single(s2);
+        __moe_s2pf_run_idma(s2);
     }
     MOE_PROFILE_RESOURCE_END(profile);
     MOE_INDIV_PRINT(

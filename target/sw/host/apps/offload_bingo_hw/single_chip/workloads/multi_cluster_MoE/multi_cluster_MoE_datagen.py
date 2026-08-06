@@ -65,6 +65,10 @@ from moe_layout import (  # noqa: E402
     derive_mixed_workload_params,
     token_row_stride,
 )
+from moe_scheduler_bench_cases import (  # noqa: E402
+    SCHEDULER_BENCH_CASES,
+    get_scheduler_bench_case,
+)
 
 np.random.seed(320)
 
@@ -496,11 +500,28 @@ def get_args():
         "snitch_cluster/cfg/"
         "snax_dual_versacore_int16x4_multidim_spatial_k8_8x4_4lane.hjson",
     )
+    parser.add_argument(
+        "--scheduler-bench-case",
+        choices=tuple(SCHEDULER_BENCH_CASES),
+        help="emit the minimal data header for a Prepare/Execute benchmark",
+    )
     return parser.parse_args()
 
 
 def main():
     args = get_args()
+    if args.scheduler_bench_case is not None:
+        case = get_scheduler_bench_case(args.scheduler_bench_case)
+        log(
+            f"scheduler bench {case.name}: tokens={case.input_tokens} "
+            f"active_experts={case.active_experts}"
+        )
+        print(
+            "// Auto-generated scheduler-only MoE benchmark data.\n"
+            "// Counts are emitted by multi_cluster_MoE_config.h.\n"
+            "#pragma once"
+        )
+        return
     with args.cfg.open() as f:
         pcfg = hjson.loads(f.read())
     with args.hwcfg.open() as f:

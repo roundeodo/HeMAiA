@@ -27,14 +27,49 @@ from moe_test_schedule import (  # noqa: E402
     C_TAIL_SMOKE_PROFILE,
     DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS,
     DYNAMIC_DESC_PROFILE,
+    DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS,
+    DYNAMIC_TWO_ENDED_PROFILE,
     ENDS_INWARD_EXPECTED_MAKESPAN_TICKS,
     ENDS_INWARD_PROFILE,
     EXPERT_COUNT,
+    FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS,
+    FULL_SCHEDULER_PROFILE,
     HIGH_TO_LOW_COUNTS,
     HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS,
     HIGH_TO_LOW_PROFILE,
     LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS,
     LOW_TO_HIGH_PROFILE,
+    M60_HIGH_SKEW_COUNTS,
+    M60_HIGH_SKEW_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS,
+    M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+    M60_HIGH_SKEW_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS,
+    M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    M60_HIGH_SKEW_STATIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+    M60_HIGH_SKEW_TOKEN_IDS_BY_EXPERT,
+    M70_THREE_HOT_COUNTS,
+    M70_THREE_HOT_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    M70_THREE_HOT_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS,
+    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+    M70_THREE_HOT_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS,
+    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+    M70_THREE_HOT_STATIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    M70_THREE_HOT_STATIC_DESC_PROFILE,
+    M70_THREE_HOT_TOKEN_IDS_BY_EXPERT,
+    M92_PARAMETER_ORDER_COUNTS,
+    M92_PARAMETER_ORDER_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS,
+    M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+    M92_PARAMETER_ORDER_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS,
+    M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+    M92_PARAMETER_ORDER_STATIC_DESC_EXPECTED_MAKESPAN_TICKS,
+    M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT,
     S1_STAGE_SMOKE_PROFILE,
     SCHEDULE_PROFILES,
     STATIC_DESC_EXPECTED_MAKESPAN_TICKS,
@@ -224,18 +259,22 @@ def _high_to_low_token_refs(max_tokens_per_expert: int):
     return refs, token_ids_by_expert
 
 
-def _static_desc_token_refs(max_tokens_per_expert: int):
+def _exported_token_refs(
+    counts: tuple[int, ...],
+    routing: tuple[tuple[int, ...], ...],
+    max_tokens_per_expert: int,
+):
     refs = np.zeros(EXPERT_COUNT * max_tokens_per_expert, dtype=np.uint16)
     token_ids_by_expert = {
         expert_id: np.asarray(token_ids, dtype=np.int64)
-        for expert_id, token_ids in enumerate(STATIC_DESC_TOKEN_IDS_BY_EXPERT)
+        for expert_id, token_ids in enumerate(routing)
     }
-    owners = [[] for _ in range(sum(HIGH_TO_LOW_COUNTS) // 2)]
+    owners = [[] for _ in range(sum(counts) // 2)]
     for expert_id, token_ids in token_ids_by_expert.items():
         for token_id in token_ids:
             owners[int(token_id)].append(expert_id)
     if any(len(token_owners) != 2 for token_owners in owners):
-        raise AssertionError("STATIC_DESC routing must have exactly two owners")
+        raise AssertionError("exported routing must have exactly two owners")
 
     for expert_id, token_ids in token_ids_by_expert.items():
         start = expert_id * max_tokens_per_expert
@@ -284,8 +323,12 @@ def _emit_high_to_low_header(p: dict, rng: np.random.Generator) -> str:
     if p["schedule_profile"] in (
         STATIC_DESC_PROFILE,
         DYNAMIC_DESC_PROFILE,
+        DYNAMIC_TWO_ENDED_PROFILE,
+        FULL_SCHEDULER_PROFILE,
     ):
-        token_refs, token_ids_by_expert = _static_desc_token_refs(
+        token_refs, token_ids_by_expert = _exported_token_refs(
+            HIGH_TO_LOW_COUNTS,
+            STATIC_DESC_TOKEN_IDS_BY_EXPERT,
             p["prod_max_tokens_per_expert"]
         )
         counts = np.asarray(HIGH_TO_LOW_COUNTS, dtype=np.uint8)
@@ -293,10 +336,82 @@ def _emit_high_to_low_header(p: dict, rng: np.random.Generator) -> str:
             profile_comment = (
                 "// Case 0 STATIC_DESC; exact exported routing and fixed B/B lanes."
             )
-        else:
+        elif p["schedule_profile"] == DYNAMIC_DESC_PROFILE:
             profile_comment = (
                 "// Case 0 DYNAMIC_DESC; exact exported routing and dynamic lanes."
             )
+        elif p["schedule_profile"] == DYNAMIC_TWO_ENDED_PROFILE:
+            profile_comment = (
+                "// Case 0 DYNAMIC_TWO_ENDED; exact routing and hot/cold streams."
+            )
+        else:
+            profile_comment = (
+                "// Case 0 FULL_SCHEDULER; exact certified scheduler streams."
+            )
+    elif p["schedule_profile"] in (
+        M70_THREE_HOT_STATIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+        M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+        M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+    ):
+        token_refs, token_ids_by_expert = _exported_token_refs(
+            M70_THREE_HOT_COUNTS,
+            M70_THREE_HOT_TOKEN_IDS_BY_EXPERT,
+            p["prod_max_tokens_per_expert"],
+        )
+        counts = np.asarray(M70_THREE_HOT_COUNTS, dtype=np.uint8)
+        if p["schedule_profile"] == M70_THREE_HOT_STATIC_DESC_PROFILE:
+            profile_comment = (
+                "// Case 1 M70 THREE_HOT STATIC_DESC; exact routing and fixed B/B lanes."
+            )
+        else:
+            profile_comment = (
+                "// Case 1 M70 THREE_HOT dynamic policy; exact routing and lanes."
+            )
+    elif p["schedule_profile"] in (
+        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+    ):
+        token_refs, token_ids_by_expert = _exported_token_refs(
+            M92_PARAMETER_ORDER_COUNTS,
+            M92_PARAMETER_ORDER_TOKEN_IDS_BY_EXPERT,
+            p["prod_max_tokens_per_expert"],
+        )
+        counts = np.asarray(M92_PARAMETER_ORDER_COUNTS, dtype=np.uint8)
+        profile_comment = (
+            "// Case 2 M92 PARAMETER_ORDER STATIC_DESC; exact routing and fixed B/B lanes."
+            if p["schedule_profile"] == M92_PARAMETER_ORDER_STATIC_DESC_PROFILE
+            else "// Case 2 M92 PARAMETER_ORDER dynamic policy; exact routing and lanes."
+        )
+    elif p["schedule_profile"] in (
+        M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    ):
+        token_refs, token_ids_by_expert = _exported_token_refs(
+            M60_HIGH_SKEW_COUNTS,
+            M60_HIGH_SKEW_TOKEN_IDS_BY_EXPERT,
+            p["prod_max_tokens_per_expert"],
+        )
+        counts = np.asarray(M60_HIGH_SKEW_COUNTS, dtype=np.uint8)
+        profile_comment = (
+            "// Case 3 M60 HIGH_SKEW STATIC_DESC; exact routing and fixed B/B lanes."
+            if p["schedule_profile"] == M60_HIGH_SKEW_STATIC_DESC_PROFILE
+            else (
+                "// Case 3 M60 HIGH_SKEW DYNAMIC_DESC; exact routing and lanes."
+                if p["schedule_profile"] == M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE
+                else (
+                    "// Case 3 M60 HIGH_SKEW DYNAMIC_TWO_ENDED; exact routing and lanes."
+                    if p["schedule_profile"]
+                    == M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE
+                    else "// Case 3 M60 HIGH_SKEW FULL_SCHEDULER; exact routing and lanes."
+                )
+            )
+        )
     elif p["schedule_profile"] in (
         HIGH_TO_LOW_PROFILE,
         LOW_TO_HIGH_PROFILE,
@@ -328,6 +443,20 @@ def _emit_high_to_low_header(p: dict, rng: np.random.Generator) -> str:
         f"#define MOE_TEST_HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS {HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS}u",
         f"#define MOE_TEST_STATIC_DESC_EXPECTED_MAKESPAN_TICKS {STATIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
         f"#define MOE_TEST_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS {DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS {DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS {FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M70_THREE_HOT_STATIC_DESC_EXPECTED_MAKESPAN_TICKS {M70_THREE_HOT_STATIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M70_THREE_HOT_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS {M70_THREE_HOT_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M70_THREE_HOT_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS {M70_THREE_HOT_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M70_THREE_HOT_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS {M70_THREE_HOT_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M92_PARAMETER_ORDER_STATIC_DESC_EXPECTED_MAKESPAN_TICKS {M92_PARAMETER_ORDER_STATIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M92_PARAMETER_ORDER_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS {M92_PARAMETER_ORDER_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS {M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M92_PARAMETER_ORDER_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS {M92_PARAMETER_ORDER_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M60_HIGH_SKEW_STATIC_DESC_EXPECTED_MAKESPAN_TICKS {M60_HIGH_SKEW_STATIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M60_HIGH_SKEW_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS {M60_HIGH_SKEW_DYNAMIC_DESC_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS {M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_EXPECTED_MAKESPAN_TICKS}u",
+        f"#define MOE_TEST_M60_HIGH_SKEW_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS {M60_HIGH_SKEW_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS}u",
         f"#define MOE_TEST_LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS {LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS}u",
         f"#define MOE_TEST_ENDS_INWARD_EXPECTED_MAKESPAN_TICKS {ENDS_INWARD_EXPECTED_MAKESPAN_TICKS}u",
         format_vector_definition(
@@ -383,6 +512,21 @@ def emit_header(config: dict, schedule_profile: str = BASELINE_PROFILE) -> str:
         ENDS_INWARD_PROFILE,
         STATIC_DESC_PROFILE,
         DYNAMIC_DESC_PROFILE,
+        DYNAMIC_TWO_ENDED_PROFILE,
+        FULL_SCHEDULER_PROFILE,
+        M70_THREE_HOT_STATIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+        M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+        M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+        M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
         C_TAIL_SMOKE_PROFILE,
         S1_STAGE_SMOKE_PROFILE,
     ):

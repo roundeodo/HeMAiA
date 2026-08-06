@@ -44,6 +44,7 @@ STAGE_NAMES = {
     12: "config_s3",
     13: "cluster_begin",
     14: "cluster_end",
+    15: "load_s3_prefetch_s4",
 }
 RESOURCE_NAMES = {
     0: "none",
@@ -67,8 +68,13 @@ STAGE_GROUPS = (
     ("S3", frozenset((6, 7, 12))),
     ("S4", frozenset((8, 9))),
     ("STORE", frozenset((10,))),
+    ("S3+S4PF", frozenset((15,))),
 )
-REQUIRED_SLOT_STAGES = frozenset().union(*(ids for _, ids in STAGE_GROUPS))
+REQUIRED_SLOT_STAGES = frozenset((2, 3, 4, 5, 7, 9, 10, 11, 12))
+REQUIRED_STAGE_ALTERNATIVES = (
+    (frozenset((6, 15)), "load_s3|load_s3_prefetch_s4"),
+    (frozenset((8, 15)), "prefetch_s4|load_s3_prefetch_s4"),
+)
 SCOPE_BEGIN = 13
 SCOPE_END = 14
 UINT32_MASK = (1 << 32) - 1
@@ -305,10 +311,18 @@ def validate_slots(
     for (cluster, slot), group in sorted(slots.items()):
         stages = Counter(int(record["stage"]) for record in group)
         missing = sorted(REQUIRED_SLOT_STAGES - stages.keys())
-        if missing:
+        missing_alternatives = [
+            name
+            for alternatives, name in REQUIRED_STAGE_ALTERNATIVES
+            if alternatives.isdisjoint(stages)
+        ]
+        if missing or missing_alternatives:
             errors.append(
                 f"C{cluster} slot={slot}: missing task records "
-                + ",".join(STAGE_NAMES[stage] for stage in missing)
+                + ",".join(
+                    [STAGE_NAMES[stage] for stage in missing]
+                    + missing_alternatives
+                )
             )
         if slot == 0 and stages[1] == 0:
             errors.append(f"C{cluster} slot=0: missing gather_s1 record")

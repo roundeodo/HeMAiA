@@ -138,7 +138,7 @@ ALL_OUTPUTS += $$(ELF_$(1)) $$(BIN_$(1)) $$(DUMP_$(1)) $$(DWARF_$(1))
 RISCV_LDFLAGS_$(1) = $(RISCV_LDFLAGS) -T$$(BASE_LD_$(1))
 
 # Origin LD generation
-$$(ORIGIN_LD_$(1)): | $(BUILDDIR)
+$$(ORIGIN_LD_$(1)): $(DEVICE_DIR)/host_app_origin.tmp | $(BUILDDIR)
 	@echo "Generating origin LD for $(1) with origin $(2)"
 	echo "L3_ORIGIN = $(2);" > $$@
 	echo "L3_LENGTH = 0x100000000 - L3_ORIGIN;" >> $$@

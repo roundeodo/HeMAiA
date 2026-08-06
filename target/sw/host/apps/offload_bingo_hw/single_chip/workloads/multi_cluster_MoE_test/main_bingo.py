@@ -37,15 +37,32 @@ from moe_test_schedule import (  # noqa: E402
     DMA_BOTH,
     DMA_NONE,
     DYNAMIC_DESC_PROFILE,
+    DYNAMIC_TWO_ENDED_PROFILE,
     ENDS_INWARD_PROFILE,
+    FULL_SCHEDULER_PROFILE,
     HIGH_TO_LOW_PROFILE,
     LOW_TO_HIGH_PROFILE,
+    M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+    M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    M70_THREE_HOT_STATIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+    M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+    M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
     S2PF_BOTH_PROFILE,
+    S2PF_EARLY_CTRL_BIT,
     S1_STAGE_SMOKE_PROFILE,
     SCHEDULE_PROFILES,
     STATIC_DESC_PROFILE,
     build_schedule_profile,
     format_schedule_manifest,
+    s2pf_s1_overlap_steps,
     select_two_slot_s2pf_binding,
 )
 
@@ -298,6 +315,20 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             slot1_s2_prefetch_vd = (
                 (1 | (slot1_s2_dma << 1)) << (2 * 3)
             )
+            slot0_overlap_steps = s2pf_s1_overlap_steps(
+                skip_s1=False,
+                s1_shape=s1_shape,
+                s1_dma=s1_dma,
+                s2_prefetch_dma=s2_dma,
+            )
+            slot1_overlap_steps = s2pf_s1_overlap_steps(
+                skip_s1=bool(slot1_skip_s1),
+                s1_shape=s1_shape,
+                s1_dma=slot1_s1_dma,
+                s2_prefetch_dma=slot1_s2_dma,
+            )
+            ctrl0 |= int(slot0_overlap_steps != 0) << S2PF_EARLY_CTRL_BIT
+            ctrl1 |= int(slot1_overlap_steps != 0) << S2PF_EARLY_CTRL_BIT
 
             lines += [
                 f"__snax_bingo_moe_dynamic_expert_static_args_t *{static_name} = "
@@ -644,6 +675,17 @@ def add_production_slot_handoff_test(dfg, p, mh):
                 slot0_addr, static_addr, pipeline_ctrl_addr, block
             )
 
+        bench = BENCHMARK_CLUSTER_CONFIG[prefix]
+        slot0_s2_dma = select_two_slot_s2pf_binding(
+            p["schedule_profile"], prefix, 0, bench["s2_prefetch_dma"]
+        )
+        slot0_overlap_steps = s2pf_s1_overlap_steps(
+            skip_s1=False,
+            s1_shape=bench["s1_shape"],
+            s1_dma=bench["s1_dma"],
+            s2_prefetch_dma=slot0_s2_dma,
+        )
+
         chain = build_dynamic_expert_slot_chain(
             add_node=lambda core, kernel, args, label: add_node(
                 dfg, cluster, core, kernel, args, label
@@ -658,6 +700,12 @@ def add_production_slot_handoff_test(dfg, p, mh):
             s3_block_count=p["s3_block_count"],
             dma_core_id=DMA_CORE,
             gemm_core_id=GEMM_CORE,
+            emit_s2_prefetch_task=(
+                slot0_s2_dma != DMA_NONE and slot0_overlap_steps == 0
+            ),
+            s2pf_starts_after_s1_dma=(
+                slot0_s2_dma == DMA_NONE or slot0_overlap_steps != 0
+            ),
             implementation=SLOT_IMPLEMENTATION,
             label_prefix=f"{prefix.upper()}_PROD",
         )
@@ -689,6 +737,18 @@ def add_production_slot_handoff_test(dfg, p, mh):
                 slot1_addr, static_addr, pipeline_ctrl_addr, block
             )
 
+        slot1_bench = SLOT1_CLUSTER_CONFIG[prefix]
+        slot1_s2_dma = select_two_slot_s2pf_binding(
+            p["schedule_profile"], prefix, 1,
+            slot1_bench["s2_prefetch_dma"],
+        )
+        slot1_overlap_steps = s2pf_s1_overlap_steps(
+            skip_s1=bool(slot1_bench["skip_s1"]),
+            s1_shape=BENCHMARK_CLUSTER_CONFIG[prefix]["s1_shape"],
+            s1_dma=slot1_bench["s1_dma"],
+            s2_prefetch_dma=slot1_s2_dma,
+        )
+
         slot1_chains[prefix] = build_dynamic_expert_slot_chain(
             add_node=lambda core, kernel, args, label, cluster=cluster: add_node(
                 dfg, cluster, core, kernel, args, label
@@ -703,6 +763,14 @@ def add_production_slot_handoff_test(dfg, p, mh):
             s3_block_count=p["s3_block_count"],
             dma_core_id=DMA_CORE,
             gemm_core_id=GEMM_CORE,
+            emit_s2_prefetch_task=(
+                slot1_s2_dma != DMA_NONE and slot1_overlap_steps == 0
+            ),
+            s2pf_starts_after_s1_dma=(
+                slot1_bench["skip_s1"] != 0
+                or slot1_s2_dma == DMA_NONE
+                or slot1_overlap_steps != 0
+            ),
             implementation=SLOT_IMPLEMENTATION,
             label_prefix=f"{prefix.upper()}_PROD_SLOT1",
         )
@@ -777,6 +845,21 @@ def create_dfg(p, mh):
         ENDS_INWARD_PROFILE,
         STATIC_DESC_PROFILE,
         DYNAMIC_DESC_PROFILE,
+        DYNAMIC_TWO_ENDED_PROFILE,
+        FULL_SCHEDULER_PROFILE,
+        M70_THREE_HOT_STATIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+        M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+        M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+        M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
         C_TAIL_SMOKE_PROFILE,
     ):
         queues = build_schedule_profile(p["schedule_profile"])
@@ -786,6 +869,21 @@ def create_dfg(p, mh):
             ENDS_INWARD_PROFILE,
             STATIC_DESC_PROFILE,
             DYNAMIC_DESC_PROFILE,
+            DYNAMIC_TWO_ENDED_PROFILE,
+            FULL_SCHEDULER_PROFILE,
+            M70_THREE_HOT_STATIC_DESC_PROFILE,
+            M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+            M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+            M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+            M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+            M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+            M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+            M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+            M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+            M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+            M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+            M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+            M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
         ):
             print(format_schedule_manifest(queues, p["schedule_profile"]))
         else:
@@ -813,6 +911,21 @@ def main():
         ENDS_INWARD_PROFILE,
         STATIC_DESC_PROFILE,
         DYNAMIC_DESC_PROFILE,
+        DYNAMIC_TWO_ENDED_PROFILE,
+        FULL_SCHEDULER_PROFILE,
+        M70_THREE_HOT_STATIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+        M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+        M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+        M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
         C_TAIL_SMOKE_PROFILE,
         S1_STAGE_SMOKE_PROFILE,
     ):

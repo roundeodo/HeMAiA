@@ -25,12 +25,22 @@ INCL_DEVICE_BINARY ?= 1 # True to include the device binary
 DATA_CFG ?= $(MK_DIR)/params.hjson
 DATA_H = $(MK_DIR)/multi_cluster_MoE_data.h
 DATAGEN_FLAGS ?=
+OFFLOAD_FLAGS ?=
+MOE_SCHED_BENCH_CASE ?=
+SCHED_BENCH_CASES_PY = $(MK_DIR)/moe_scheduler_bench_cases.py
+SCHED_BENCH_STAMP = $(MK_DIR)/build/.scheduler_bench_case
+
+ifneq ($(strip $(MOE_SCHED_BENCH_CASE)),)
+DATAGEN_FLAGS += --scheduler-bench-case $(MOE_SCHED_BENCH_CASE)
+OFFLOAD_FLAGS += --scheduler-bench-case $(MOE_SCHED_BENCH_CASE)
+endif
 
 BENDER   = bender
 SNITCH_ROOT = $(shell $(BENDER) path snitch_cluster)
 HW_CFG ?= $(SNITCH_ROOT)/target/snitch_cluster/cfg/snax_dual_versacore_int16x4_rebalanced_cluster.hjson
 
-$(DATA_H): $(MK_DIR)/multi_cluster_MoE_datagen.py $(MK_DIR)/moe_layout.py $(DATA_CFG) $(HW_CFG)
+$(DATA_H): $(MK_DIR)/multi_cluster_MoE_datagen.py $(MK_DIR)/moe_layout.py \
+		$(SCHED_BENCH_CASES_PY) $(DATA_CFG) $(HW_CFG) $(SCHED_BENCH_STAMP)
 	python3 $< -c $(DATA_CFG) --hwcfg $(HW_CFG) $(DATAGEN_FLAGS) > $@
 
 # Offload: 由 main_bingo.py 生成 DFG 对应的 offload 头文件
@@ -40,10 +50,20 @@ BINGO_KERNEL_ARGS_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/b
 BINGO_DFG_PY = $(MK_DIR)/../../../../../runtime/libbingo/mini_compiler/bingo_dfg.py
 MOE_DYNAMIC_SLOT_DFG_PY = $(MK_DIR)/../moe_dynamic_slot_dfg.py
 $(OFFLOAD_H) $(CONFIG_H) &: $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
+		$(SCHED_BENCH_CASES_PY) $(SCHED_BENCH_STAMP) \
 		$(MOE_DYNAMIC_SLOT_DFG_PY) $(BINGO_DFG_PY) $(BINGO_KERNEL_ARGS_PY) \
 		$(DATA_CFG) $(HW_CFG)
-	python3 $< --cfg $(DATA_CFG) --hwcfg $(HW_CFG) --output_dir $(MK_DIR) --output_offload_file_name $(notdir $(OFFLOAD_H))
+	python3 $< --cfg $(DATA_CFG) --hwcfg $(HW_CFG) --output_dir $(MK_DIR) \
+		--output_offload_file_name $(notdir $(OFFLOAD_H)) $(OFFLOAD_FLAGS)
 	rm -f $(MK_DIR)/*.png $(MK_DIR)/*.csv
+
+.PHONY: FORCE_SCHED_BENCH_STAMP
+FORCE_SCHED_BENCH_STAMP:
+
+$(SCHED_BENCH_STAMP): FORCE_SCHED_BENCH_STAMP
+	mkdir -p $(dir $@)
+	@printf '%s\n' '$(strip $(MOE_SCHED_BENCH_CASE))' > $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
 
 
 ###############
@@ -67,6 +87,7 @@ $(OFFLOAD_H) $(CONFIG_H) &: $(MK_DIR)/main_bingo.py $(MK_DIR)/moe_layout.py \
 #   MOE_INDIV_BRINGUP=1 打印 individual descriptor、真实 token 搬运和各计算阶段。
 #   MOE_RUNTIME_TIMING=1 只记录两个cluster的begin/end，用于低扰动global时间。
 #   MOE_RUNTIME_TIMING=2 记录全部slot/stage/task时间，供离线脚本详细分析。
+#   MOE_SCHED_BENCH_CASE=<name> 仅生成所选 Prepare/Execute 小测试。
 # 不再支持 HW/SW check、legacy scheduler 或 runtime fallback 开关。
 MOE_HW_SCHEDULER ?= 0
 MOE_MCYCLE_DETAIL ?= 0
@@ -103,3 +124,8 @@ gen-data: $(DATA_H)
 gen-offload: $(OFFLOAD_H)
 
 include ../../../../common.mk
+
+# common.mk does not consume workload-generated headers from PARTIAL_OUTPUTS as
+# ELF prerequisites. Attach them explicitly so changing benchmark cases cannot
+# silently reuse an ELF compiled from the previous generated DFG.
+$(PARTIAL_ELF) $(ELFS): $(DATA_H) $(OFFLOAD_H) $(CONFIG_H)

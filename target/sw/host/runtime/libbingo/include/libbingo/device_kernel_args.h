@@ -779,6 +779,9 @@ typedef struct __attribute__((packed, aligned(4))) {
   uint32_t down_d_m_stride[3];
 } __snax_bingo_moe_dynamic_expert_static_args_t;
 
+#define BINGO_MOE_DYN_CTRL_S2PF_EARLY_BIT 20u
+#define BINGO_MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE_BIT 21u
+
 #define BINGO_MOE_MAX_BLOCKS 8u
 
 typedef struct __attribute__((packed, aligned(8))) {
@@ -855,6 +858,8 @@ typedef struct __attribute__((packed, aligned(8)))
    * bits [12:11]:dma_s3
    * bit  13:     runtime_cluster_idx (0=C2, 1=C3)
    * bits [19:14]:slot_id            (0-63, local slot index)
+   * bit  20:     s2pf_early         (lead=2 from the S1 compute tail)
+   * bit  21:     s2pf_runtime_release
    * ──────────────────────────────────────────────────────────────────────────── */
   union {
     struct {

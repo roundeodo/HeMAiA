@@ -24,6 +24,7 @@ enum bingo_moe_runtime_timing_stage {
     MOE_PROFILE_STAGE_CONFIG_S3,
     MOE_PROFILE_STAGE_CLUSTER_BEGIN,
     MOE_PROFILE_STAGE_CLUSTER_END,
+    MOE_PROFILE_STAGE_LOAD_S3_PREFETCH_S4,
 };
 
 enum bingo_moe_runtime_timing_resource {

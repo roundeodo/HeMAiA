@@ -193,51 +193,86 @@ def _build_optimized_slot_chain(
     input_ready,
     dma_core_id,
     gemm_core_id,
+    emit_s2_prefetch_task,
+    s2pf_starts_after_s1_dma,
     label,
+    execute_s1=True,
 ):
     """Build the production one-node-per-stage pipelined slot chain."""
     slot_args = make_block_args(0)
     block0_args = make_block_args(0)
-    s1_load = add_node(
-        dma_core_id, kernels["s1_load"], block0_args, label("S1_LOAD_STAGE")
-    )
-    s1_config = add_node(
-        gemm_core_id,
-        kernels["s1_config"],
-        block0_args,
-        label("S1_CONFIG_BLOCK0_DURING_LOAD0"),
-    )
-    s1_compute = add_node(
-        gemm_core_id,
-        kernels["s1_compute"],
-        block0_args,
-        label("S1_COMPUTE_STAGE"),
-    )
-    add_edge(input_ready, s1_load)
-    add_edge(input_ready, s1_config)
-    add_edge(s1_config, s1_compute)
-    # The producer and consumer must be issued in this order, but they cannot
-    # have a completion dependency: load1 waits for compute0's ready cookie.
-    add_descriptor_sequence(s1_load, s1_compute)
 
-    s2_prefetch = add_node(
-        dma_core_id,
-        kernels["s2_prefetch"],
-        slot_args,
-        label("S2_DOWN_PREFETCH"),
-    )
+    def unique(nodes):
+        return tuple(dict.fromkeys(nodes))
+
+    def add_predecessors(nodes, target):
+        for predecessor in unique(nodes):
+            add_edge(predecessor, target)
+
+    if execute_s1:
+        s1_load = add_node(
+            dma_core_id,
+            kernels["s1_load"],
+            block0_args,
+            label("S1_LOAD_STAGE"),
+        )
+        s1_config = add_node(
+            gemm_core_id,
+            kernels["s1_config"],
+            block0_args,
+            label("S1_CONFIG_BLOCK0_DURING_LOAD0"),
+        )
+        s1_compute = add_node(
+            gemm_core_id,
+            kernels["s1_compute"],
+            block0_args,
+            label("S1_COMPUTE_STAGE"),
+        )
+        add_edge(input_ready, s1_load)
+        add_edge(input_ready, s1_config)
+        add_edge(s1_config, s1_compute)
+        # The producer and consumer must be issued in this order, but they
+        # cannot have a completion dependency: load1 waits for compute0's
+        # ready cookie.
+        add_descriptor_sequence(s1_load, s1_compute)
+        s1_done = (s1_load, s1_compute)
+    else:
+        s1_load = input_ready
+        s1_config = input_ready
+        s1_compute = input_ready
+        s1_done = (input_ready,)
+
+    if emit_s2_prefetch_task:
+        if not execute_s1:
+            raise ValueError("an emitted S2PF task requires an executed S1 stage")
+        s2_prefetch = add_node(
+            dma_core_id,
+            kernels["s2_prefetch"],
+            slot_args,
+            label("S2_DOWN_PREFETCH"),
+        )
+        add_edge(s1_load, s2_prefetch)
+        if not s2pf_starts_after_s1_dma:
+            add_edge(s1_compute, s2_prefetch)
+    else:
+        # With no S2PF, or when early S2PF is fused into S1 load, S1-load
+        # completion is the exact S2PF-completion event for later dependencies.
+        s2_prefetch = s1_load
+
     s2_compute = add_node(
         gemm_core_id,
         kernels["s2_compute"],
         slot_args,
         label("S2_COMPUTE_REMAINDER"),
     )
-    for predecessor in (s1_load, s1_compute):
-        add_edge(predecessor, s2_prefetch)
-        add_edge(predecessor, s2_compute)
+    add_predecessors(s1_done, s2_compute)
 
+    s3_ready = unique((s2_compute, s2_prefetch))
     s3_load = add_node(
-        dma_core_id, kernels["s3_load"], block0_args, label("S3_LOAD_STAGE")
+        dma_core_id,
+        kernels["s3_load"],
+        block0_args,
+        label("S3_LOAD_STAGE"),
     )
     s3_config = add_node(
         gemm_core_id,
@@ -251,9 +286,8 @@ def _build_optimized_slot_chain(
         block0_args,
         label("S3_COMPUTE_STAGE"),
     )
-    for predecessor in (s2_compute, s2_prefetch):
-        add_edge(predecessor, s3_load)
-        add_edge(predecessor, s3_config)
+    add_predecessors(s3_ready, s3_load)
+    add_predecessors(s3_ready, s3_config)
     add_edge(s3_config, s3_compute)
     add_descriptor_sequence(s3_load, s3_compute)
 
@@ -264,7 +298,6 @@ def _build_optimized_slot_chain(
         label("S4_PREFETCH_OR_PREPARE_STORE"),
     )
     add_edge(s3_load, s4_prepare)
-    # The optimized S4 workers share the S3 synchronization control words.
     add_edge(s3_config, s4_prepare)
 
     s4_compute = add_node(
@@ -305,6 +338,8 @@ def build_dynamic_expert_slot_chain(
     s3_block_count,
     dma_core_id,
     gemm_core_id,
+    emit_s2_prefetch_task,
+    s2pf_starts_after_s1_dma,
     implementation=DEFAULT_SLOT_IMPLEMENTATION,
     label_prefix="",
 ):
@@ -335,4 +370,44 @@ def build_dynamic_expert_slot_chain(
         **common,
         kernels=OPTIMIZED_STAGE_KERNELS,
         add_descriptor_sequence=add_descriptor_sequence,
+        emit_s2_prefetch_task=emit_s2_prefetch_task,
+        s2pf_starts_after_s1_dma=s2pf_starts_after_s1_dma,
+    )
+
+
+def build_dynamic_expert_skip_s1_elided_slot_chain(
+    *,
+    add_node,
+    add_edge,
+    add_descriptor_sequence,
+    make_block_args,
+    input_ready,
+    s1_block_count,
+    s3_block_count,
+    dma_core_id,
+    gemm_core_id,
+    emit_s2_prefetch_task,
+    s2pf_starts_after_s1_dma,
+    label_prefix="",
+):
+    """Build an optimized cache-hit slot without empty S1 stage tasks."""
+    if s1_block_count <= 0 or s3_block_count <= 0:
+        raise ValueError("dynamic MoE slot requires non-zero S1/S3 block counts")
+
+    def label(name):
+        return f"{label_prefix}_{name}" if label_prefix else name
+
+    return _build_optimized_slot_chain(
+        kernels=OPTIMIZED_STAGE_KERNELS,
+        add_node=add_node,
+        add_edge=add_edge,
+        add_descriptor_sequence=add_descriptor_sequence,
+        make_block_args=make_block_args,
+        input_ready=input_ready,
+        dma_core_id=dma_core_id,
+        gemm_core_id=gemm_core_id,
+        emit_s2_prefetch_task=emit_s2_prefetch_task,
+        s2pf_starts_after_s1_dma=s2pf_starts_after_s1_dma,
+        execute_s1=False,
+        label=label,
     )

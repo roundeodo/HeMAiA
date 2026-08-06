@@ -7,6 +7,8 @@
 #error "pure-SW lowering requires MOE_HW_WEIGHT_BACKING_MASK"
 #endif
 
+#include "host_moe_s2pf_mode.h"
+
 static inline __attribute__((always_inline)) uint32_t
 __host_moe_weight_backing_id(uint32_t logical_eid)
 {
@@ -252,6 +254,12 @@ static inline uint64_t __host_bingo_kernel_moe_execute(void *arg)
         __snax_bingo_kernel_moe_dynamic_expert_args_t *dst_arg =
             task_args[op->task_idx];
         uint32_t slot = (uint32_t)__host_moe_dma_slot_index(op->kind);
+        if (op->kind == MOE_DMA_OP_S2_PREFETCH) {
+            const moe_task_t *task = &schedule->tasks[op->task_idx];
+            dst_arg->ctrl |= __host_moe_s2pf_runtime_ctrl(
+                1u, (uint32_t)task->skip_s1,
+                (uint32_t)task->shape_s1, (uint32_t)task->dma_s1);
+        }
         dst_arg->dma_slot_vd |=
             (1u | ((uint32_t)op->dma << 1u)) << (slot * 3u);
         dst_arg->dma_slot_eids |=

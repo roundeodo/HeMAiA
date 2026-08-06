@@ -13,11 +13,29 @@ from moe_test_schedule import (  # noqa: E402
     BASELINE_PROFILE,
     C_TAIL_SMOKE_PROFILE,
     DYNAMIC_DESC_PROFILE,
+    DYNAMIC_TWO_ENDED_PROFILE,
     ENDS_INWARD_PROFILE,
+    FULL_SCHEDULER_PROFILE,
     EXPERT_COUNT,
     HIGH_TO_LOW_PROFILE,
     HIGH_TO_LOW_COUNTS,
     LOW_TO_HIGH_PROFILE,
+    M60_HIGH_SKEW_COUNTS,
+    M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+    M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+    M70_THREE_HOT_COUNTS,
+    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+    M70_THREE_HOT_STATIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_COUNTS,
+    M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+    M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+    M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
     S2PF_BOTH_PROFILE,
     S1_STAGE_SMOKE_PROFILE,
     SCHEDULE_PROFILES,
@@ -65,10 +83,54 @@ def derive_params(config: dict, schedule_profile: str = BASELINE_PROFILE) -> dic
         ENDS_INWARD_PROFILE,
         STATIC_DESC_PROFILE,
         DYNAMIC_DESC_PROFILE,
+        DYNAMIC_TWO_ENDED_PROFILE,
+        FULL_SCHEDULER_PROFILE,
+        M70_THREE_HOT_STATIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+        M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+        M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+        M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
     ):
         queues = build_schedule_profile(schedule_profile)
-        gather_source_tokens = sum(HIGH_TO_LOW_COUNTS) // 2
-        max_tokens_per_expert = max(HIGH_TO_LOW_COUNTS)
+        distribution = (
+            M60_HIGH_SKEW_COUNTS
+            if schedule_profile in (
+                M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+                M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+                M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+                M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+            )
+            else (
+                M70_THREE_HOT_COUNTS
+                if schedule_profile in (
+                    M70_THREE_HOT_STATIC_DESC_PROFILE,
+                    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+                    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+                    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+                    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+                )
+                else (
+                    M92_PARAMETER_ORDER_COUNTS
+                    if schedule_profile in (
+                        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+                        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+                        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+                        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+                    )
+                    else HIGH_TO_LOW_COUNTS
+                )
+            )
+        )
+        gather_source_tokens = sum(distribution) // 2
+        max_tokens_per_expert = max(distribution)
         slot_count = max(len(slots) for slots in queues.values())
         token_ref_count = EXPERT_COUNT * max_tokens_per_expert
         output_expert_stride = max_tokens_per_expert * token_bytes

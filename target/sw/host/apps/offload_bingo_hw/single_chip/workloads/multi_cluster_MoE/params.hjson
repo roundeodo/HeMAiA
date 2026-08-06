@@ -14,8 +14,8 @@
 # 内部的归一化代价常数不由本文件生成。改变模型维度后功能 ABI 仍同步，但若
 # 需要最优调度周期，还应针对新维度重新标定硬件代价常数。
 #
-# 当前模型：32 tokens，2048 -> 1024 -> 2048，64 个 logical individual
-# experts，Top-2。64 个 logical expert 共享 4 份 physical weight backing；
+# 当前模型：32 tokens，2048 -> 1024 -> 2048，8 个 logical individual
+# experts，Top-2。8 个 logical expert 共享 4 份 physical weight backing；
 # scheduler/CAM 始终保留 logical expert ID，只有权重 DMA 地址做 backing 映射。
 
 {
@@ -41,7 +41,7 @@
     // 每个 Mode1/VC block 都覆盖 128 columns；block 数由模型尺寸自动推导。
     // chunk 必须是 16 columns 的整数倍，以保留 common-16 panel ABI。
     weight_chunk_cols: 128
-    num_indiv_experts: 64
+    num_indiv_experts: 8
     // FPGA performance workload 只存储 4 份实际 individual expert 权重。
     // logical eid e 使用 backing eid (e % 4)，但不同 logical eid 仍由
     // scheduler/CAM 视为不同 expert，因此仍会重新搬运完整权重。

@@ -133,6 +133,19 @@ class TimingAnalyzerTest(unittest.TestCase):
         self.assertEqual({(2, 0), (3, 0)}, set(slots))
         self.assertEqual(1, min(record["start_offset"] for record in slots[(2, 0)]))
 
+    def test_fused_s3_s4pf_record_satisfies_both_stage_requirements(self) -> None:
+        records = make_cluster(2, 500, 80, 100)
+        records = [record for record in records if record["stage"] not in (6, 8)]
+        records.append(make_record(200, 2, 15, 520, 12))
+        records += make_cluster(3, 900, 70, 300)
+
+        scopes, errors = timing.find_scopes(records)
+        errors += timing.add_scope_offsets(records, scopes)
+        slots = timing.active_slots(records, scopes)
+        errors += timing.validate_slots(slots)
+
+        self.assertEqual([], errors)
+
     def test_valid_report_does_not_infer_gap_or_idle(self) -> None:
         records = make_cluster(2, 100, 80, 100)
         records += make_cluster(3, 5000, 70, 200)

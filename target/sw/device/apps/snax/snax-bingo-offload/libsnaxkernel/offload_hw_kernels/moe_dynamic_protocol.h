@@ -15,6 +15,8 @@
  *   bits [12:11]: dma_s3
  *   bit  13:      runtime_cluster_idx  (0=C2, 1=C3)
  *   bits [19:14]: slot_id           (0-63)
+ *   bit  20:      s2pf_early        (lead=2 from S1 compute tail)
+ *   bit  21:      s2pf_runtime_release (runtime DFG performs device-side release)
  * ──────────────────────────────────────────────────────────────────────────── */
 #define MOE_DYN_CTRL_ACTIVE(c)   ((c) & 1u)
 #define MOE_DYN_CTRL_SKIP_S1(c)  (((c) >> 1u) & 1u)
@@ -27,6 +29,10 @@
 #define MOE_DYN_CTRL_DMA_S3(c)   (((c) >> 11u) & 3u)
 #define MOE_DYN_CTRL_CLUSTER(c)  (((c) >> 13u) & 1u)
 #define MOE_DYN_CTRL_SLOT_ID(c)  (((c) >> 14u) & 63u) /* bits [19:14]: 6-bit slot_id (0..63) */
+#define MOE_DYN_CTRL_S2PF_EARLY(c) \
+    (((c) >> BINGO_MOE_DYN_CTRL_S2PF_EARLY_BIT) & 1u)
+#define MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE(c) \
+    (((c) >> BINGO_MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE_BIT) & 1u)
 /* ── dma_slot_vd field extractors (3 bits per slot: valid | dma[1:0]) ───────
  * For slot i: bit[i*3] = valid, bits[i*3+2:i*3+1] = dma binding
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -150,18 +156,10 @@ static inline void __moe_prepare_s1_xdma_shape(
         st->indiv_B_block_stride, MOE_XDMA_PREPARED_S1);
 }
 
-static inline void __moe_prepare_s2pf_xdma_shape(
-    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk)
-{
-    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
-    __moe_prepare_pair_xdma_shape(
-        blk, s2->binding, s2->block_bytes,
-        MOE_XDMA_PREPARED_S2PF);
-}
-
-static inline void __moe_prepare_s4pf_xdma_phase_shape(
+static inline void __moe_prepare_phase_xdma_shape(
     const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
-    uint32_t block_bytes, uint32_t block_count, uint32_t phase)
+    uint32_t block_bytes, uint32_t block_count, uint32_t phase,
+    uint32_t prepared_stage)
 {
     uint32_t rows = block_bytes / MOE_BANK_WEIGHT_ROW_BYTES;
     uint32_t phase_blocks = __moe_s4_blocks_in_phase(block_count, phase);
@@ -209,6 +207,25 @@ static inline void __moe_prepare_s4pf_xdma_phase_shape(
     BINGO_TRACE_MARKER(BINGO_TRACE_DEV_MOE_DMA_XDMA_CFG_END);
     __moe_pipeline_publish(
         &__moe_s1_dma_ctrl(blk)->xdma_prepared_stage,
+        prepared_stage);
+}
+
+static inline void __moe_prepare_s2pf_xdma_phase_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    uint32_t phase)
+{
+    __moe_s2_prefetch_ctrl_t *s2 = __moe_s2_prefetch_ctrl(blk);
+    __moe_prepare_phase_xdma_shape(
+        blk, s2->block_bytes, s2->block_count, phase,
+        MOE_XDMA_PREPARED_S2PF);
+}
+
+static inline void __moe_prepare_s4pf_xdma_phase_shape(
+    const __snax_bingo_kernel_moe_dynamic_expert_block_args_t *blk,
+    uint32_t block_bytes, uint32_t block_count, uint32_t phase)
+{
+    __moe_prepare_phase_xdma_shape(
+        blk, block_bytes, block_count, phase,
         MOE_XDMA_PREPARED_S4PF);
 }
 

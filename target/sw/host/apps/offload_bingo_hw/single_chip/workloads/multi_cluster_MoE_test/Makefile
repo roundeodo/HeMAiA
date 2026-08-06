@@ -14,9 +14,15 @@ INCL_DEVICE_BINARY ?= 1
 DATA_CFG ?= $(MK_DIR)/params.hjson
 DATA_H = $(MK_DIR)/multi_cluster_MoE_test_data.h
 OFFLOAD_H = $(MK_DIR)/offload_bingo_hw.h
-# Choices: baseline, s2pf_both, static_desc, dynamic_desc, high_to_low, low_to_high,
-# ends_inward, c_tail_smoke,
-# s1_stage_smoke.
+# Choices: baseline, s2pf_both, static_desc, dynamic_desc, dynamic_two_ended,
+# full_scheduler, m70_three_hot_static_desc, m70_three_hot_dynamic_desc,
+# m70_three_hot_dynamic_two_ended, m70_three_hot_full_scheduler,
+# m92_parameter_order_static_desc, m92_parameter_order_dynamic_desc,
+# m92_parameter_order_dynamic_two_ended, m92_parameter_order_full_scheduler,
+# m60_high_skew_static_desc, m60_high_skew_dynamic_desc,
+# m60_high_skew_dynamic_two_ended, m60_high_skew_full_scheduler,
+# m70_three_hot_dynamic_desc_skip_elided,
+# high_to_low, low_to_high, ends_inward, c_tail_smoke, s1_stage_smoke.
 MOE_TEST_SCHEDULE ?= baseline
 SCHEDULE_STAMP = $(MK_DIR)/.schedule-$(MOE_TEST_SCHEDULE)
 MOE_DYNAMIC_SLOT_DFG_PY = $(MK_DIR)/../moe_dynamic_slot_dfg.py

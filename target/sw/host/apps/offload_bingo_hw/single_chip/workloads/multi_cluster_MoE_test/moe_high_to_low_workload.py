@@ -9,6 +9,7 @@ from bingo_mem_handle import BingoMemAlloc, BingoMemSymbol
 from bingo_node import BingoNode
 from moe_dynamic_slot_dfg import (
     OPTIMIZED_STAGE_KERNELS,
+    build_dynamic_expert_skip_s1_elided_slot_chain,
     build_dynamic_expert_slot_chain,
     dynamic_expert_gather_kernel,
 )
@@ -16,11 +17,27 @@ from moe_test_schedule import (
     C_TAIL_SMOKE_PROFILE,
     DMA_NONE,
     DYNAMIC_DESC_PROFILE,
+    DYNAMIC_TWO_ENDED_PROFILE,
     ENDS_INWARD_PROFILE,
+    FULL_SCHEDULER_PROFILE,
     HIGH_TO_LOW_DMA_SERIAL_EIDS,
     HIGH_TO_LOW_PROFILE,
     LOW_TO_HIGH_PROFILE,
+    M70_THREE_HOT_STATIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+    M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+    M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+    M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+    M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+    M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+    M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
     S1_STAGE_SMOKE_PROFILE,
+    S2PF_EARLY_CTRL_BIT,
     SHAPE_C,
     SHAPE_M,
     STATIC_DESC_PROFILE,
@@ -28,7 +45,21 @@ from moe_test_schedule import (
     audit_high_to_low_schedule,
     audit_ends_inward_schedule,
     audit_dynamic_desc_schedule,
+    audit_dynamic_two_ended_schedule,
+    audit_full_scheduler_schedule,
     audit_low_to_high_schedule,
+    audit_m70_three_hot_static_desc_schedule,
+    audit_m70_three_hot_dynamic_desc_schedule,
+    audit_m70_three_hot_dynamic_two_ended_schedule,
+    audit_m70_three_hot_full_scheduler_schedule,
+    audit_m60_high_skew_static_desc_schedule,
+    audit_m60_high_skew_dynamic_desc_schedule,
+    audit_m60_high_skew_dynamic_two_ended_schedule,
+    audit_m60_high_skew_full_scheduler_schedule,
+    audit_m92_parameter_order_dynamic_desc_schedule,
+    audit_m92_parameter_order_dynamic_two_ended_schedule,
+    audit_m92_parameter_order_full_scheduler_schedule,
+    audit_m92_parameter_order_static_desc_schedule,
     audit_static_desc_schedule,
     cross_cluster_dma_release_edges,
 )
@@ -44,6 +75,45 @@ STATIC_BYTES = 192
 PIPELINE_CTRL_SLOT_BYTES = 1024
 PIPELINE_CTRL_BANK_OFFSET = 448
 
+DMA_RELEASE_EDGE_PROFILES = frozenset(
+    (
+        ENDS_INWARD_PROFILE,
+        DYNAMIC_DESC_PROFILE,
+        DYNAMIC_TWO_ENDED_PROFILE,
+        FULL_SCHEDULER_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+        M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+        M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+    )
+)
+
+_DMA_RELEASE_STAGE_KEYS = {
+    "S1": "s1_load",
+    "S2PF": "s2_prefetch",
+    "S3": "s3_load",
+    "S4PF": "s4_prepare",
+}
+
+
+def _add_dma_release_edges(dfg, slot_chains, dma_release_edges) -> None:
+    for previous, current in dma_release_edges:
+        previous_chain = slot_chains[(previous[0], previous[1])]
+        current_chain = slot_chains[(current[0], current[1])]
+        previous_node = previous_chain[_DMA_RELEASE_STAGE_KEYS[previous[3]]]
+        current_node = current_chain[_DMA_RELEASE_STAGE_KEYS[current[3]]]
+        if isinstance(previous_node, list):
+            previous_node = previous_node[-1]
+        if isinstance(current_node, list):
+            current_node = current_node[0]
+        dfg.bingo_add_edge(previous_node, current_node)
+
 
 def _setup_name(schedule_profile: str) -> str:
     if schedule_profile == S1_STAGE_SMOKE_PROFILE:
@@ -58,6 +128,36 @@ def _setup_name(schedule_profile: str) -> str:
         return "SETUP_STATIC_DESC"
     if schedule_profile == DYNAMIC_DESC_PROFILE:
         return "SETUP_DYNAMIC_DESC"
+    if schedule_profile == DYNAMIC_TWO_ENDED_PROFILE:
+        return "SETUP_DYNAMIC_TWO_ENDED"
+    if schedule_profile == FULL_SCHEDULER_PROFILE:
+        return "SETUP_FULL_SCHEDULER"
+    if schedule_profile == M70_THREE_HOT_STATIC_DESC_PROFILE:
+        return "SETUP_M70_THREE_HOT_STATIC_DESC"
+    if schedule_profile == M70_THREE_HOT_DYNAMIC_DESC_PROFILE:
+        return "SETUP_M70_THREE_HOT_DYNAMIC_DESC"
+    if schedule_profile == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE:
+        return "SETUP_M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED"
+    if schedule_profile == M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE:
+        return "SETUP_M70_THREE_HOT_DYNAMIC_TWO_ENDED"
+    if schedule_profile == M70_THREE_HOT_FULL_SCHEDULER_PROFILE:
+        return "SETUP_M70_THREE_HOT_FULL_SCHEDULER"
+    if schedule_profile == M92_PARAMETER_ORDER_STATIC_DESC_PROFILE:
+        return "SETUP_M92_PARAMETER_ORDER_STATIC_DESC"
+    if schedule_profile == M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE:
+        return "SETUP_M92_PARAMETER_ORDER_DYNAMIC_DESC"
+    if schedule_profile == M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE:
+        return "SETUP_M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED"
+    if schedule_profile == M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE:
+        return "SETUP_M92_PARAMETER_ORDER_FULL_SCHEDULER"
+    if schedule_profile == M60_HIGH_SKEW_STATIC_DESC_PROFILE:
+        return "SETUP_M60_HIGH_SKEW_STATIC_DESC"
+    if schedule_profile == M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE:
+        return "SETUP_M60_HIGH_SKEW_DYNAMIC_DESC"
+    if schedule_profile == M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE:
+        return "SETUP_M60_HIGH_SKEW_DYNAMIC_TWO_ENDED"
+    if schedule_profile == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
+        return "SETUP_M60_HIGH_SKEW_FULL_SCHEDULER"
     return "SETUP_HIGH_TO_LOW_E3_S3_STOREDBG"
 
 
@@ -70,6 +170,36 @@ def _schedule_tag(schedule_profile: str) -> str:
         return "STATIC_DESC"
     if schedule_profile == DYNAMIC_DESC_PROFILE:
         return "DYNAMIC_DESC"
+    if schedule_profile == DYNAMIC_TWO_ENDED_PROFILE:
+        return "DYNAMIC_TWO_ENDED"
+    if schedule_profile == FULL_SCHEDULER_PROFILE:
+        return "FULL_SCHEDULER"
+    if schedule_profile == M70_THREE_HOT_STATIC_DESC_PROFILE:
+        return "M70_THREE_HOT_STATIC_DESC"
+    if schedule_profile == M70_THREE_HOT_DYNAMIC_DESC_PROFILE:
+        return "M70_THREE_HOT_DYNAMIC_DESC"
+    if schedule_profile == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE:
+        return "M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED"
+    if schedule_profile == M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE:
+        return "M70_THREE_HOT_DYNAMIC_TWO_ENDED"
+    if schedule_profile == M70_THREE_HOT_FULL_SCHEDULER_PROFILE:
+        return "M70_THREE_HOT_FULL_SCHEDULER"
+    if schedule_profile == M92_PARAMETER_ORDER_STATIC_DESC_PROFILE:
+        return "M92_PARAMETER_ORDER_STATIC_DESC"
+    if schedule_profile == M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE:
+        return "M92_PARAMETER_ORDER_DYNAMIC_DESC"
+    if schedule_profile == M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE:
+        return "M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED"
+    if schedule_profile == M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE:
+        return "M92_PARAMETER_ORDER_FULL_SCHEDULER"
+    if schedule_profile == M60_HIGH_SKEW_STATIC_DESC_PROFILE:
+        return "M60_HIGH_SKEW_STATIC_DESC"
+    if schedule_profile == M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE:
+        return "M60_HIGH_SKEW_DYNAMIC_DESC"
+    if schedule_profile == M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE:
+        return "M60_HIGH_SKEW_DYNAMIC_TWO_ENDED"
+    if schedule_profile == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
+        return "M60_HIGH_SKEW_FULL_SCHEDULER"
     return "HIGH_TO_LOW"
 
 
@@ -96,6 +226,7 @@ def _pack_ctrl(slot: SlotSpec) -> int:
         | (slot.s3_dma << 11)
         | (slot.cluster_index << 13)
         | (slot.local_slot << 14)
+        | ((slot.s2pf_s1_overlap_steps != 0) << S2PF_EARLY_CTRL_BIT)
     )
 
 
@@ -459,6 +590,38 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
         audit_static_desc_schedule(queues)
     elif p["schedule_profile"] == DYNAMIC_DESC_PROFILE:
         audit_dynamic_desc_schedule(queues)
+    elif p["schedule_profile"] == DYNAMIC_TWO_ENDED_PROFILE:
+        audit_dynamic_two_ended_schedule(queues)
+    elif p["schedule_profile"] == FULL_SCHEDULER_PROFILE:
+        audit_full_scheduler_schedule(queues)
+    elif p["schedule_profile"] == M70_THREE_HOT_STATIC_DESC_PROFILE:
+        audit_m70_three_hot_static_desc_schedule(queues)
+    elif p["schedule_profile"] in (
+        M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+        M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+    ):
+        audit_m70_three_hot_dynamic_desc_schedule(queues)
+    elif p["schedule_profile"] == M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE:
+        audit_m70_three_hot_dynamic_two_ended_schedule(queues)
+    elif p["schedule_profile"] == M70_THREE_HOT_FULL_SCHEDULER_PROFILE:
+        audit_m70_three_hot_full_scheduler_schedule(queues)
+    elif p["schedule_profile"] == M92_PARAMETER_ORDER_STATIC_DESC_PROFILE:
+        audit_m92_parameter_order_static_desc_schedule(queues)
+    elif p["schedule_profile"] == M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE:
+        audit_m92_parameter_order_dynamic_desc_schedule(queues)
+    elif p["schedule_profile"] == M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE:
+        audit_m92_parameter_order_dynamic_two_ended_schedule(queues)
+    elif p["schedule_profile"] == M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE:
+        audit_m92_parameter_order_full_scheduler_schedule(queues)
+    elif p["schedule_profile"] == M60_HIGH_SKEW_STATIC_DESC_PROFILE:
+        audit_m60_high_skew_static_desc_schedule(queues)
+    elif p["schedule_profile"] == M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE:
+        audit_m60_high_skew_dynamic_desc_schedule(queues)
+    elif p["schedule_profile"] == M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE:
+        audit_m60_high_skew_dynamic_two_ended_schedule(queues)
+    elif p["schedule_profile"] == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
+        audit_m60_high_skew_full_scheduler_schedule(queues)
+    dma_release_edges = cross_cluster_dma_release_edges(queues)
     tag = _schedule_tag(p["schedule_profile"])
     setup = _add_node(
         dfg,
@@ -564,7 +727,22 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
                     block,
                 )
 
-            chain = build_dynamic_expert_slot_chain(
+            skip_s1_elided = (
+                p["schedule_profile"]
+                == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE
+                and slot.skip_s1
+            )
+            chain_builder = (
+                build_dynamic_expert_skip_s1_elided_slot_chain
+                if skip_s1_elided
+                else build_dynamic_expert_slot_chain
+            )
+            chain_options = (
+                {}
+                if skip_s1_elided
+                else {"implementation": slot_implementation}
+            )
+            chain = chain_builder(
                 add_node=lambda core, kernel, args, label, cluster=cluster: _add_node(
                     dfg, cluster, core, kernel, args, label
                 ),
@@ -578,11 +756,18 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
                 s3_block_count=p["s3_block_count"],
                 dma_core_id=DMA_CORE,
                 gemm_core_id=GEMM_CORE,
-                implementation=slot_implementation,
+                emit_s2_prefetch_task=(
+                    slot.s2_prefetch_dma != DMA_NONE
+                    and slot.s2pf_s1_overlap_steps == 0
+                ),
+                s2pf_starts_after_s1_dma=(
+                    slot.s2pf_starts_after_s1_dma
+                ),
                 label_prefix=(
                     f"{prefix.upper()}_{tag}_SLOT{slot.local_slot}_"
                     f"E{slot.expert_id}_T{slot.ntokens}"
                 ),
+                **chain_options,
             )
             slot_chains[(prefix, slot.local_slot)] = chain
             slot_chains_by_eid.setdefault(slot.expert_id, chain)
@@ -624,23 +809,8 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
             current_s1_load = current_s1_load[0]
         dfg.bingo_add_edge(previous_s3_load, current_s1_load)
 
-    if p["schedule_profile"] in (ENDS_INWARD_PROFILE, DYNAMIC_DESC_PROFILE):
-        stage_keys = {
-            "S1": "s1_load",
-            "S2PF": "s2_prefetch",
-            "S3": "s3_load",
-            "S4PF": "s4_prepare",
-        }
-        for previous, current in cross_cluster_dma_release_edges(queues):
-            previous_chain = slot_chains[(previous[0], previous[1])]
-            current_chain = slot_chains[(current[0], current[1])]
-            previous_node = previous_chain[stage_keys[previous[3]]]
-            current_node = current_chain[stage_keys[current[3]]]
-            if isinstance(previous_node, list):
-                previous_node = previous_node[-1]
-            if isinstance(current_node, list):
-                current_node = current_node[0]
-            dfg.bingo_add_edge(previous_node, current_node)
+    if p["schedule_profile"] in DMA_RELEASE_EDGE_PROFILES:
+        _add_dma_release_edges(dfg, slot_chains, dma_release_edges)
 
     if p["schedule_profile"] == LOW_TO_HIGH_PROFILE:
         # The final E0 action is one SPLIT decision. Both slices wait until
