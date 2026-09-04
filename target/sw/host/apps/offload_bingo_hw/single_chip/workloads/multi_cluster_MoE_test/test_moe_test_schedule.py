@@ -1,12 +1,173 @@
 #!/usr/bin/env python3
 """Focused schedule-contract tests for the FPGA showcase profiles."""
 
+import pathlib
+import sys
 import unittest
 
 import moe_test_schedule as schedule
 
 
 class MoeTestScheduleTest(unittest.TestCase):
+    def test_m32_distribution_is_the_production_routing_case(self) -> None:
+        case = schedule.get_routing_case(32, schedule.EXPERT_COUNT)
+        self.assertEqual("m32_moe_style", case.name)
+        self.assertEqual(case.expected_counts, schedule.M32_SCALED_SKEW_COUNTS)
+        self.assertEqual(case.token_major_top2, schedule.M32_SCALED_SKEW_TOP2)
+        self.assertEqual(64, sum(schedule.M32_SCALED_SKEW_COUNTS))
+        self.assertEqual(29, sum(c > 0 for c in schedule.M32_SCALED_SKEW_COUNTS))
+        self.assertEqual(
+            (8, 5, 4, 3) + (2,) * 14 + (1,) * 10 + (0,) * 35 + (6,),
+            schedule.M32_SCALED_SKEW_COUNTS,
+        )
+
+    def test_m32_comparison_contains_four_audited_runs(self) -> None:
+        schedules = schedule.build_m32_comparison_schedules()
+        self.assertEqual(schedule.M32_COMPARISON_RUN_PROFILES, tuple(schedules))
+        expected = {
+            schedule.M32_FIXED_A_PROFILE: 180,
+            schedule.M32_FIXED_B_PROFILE: 99,
+            schedule.M32_FIXED_C_PROFILE: 108,
+            schedule.M32_DISTILLED_PROFILE: 87,
+        }
+        for profile, queues in schedules.items():
+            with self.subTest(profile=profile):
+                audit = schedule.audit_m32_comparison_schedule(queues, profile)
+                self.assertEqual(expected[profile], audit["makespan_ticks"])
+                self.assertEqual(64, audit["routed_tokens"])
+                self.assertEqual(29, audit["active_experts"])
+
+    def test_m32_comparison_runs_are_independently_selectable(self) -> None:
+        schedules = schedule.build_m32_comparison_schedules()
+        self.assertNotIn(schedule.M32_COMPARISON_PROFILE, schedule.SCHEDULE_PROFILES)
+        for profile in schedule.M32_COMPARISON_RUN_PROFILES:
+            with self.subTest(profile=profile):
+                self.assertIn(profile, schedule.SCHEDULE_PROFILES)
+                self.assertEqual(
+                    schedules[profile], schedule.build_schedule_profile(profile)
+                )
+
+    def test_m32_distilled_stream_matches_normative_model(self) -> None:
+        model_dir = pathlib.Path(__file__).resolve().parents[9] / "schedule_algorithm"
+        if not model_dir.is_dir():
+            self.skipTest("normative schedule_algorithm directory is unavailable")
+        sys.path.insert(0, str(model_dir))
+        try:
+            from scheduler_rtl_distilled_policy import schedule as model_schedule
+            from scheduler_rtl_distilled_types import TICK_CC
+        finally:
+            sys.path.pop(0)
+
+        distribution = {
+            eid: ntokens
+            for eid, ntokens in enumerate(schedule.M32_SCALED_SKEW_COUNTS)
+            if ntokens
+        }
+        result = model_schedule(
+            distribution,
+            initial_cache_c2=-1,
+            initial_cache_c3=-1,
+        )
+        shape_id = {"A": schedule.SHAPE_A, "B": schedule.SHAPE_B, "C": schedule.SHAPE_C}
+        model_queues = {"c0": [], "c1": []}
+        for step in result.steps:
+            self.assertFalse(step.s4pf_actions)
+            action = step.action
+            for cluster_name, prefix in (("c0", "c2"), ("c1", "c3")):
+                expert_id = getattr(action, f"{prefix}_eid")
+                if expert_id < 0:
+                    continue
+                model_queues[cluster_name].append(
+                    (
+                        expert_id,
+                        getattr(action, f"{prefix}_ntok"),
+                        getattr(action, f"{prefix}_start") // TICK_CC,
+                        shape_id[getattr(action, f"{prefix}_shape_s1").name[0]],
+                        shape_id[getattr(action, f"{prefix}_shape_s3").name[0]],
+                        int(getattr(action, f"{prefix}_dma_s1")),
+                        int(getattr(action, f"{prefix}_dma_s3")),
+                        int(getattr(action, f"{prefix}_s2pf_dma")),
+                        bool(getattr(action, f"{prefix}_s1_cached")),
+                        bool(getattr(action, f"{prefix}_s3_cached")),
+                    )
+                )
+
+        frozen = schedule.build_m32_distilled_schedule()
+        for cluster_name in ("c0", "c1"):
+            frozen_signature = [
+                (
+                    slot.expert_id,
+                    slot.ntokens,
+                    slot.reference_start_tick,
+                    slot.s1_shape,
+                    slot.s3_shape,
+                    slot.s1_dma,
+                    slot.s3_dma,
+                    slot.s2_prefetch_dma,
+                    slot.skip_s1,
+                    slot.skip_s3,
+                )
+                for slot in frozen[cluster_name]
+            ]
+            self.assertEqual(model_queues[cluster_name], frozen_signature)
+        self.assertEqual(
+            schedule.M32_DISTILLED_EXPECTED_MAKESPAN_TICKS,
+            result.makespan_cc // TICK_CC,
+        )
+
+    def test_m8_distribution_preserves_production_top2_order(self) -> None:
+        self.assertEqual(
+            (
+                (0, 63),
+                (0, 63),
+                (0, 63),
+                (0, 63),
+                (0, 1),
+                (0, 1),
+                (63, 1),
+                (63, 1),
+            ),
+            schedule.M8_4_2_2_TOP2,
+        )
+        self.assertEqual(
+            (6, 4) + (0,) * 61 + (6,),
+            schedule.M8_4_2_2_COUNTS,
+        )
+
+    def test_m8_comparison_contains_four_audited_runs(self) -> None:
+        schedules = schedule.build_m8_comparison_schedules()
+        self.assertEqual(
+            schedule.M8_COMPARISON_RUN_PROFILES,
+            tuple(schedules),
+        )
+        expected = {
+            schedule.M8_FIXED_A_PROFILE: 24,
+            schedule.M8_FIXED_B_PROFILE: 15,
+            schedule.M8_FIXED_C_PROFILE: 21,
+            schedule.M8_DISTILLED_PROFILE: 15,
+        }
+        for profile, queues in schedules.items():
+            with self.subTest(profile=profile):
+                audit = schedule.audit_m8_comparison_schedule(queues, profile)
+                self.assertEqual(expected[profile], audit["makespan_ticks"])
+                self.assertEqual(16, audit["routed_tokens"])
+
+    def test_m8_distilled_stream_matches_normative_model_result(self) -> None:
+        queues = schedule.build_m8_distilled_schedule()
+        self.assertEqual((0, 1), tuple(s.expert_id for s in queues["c0"]))
+        self.assertEqual((63,), tuple(s.expert_id for s in queues["c1"]))
+        self.assertEqual(
+            (
+                (schedule.SHAPE_B, schedule.SHAPE_B),
+                (schedule.SHAPE_C, schedule.SHAPE_C),
+            ),
+            tuple((s.s1_shape, s.s3_shape) for s in queues["c0"]),
+        )
+        self.assertEqual(
+            (("c1", 0, 63, "S3"), ("c0", 1, 1, "S1")),
+            schedule.cross_cluster_dma_release_edges(queues)[0],
+        )
+
     def test_s2pf_early_mode_requires_positive_s1_slack(self) -> None:
         cases = (
             (schedule.SHAPE_A, schedule.DMA_IDMA, 2),
@@ -72,9 +233,7 @@ class MoeTestScheduleTest(unittest.TestCase):
         queues = schedule.build_static_desc_schedule()
         for cluster_name, slots in queues.items():
             expected_dma = (
-                schedule.DMA_IDMA
-                if cluster_name == "c0"
-                else schedule.DMA_XDMA
+                schedule.DMA_IDMA if cluster_name == "c0" else schedule.DMA_XDMA
             )
             for slot in slots:
                 self.assertEqual(schedule.SHAPE_B, slot.s1_shape)
@@ -264,7 +423,9 @@ class MoeTestScheduleTest(unittest.TestCase):
             {1, 2, 3, 4, 5, 6},
             {eid for eid, slot in slots.items() if slot.s2_prefetch_dma},
         )
-        self.assertTrue(all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values()))
+        self.assertTrue(
+            all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
+        )
         self.assertTrue(all(not slot.skip_s1 for slot in slots.values()))
 
     def test_m70_three_hot_dynamic_two_ended_structural_bound(self) -> None:
@@ -315,7 +476,8 @@ class MoeTestScheduleTest(unittest.TestCase):
                 6: schedule.DMA_XDMA,
             },
             {
-                eid: slot.s2_prefetch_dma for eid, slot in slots.items()
+                eid: slot.s2_prefetch_dma
+                for eid, slot in slots.items()
                 if slot.s2_prefetch_dma != schedule.DMA_NONE
             },
         )
@@ -352,8 +514,31 @@ class MoeTestScheduleTest(unittest.TestCase):
             tuple(slot.expert_id for slot in queues["c0"]),
         )
         self.assertEqual(
-            (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22,
-             24, 26, 28, 30, 32, 34, 36),
+            (
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                12,
+                14,
+                16,
+                18,
+                20,
+                22,
+                24,
+                26,
+                28,
+                30,
+                32,
+                34,
+                36,
+            ),
             tuple(slot.expert_id for slot in queues["c1"]),
         )
 
@@ -437,9 +622,7 @@ class MoeTestScheduleTest(unittest.TestCase):
         )
         for cluster_name, slots in queues.items():
             expected_dma = (
-                schedule.DMA_IDMA
-                if cluster_name == "c0"
-                else schedule.DMA_XDMA
+                schedule.DMA_IDMA if cluster_name == "c0" else schedule.DMA_XDMA
             )
             for slot in slots:
                 self.assertEqual(schedule.SHAPE_B, slot.s1_shape)
@@ -501,9 +684,7 @@ class MoeTestScheduleTest(unittest.TestCase):
 
     def test_m60_high_skew_dynamic_desc_structural_bound(self) -> None:
         audit = schedule.audit_m60_high_skew_dynamic_desc_schedule(
-            schedule.build_schedule_profile(
-                schedule.M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE
-            )
+            schedule.build_schedule_profile(schedule.M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE)
         )
 
         self.assertEqual(
@@ -614,9 +795,7 @@ class MoeTestScheduleTest(unittest.TestCase):
                 if slot.s2_prefetch_dma != schedule.DMA_NONE
             },
         )
-        self.assertTrue(
-            all(slots[eid].s2pf_s1_overlap_steps == 2 for eid in (0, 1, 2))
-        )
+        self.assertTrue(all(slots[eid].s2pf_s1_overlap_steps == 2 for eid in (0, 1, 2)))
         self.assertTrue(
             all(slot.s4_prefetch_dma == schedule.DMA_NONE for slot in slots.values())
         )
@@ -659,8 +838,36 @@ class MoeTestScheduleTest(unittest.TestCase):
             tuple(slot.expert_id for slot in queues["c0"]),
         )
         self.assertEqual(
-            (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-             15, 16, 17, 18, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37),
+            (
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                21,
+                23,
+                25,
+                27,
+                29,
+                31,
+                33,
+                35,
+                37,
+            ),
             tuple(slot.expert_id for slot in queues["c1"]),
         )
 
@@ -700,9 +907,7 @@ class MoeTestScheduleTest(unittest.TestCase):
         self,
     ) -> None:
         queues = schedule.build_m92_parameter_order_dynamic_two_ended_schedule()
-        audit = schedule.audit_m92_parameter_order_dynamic_two_ended_schedule(
-            queues
-        )
+        audit = schedule.audit_m92_parameter_order_dynamic_two_ended_schedule(queues)
 
         self.assertEqual({"c0": 114, "c1": 172}, audit["queue_ticks"])
         self.assertEqual({"c0": 1, "c1": 37}, audit["cluster_local_slots"])
@@ -729,7 +934,8 @@ class MoeTestScheduleTest(unittest.TestCase):
         self.assertEqual(
             {1},
             {
-                eid for eid, slot in slots.items()
+                eid
+                for eid, slot in slots.items()
                 if slot.s2_prefetch_dma != schedule.DMA_NONE
             },
         )
@@ -759,9 +965,7 @@ class MoeTestScheduleTest(unittest.TestCase):
         self,
     ) -> None:
         queues = schedule.build_m92_parameter_order_full_scheduler_schedule()
-        audit = schedule.audit_m92_parameter_order_full_scheduler_schedule(
-            queues
-        )
+        audit = schedule.audit_m92_parameter_order_full_scheduler_schedule(queues)
 
         self.assertEqual({"c0": 141, "c1": 144}, audit["queue_ticks"])
         self.assertEqual({"c0": 10, "c1": 28}, audit["cluster_local_slots"])
@@ -834,9 +1038,7 @@ class MoeTestScheduleTest(unittest.TestCase):
             if slot.s2pf_s1_overlap_steps != 0
         )
         self.assertEqual(20, len(early_s2pf))
-        self.assertTrue(
-            all(slot.s1_dma == slot.s2_prefetch_dma for slot in early_s2pf)
-        )
+        self.assertTrue(all(slot.s1_dma == slot.s2_prefetch_dma for slot in early_s2pf))
         self.assertTrue(
             all(
                 slot.s2pf_s1_overlap_steps == 2
@@ -933,15 +1135,11 @@ class MoeTestScheduleTest(unittest.TestCase):
             for slot in cluster_slots
         }
         early_s2pf = tuple(
-            slot
-            for slot in slots.values()
-            if slot.s2pf_s1_overlap_steps != 0
+            slot for slot in slots.values() if slot.s2pf_s1_overlap_steps != 0
         )
 
         self.assertEqual(19, len(early_s2pf))
-        self.assertTrue(
-            all(slot.s2pf_s1_overlap_steps == 2 for slot in early_s2pf)
-        )
+        self.assertTrue(all(slot.s2pf_s1_overlap_steps == 2 for slot in early_s2pf))
         self.assertEqual(
             (schedule.DMA_BOTH, 20),
             (slots[21].s4_prefetch_dma, slots[21].s4_prefetch_target_eid),
@@ -980,8 +1178,20 @@ class MoeTestScheduleTest(unittest.TestCase):
         )
         self.assertEqual(
             (
-                4, *range(42, 33, -1), 6, *range(33, 26, -1), 3,
-                *range(26, 21, -1), 7, 9, 11, 13, 15, 17, 19, 21,
+                4,
+                *range(42, 33, -1),
+                6,
+                *range(33, 26, -1),
+                3,
+                *range(26, 21, -1),
+                7,
+                9,
+                11,
+                13,
+                15,
+                17,
+                19,
+                21,
             ),
             tuple(slot.expert_id for slot in queues["c1"]),
         )
@@ -997,7 +1207,8 @@ class MoeTestScheduleTest(unittest.TestCase):
         self.assertEqual(
             {0, 1, 2},
             {
-                expert_id for expert_id, slot in slots.items()
+                expert_id
+                for expert_id, slot in slots.items()
                 if slot.s2_prefetch_dma != schedule.DMA_NONE
             },
         )

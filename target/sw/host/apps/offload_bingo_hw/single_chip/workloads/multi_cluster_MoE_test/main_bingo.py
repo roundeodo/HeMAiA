@@ -27,6 +27,9 @@ from moe_dynamic_slot_dfg import (  # noqa: E402
 )
 from moe_high_to_low_workload import (  # noqa: E402
     add_high_to_low_schedule,
+    add_m8_comparison_suite,
+    add_m32_comparison_run,
+    add_m32_comparison_suite,
     add_s1_stage_smoke_schedule,
     define_high_to_low_memory,
 )
@@ -42,6 +45,9 @@ from moe_test_schedule import (  # noqa: E402
     FULL_SCHEDULER_PROFILE,
     HIGH_TO_LOW_PROFILE,
     LOW_TO_HIGH_PROFILE,
+    M8_COMPARISON_PROFILE,
+    M32_COMPARISON_PROFILE,
+    M32_COMPARISON_RUN_PROFILES,
     M60_HIGH_SKEW_STATIC_DESC_PROFILE,
     M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
     M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
@@ -61,6 +67,8 @@ from moe_test_schedule import (  # noqa: E402
     SCHEDULE_PROFILES,
     STATIC_DESC_PROFILE,
     build_schedule_profile,
+    build_m8_comparison_schedules,
+    build_m32_comparison_schedules,
     format_schedule_manifest,
     s2pf_s1_overlap_steps,
     select_two_slot_s2pf_binding,
@@ -172,11 +180,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
         down_half_bytes = p["down_weight_bytes"] // 2
         down_b_n_stride = [p["down_K"] * (16 << shape) for shape in range(3)]
         down_a_m_stride = [
-            (
-                (p["down_K"] * 8)
-                // (p["base_mesh_col"] << shape)
-            )
-            * 64
+            ((p["down_K"] * 8) // (p["base_mesh_col"] << shape)) * 64
             for shape in range(3)
         ]
         down_d_m_stride = [
@@ -185,7 +189,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
         lines = [
             f"_Static_assert(BINGO_MOE_DYNAMIC_ARG_SLOT_BYTES == {self.SLOT_BYTES}u, "
             '"test and production dynamic slot ABI diverged");',
-            '_Static_assert(BINGO_MOE_STATIC_ARG_SLOT_BYTES == 192u, '
+            "_Static_assert(BINGO_MOE_STATIC_ARG_SLOT_BYTES == 192u, "
             '"test and production static slot ABI diverged");',
         ]
 
@@ -204,18 +208,12 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             s4_rows = p["base_mesh_row"] >> s4_shape
             s2_tokens = max(token_count - s1_rows, 0)
             s2_m_exec = (s2_tokens + s2_rows - 1) // s2_rows
-            s1_n = p["indiv_N_per_block"] // (
-                p["base_mesh_col"] << s1_shape
-            )
+            s1_n = p["indiv_N_per_block"] // (p["base_mesh_col"] << s1_shape)
             s2_n = (p["s1_block_count"] * p["indiv_N_per_block"]) // (
                 p["base_mesh_col"] << s2_shape
             )
-            s3_n = p["indiv_down_N_per_block"] // (
-                p["base_mesh_col"] << s3_shape
-            )
-            s4_n = (
-                p["s3_block_count"] * p["indiv_down_N_per_block"]
-            ) // (
+            s3_n = p["indiv_down_N_per_block"] // (p["base_mesh_col"] << s3_shape)
+            s4_n = (p["s3_block_count"] * p["indiv_down_N_per_block"]) // (
                 p["base_mesh_col"] << s4_shape
             )
             s1_dma = bench["s1_dma"]
@@ -232,25 +230,13 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             gate_l3 = self._addr(mh[f"{prefix}_gate_src"], handle_name_map)
             up_l3 = self._addr(mh[f"{prefix}_up_src"], handle_name_map)
             down_l3 = self._addr(mh[f"{prefix}_down_src"], handle_name_map)
-            output_l3 = self._addr(
-                mh[f"{prefix}_prod_output_l3"], handle_name_map
-            )
+            output_l3 = self._addr(mh[f"{prefix}_prod_output_l3"], handle_name_map)
             l1_a = self._addr(mh[f"{prefix}_a"], handle_name_map, as_64bit=False)
-            l1_gate = self._addr(
-                mh[f"{prefix}_gate"], handle_name_map, as_64bit=False
-            )
-            l1_up = self._addr(
-                mh[f"{prefix}_up"], handle_name_map, as_64bit=False
-            )
-            l1_down = self._addr(
-                mh[f"{prefix}_down"], handle_name_map, as_64bit=False
-            )
-            l1_d = self._addr(
-                mh[f"{prefix}_gate_out"], handle_name_map, as_64bit=False
-            )
-            l1_down_d = self._addr(
-                mh[f"{prefix}_out"], handle_name_map, as_64bit=False
-            )
+            l1_gate = self._addr(mh[f"{prefix}_gate"], handle_name_map, as_64bit=False)
+            l1_up = self._addr(mh[f"{prefix}_up"], handle_name_map, as_64bit=False)
+            l1_down = self._addr(mh[f"{prefix}_down"], handle_name_map, as_64bit=False)
+            l1_d = self._addr(mh[f"{prefix}_gate_out"], handle_name_map, as_64bit=False)
+            l1_down_d = self._addr(mh[f"{prefix}_out"], handle_name_map, as_64bit=False)
             l1_scratch = self._addr(
                 mh[f"{prefix}_gate_scratch"], handle_name_map, as_64bit=False
             )
@@ -287,12 +273,8 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 p["schedule_profile"], prefix, 0, bench["s2_prefetch_dma"]
             )
             s4_dma = bench["s4_prefetch_dma"]
-            s2_prefetch_vd = (
-                ((1 | (s2_dma << 1)) << (2 * 3)) if s2_dma else 0
-            )
-            s4_prefetch_vd = (
-                ((1 | (s4_dma << 1)) << (3 * 3)) if s4_dma else 0
-            )
+            s2_prefetch_vd = ((1 | (s2_dma << 1)) << (2 * 3)) if s2_dma else 0
+            s4_prefetch_vd = ((1 | (s4_dma << 1)) << (3 * 3)) if s4_dma else 0
             s4_token_start = (
                 s3_rows
                 if bench["s4_token_start"] == "after_s3"
@@ -302,19 +284,12 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
             s4_m_exec = (s4_tokens + s4_rows - 1) // s4_rows
             slot1_s2_token_start = 0 if slot1_skip_s1 else s1_rows
             slot1_s2_tokens = max(next_token_count - slot1_s2_token_start, 0)
-            slot1_s2_m_exec = (
-                slot1_s2_tokens + s2_rows - 1
-            ) // s2_rows
-            slot1_s4_m_exec = (
-                next_token_count + s4_rows - 1
-            ) // s4_rows
+            slot1_s2_m_exec = (slot1_s2_tokens + s2_rows - 1) // s2_rows
+            slot1_s4_m_exec = (next_token_count + s4_rows - 1) // s4_rows
             slot1_s2_dma = select_two_slot_s2pf_binding(
-                p["schedule_profile"], prefix, 1,
-                slot1_bench["s2_prefetch_dma"]
+                p["schedule_profile"], prefix, 1, slot1_bench["s2_prefetch_dma"]
             )
-            slot1_s2_prefetch_vd = (
-                (1 | (slot1_s2_dma << 1)) << (2 * 3)
-            )
+            slot1_s2_prefetch_vd = (1 | (slot1_s2_dma << 1)) << (2 * 3)
             slot0_overlap_steps = s2pf_s1_overlap_steps(
                 skip_s1=False,
                 s1_shape=s1_shape,
@@ -337,8 +312,10 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                 f"memset({static_name}, 0, sizeof(*{static_name}));",
                 f"memset({runtime_name}, 0, {self.HEADER_BYTES + 2 * self.SLOT_BYTES}u);",
                 *(
-                    [f"memset((void *)(uintptr_t){output_l3}, 0, "
-                     f"{p['prod_output_bytes']}u);"]
+                    [
+                        f"memset((void *)(uintptr_t){output_l3}, 0, "
+                        f"{p['prod_output_bytes']}u);"
+                    ]
                     if p["prod_clear_output"]
                     else []
                 ),
@@ -418,8 +395,7 @@ class ProductionMoeDualClusterSetupArgs(HostBingoKernelCheckResultArgs):
                     f"{l1_d} + {output_offset}u;",
                     f"{slot0_name}->s1_call[{block}].N = {s1_n}u;",
                     f"{slot0_name}->s1_call[{block}].array_shape = {s1_shape}u;",
-                    f"{slot1_name}->s1_call[{block}].valid = "
-                    f"{1 - slot1_skip_s1}u;",
+                    f"{slot1_name}->s1_call[{block}].valid = " f"{1 - slot1_skip_s1}u;",
                     f"{slot1_name}->s1_call[{block}].output_D0_addr = "
                     f"{l1_d} + {output_offset}u;",
                     f"{slot1_name}->s1_call[{block}].N = {s1_n}u;",
@@ -496,12 +472,8 @@ def define_production_memory(p):
         "prod_slot_token_refs": BingoMemSymbol("moe_test_prod_slot_token_refs"),
     }
     for prefix, cluster in PROD_CLUSTERS:
-        mh[f"{prefix}_slot0_golden"] = BingoMemSymbol(
-            f"moe_test_{prefix}_slot0_golden"
-        )
-        mh[f"{prefix}_slot1_golden"] = BingoMemSymbol(
-            f"moe_test_{prefix}_slot1_golden"
-        )
+        mh[f"{prefix}_slot0_golden"] = BingoMemSymbol(f"moe_test_{prefix}_slot0_golden")
+        mh[f"{prefix}_slot1_golden"] = BingoMemSymbol(f"moe_test_{prefix}_slot1_golden")
         mh[f"{prefix}_gate_src"] = BingoMemSymbol(f"moe_test_{prefix}_gate_B")
         mh[f"{prefix}_up_src"] = BingoMemSymbol(f"moe_test_{prefix}_up_B")
         mh[f"{prefix}_down_src"] = BingoMemSymbol(f"moe_test_{prefix}_down_B")
@@ -594,7 +566,6 @@ def add_copy(dfg, cluster, src, dst, size, node_name=""):
         SnaxBingoKernelIdma1dCopyArgs(src, dst, size),
         node_name,
     )
-
 
 
 def add_production_slot_handoff_test(dfg, p, mh):
@@ -739,7 +710,9 @@ def add_production_slot_handoff_test(dfg, p, mh):
 
         slot1_bench = SLOT1_CLUSTER_CONFIG[prefix]
         slot1_s2_dma = select_two_slot_s2pf_binding(
-            p["schedule_profile"], prefix, 1,
+            p["schedule_profile"],
+            prefix,
+            1,
             slot1_bench["s2_prefetch_dma"],
         )
         slot1_overlap_steps = s2pf_s1_overlap_steps(
@@ -828,6 +801,29 @@ def add_production_slot_handoff_test(dfg, p, mh):
 
 
 def create_dfg(p, mh):
+    print(f"MOE test DFG selected profile: {p['schedule_profile']}")
+    if p["schedule_profile"] in M32_COMPARISON_RUN_PROFILES:
+        forbidden = tuple(
+            f"{prefix}_slot{slot}_golden"
+            for prefix, _cluster in PROD_CLUSTERS
+            for slot in (0, 1)
+        )
+        present = tuple(key for key in forbidden if key in mh)
+        if present:
+            raise AssertionError(
+                "M32 per-expert profile received legacy two-slot memory: " f"{present}"
+            )
+        queues = build_schedule_profile(p["schedule_profile"])
+        missing = tuple(
+            f"{prefix}_e{slot.expert_id:02d}_golden"
+            for prefix, _cluster in PROD_CLUSTERS
+            for slot in queues[prefix]
+            if f"{prefix}_e{slot.expert_id:02d}_golden" not in mh
+        )
+        if missing:
+            raise AssertionError(
+                "M32 profile is missing per-expert golden symbols: " f"{missing}"
+            )
     dfg = BingoDFG(
         num_chiplets=1,
         num_clusters_per_chiplet=4,
@@ -835,7 +831,24 @@ def create_dfg(p, mh):
         is_host_as_acc=True,
         chiplet_ids=[0x00],
     )
-    if p["schedule_profile"] == S1_STAGE_SMOKE_PROFILE:
+    if p["schedule_profile"] == M8_COMPARISON_PROFILE:
+        schedules = build_m8_comparison_schedules()
+        print("M8 comparison suite: fixed A/A, fixed B/B, fixed C/C, distilled")
+        for run_profile, queues in schedules.items():
+            print(format_schedule_manifest(queues, run_profile))
+        add_m8_comparison_suite(dfg, p, mh, SLOT_IMPLEMENTATION)
+    elif p["schedule_profile"] == M32_COMPARISON_PROFILE:
+        schedules = build_m32_comparison_schedules()
+        print("M32 comparison suite: fixed A/A, fixed B/B, fixed C/C, distilled")
+        for run_profile, queues in schedules.items():
+            print(format_schedule_manifest(queues, run_profile))
+        add_m32_comparison_suite(dfg, p, mh, SLOT_IMPLEMENTATION)
+    elif p["schedule_profile"] in M32_COMPARISON_RUN_PROFILES:
+        queues = build_schedule_profile(p["schedule_profile"])
+        print("M32 standalone comparison run")
+        print(format_schedule_manifest(queues, p["schedule_profile"]))
+        add_m32_comparison_run(dfg, p, mh, queues, SLOT_IMPLEMENTATION)
+    elif p["schedule_profile"] == S1_STAGE_SMOKE_PROFILE:
         queues = build_schedule_profile(p["schedule_profile"])
         print("s1_stage_smoke schedule: C1/E23 -> C0/E24, S1-only 2-token C/C")
         add_s1_stage_smoke_schedule(dfg, p, mh, queues)
@@ -890,9 +903,7 @@ def create_dfg(p, mh):
             print("c_tail_smoke schedule: C1/E23 -> C0/E24, both 2-token C/C")
         add_high_to_low_schedule(dfg, p, mh, queues, SLOT_IMPLEMENTATION)
     else:
-        s2pf_mode = (
-            "BOTH" if p["schedule_profile"] == S2PF_BOTH_PROFILE else "single"
-        )
+        s2pf_mode = "BOTH" if p["schedule_profile"] == S2PF_BOTH_PROFILE else "single"
         print(
             "Execute concurrent C0/C1 slot0 and slot1 paths with fused slot "
             f"handoff; C0 slot0 S2PF={s2pf_mode}"
@@ -926,12 +937,30 @@ def main():
         M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
         M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
         M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
+        M8_COMPARISON_PROFILE,
+        M32_COMPARISON_PROFILE,
+        *M32_COMPARISON_RUN_PROFILES,
         C_TAIL_SMOKE_PROFILE,
         S1_STAGE_SMOKE_PROFILE,
     ):
-        memory = define_high_to_low_memory(
-            params, build_schedule_profile(params["schedule_profile"])
-        )
+        if params["schedule_profile"] in (
+            M8_COMPARISON_PROFILE,
+            M32_COMPARISON_PROFILE,
+        ):
+            comparison_schedules = (
+                build_m8_comparison_schedules()
+                if params["schedule_profile"] == M8_COMPARISON_PROFILE
+                else build_m32_comparison_schedules()
+            )
+            memory = define_high_to_low_memory(
+                params,
+                build_schedule_profile(params["schedule_profile"]),
+                comparison_schedules=comparison_schedules,
+            )
+        else:
+            memory = define_high_to_low_memory(
+                params, build_schedule_profile(params["schedule_profile"])
+            )
     else:
         memory = define_production_memory(params)
     dfg = create_dfg(params, memory)
@@ -943,10 +972,23 @@ def main():
             "multi_cluster_MoE_test_data.h",
             "../multi_cluster_MoE/moe_runtime_timing.h",
         ],
-        profile_kernel_prefix="__snax_bingo_kernel_moe_",
+        # The comparison suites need only their explicit begin/end markers.
+        # Profiling every MoE stage makes the M32 table contain 1617 entries
+        # even though level 1 can emit only eight useful records.
+        profile_kernel_prefix=(
+            "__snax_bingo_kernel_moe_dyn_opt_timing_marker"
+            if params["schedule_profile"]
+            in (
+                M8_COMPARISON_PROFILE,
+                M32_COMPARISON_PROFILE,
+                *M32_COMPARISON_RUN_PROFILES,
+            )
+            else "__snax_bingo_kernel_moe_"
+        ),
         profile_condition="MOE_RUNTIME_TIMING",
         profile_report_function="__host_bingo_moe_print_runtime_timing_v3",
     )
+
 
 if __name__ == "__main__":
     main()

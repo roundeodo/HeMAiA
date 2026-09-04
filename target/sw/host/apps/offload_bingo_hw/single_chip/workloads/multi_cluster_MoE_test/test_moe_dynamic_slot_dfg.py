@@ -1,27 +1,31 @@
 import sys
 import unittest
 from pathlib import Path
-
+from unittest.mock import patch
 
 WORKLOADS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKLOADS_DIR))
 SW_DIR = next(path for path in Path(__file__).resolve().parents if path.name == "sw")
 sys.path.insert(0, str(SW_DIR / "host/runtime/libbingo/mini_compiler"))
 KERNEL_DIR = (
-    SW_DIR
-    / "device/apps/snax/snax-bingo-offload/libsnaxkernel/offload_hw_kernels"
+    SW_DIR / "device/apps/snax/snax-bingo-offload/libsnaxkernel/offload_hw_kernels"
 )
 
 from moe_dynamic_slot_dfg import (  # noqa: E402
     build_dynamic_expert_skip_s1_elided_slot_chain,
     build_dynamic_expert_slot_chain,
 )
+import moe_high_to_low_workload as high_to_low  # noqa: E402
 from moe_high_to_low_workload import (  # noqa: E402
     DMA_RELEASE_EDGE_PROFILES,
     _add_dma_release_edges,
 )
 from moe_test_schedule import (  # noqa: E402
     DMA_NONE,
+    M32_DISTILLED_PROFILE,
+    M32_FIXED_A_PROFILE,
+    M32_FIXED_B_PROFILE,
+    M32_FIXED_C_PROFILE,
     M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
     M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
     M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
@@ -30,6 +34,8 @@ from moe_test_schedule import (  # noqa: E402
     M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
     M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
     M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+    SHAPE_A,
+    build_m32_fixed_shape_schedule,
     build_m70_three_hot_dynamic_desc_schedule,
     build_m60_high_skew_dynamic_desc_schedule,
     build_m60_high_skew_dynamic_two_ended_schedule,
@@ -40,6 +46,123 @@ from moe_test_schedule import (  # noqa: E402
 
 
 class MoeDynamicSlotDfgTest(unittest.TestCase):
+    def test_pipeline_ctrl_is_reset_before_global_timing_and_gather(self) -> None:
+        full_queues = build_m32_fixed_shape_schedule(SHAPE_A)
+        queues = {name: (slots[0],) for name, slots in full_queues.items()}
+
+        class FakeHandle:
+            def __init__(self, name):
+                self.name = name
+
+            def get_c_var_name(self):
+                return f"ptr_{self.name}"
+
+        mh = {
+            "input": FakeHandle("input"),
+            "prod_slot_token_refs": FakeHandle("refs"),
+            "pipeline_ctrl_zero": FakeHandle("pipeline_ctrl_zero"),
+        }
+        for prefix in ("c0", "c1"):
+            for stem in (
+                "layout",
+                "gate",
+                "up",
+                "down",
+                "gate_out",
+                "pipeline_ctrl",
+                "prod_output_l3",
+                "prod_static_l3",
+                "prod_runtime_l3",
+                "prod_static_l1",
+                "prod_runtime_l1",
+                "token_refs_l1",
+            ):
+                mh[f"{prefix}_{stem}"] = FakeHandle(f"{prefix}_{stem}")
+
+        class FakeDfg:
+            def __init__(self):
+                self.edges = []
+
+            def bingo_add_edge(self, source, target):
+                self.edges.append((source, target))
+
+            def add_edge(self, source, target, descriptor_sequence=False):
+                del descriptor_sequence
+                self.edges.append((source, target))
+
+        dfg = FakeDfg()
+        emitted = {}
+
+        def fake_add_node(_dfg, cluster, core, kernel, args, node_name=""):
+            emitted[node_name] = (cluster, core, kernel, args)
+            return node_name
+
+        def fake_slot_chain(*, add_edge, input_ready, label_prefix, **kwargs):
+            del kwargs
+            store = f"{label_prefix}_STORE"
+            add_edge(input_ready, store)
+            return {"store": store}
+
+        p = {
+            "schedule_profile": M32_FIXED_A_PROFILE,
+            "prod_token_refs_bytes": 1024,
+            "s1_block_count": 8,
+            "s3_block_count": 4,
+        }
+        with patch.object(
+            high_to_low, "_add_node", side_effect=fake_add_node
+        ), patch.object(
+            high_to_low,
+            "build_dynamic_expert_slot_chain",
+            side_effect=fake_slot_chain,
+        ), patch.object(
+            high_to_low, "audit_m32_comparison_schedule"
+        ):
+            high_to_low.add_high_to_low_schedule(
+                dfg,
+                p,
+                mh,
+                queues,
+                "optimized",
+                timing_stages=(28, 29),
+            )
+
+        begin = "M32_FIXED_A_GLOBAL_BEGIN"
+        for prefix in ("C0", "C1"):
+            load = f"{prefix}_M32_FIXED_A_LOAD_DYNAMIC_ABI"
+            reset = f"{prefix}_M32_FIXED_A_RESET_PIPELINE_CTRL"
+            gather = f"{prefix}_M32_FIXED_A_SLOT0_GATHER"
+            self.assertIn((load, reset), dfg.edges)
+            self.assertIn((reset, begin), dfg.edges)
+            self.assertIn((begin, gather), dfg.edges)
+            reset_args = emitted[reset][3]
+            self.assertIs(reset_args.src_addr, mh["pipeline_ctrl_zero"])
+            self.assertEqual(1024, reset_args.size)
+
+    def test_standalone_m32_runs_use_one_global_timing_pair(self) -> None:
+        expected_stages = {
+            M32_FIXED_A_PROFILE: (28, 29),
+            M32_FIXED_B_PROFILE: (30, 31),
+            M32_FIXED_C_PROFILE: (32, 33),
+            M32_DISTILLED_PROFILE: (34, 35),
+        }
+        for profile, stages in expected_stages.items():
+            with self.subTest(profile=profile):
+                with patch.object(
+                    high_to_low,
+                    "add_high_to_low_schedule",
+                    return_value=["check"],
+                ) as add_schedule:
+                    result = high_to_low.add_m32_comparison_run(
+                        "dfg",
+                        {"schedule_profile": profile},
+                        "memory",
+                        "queues",
+                        "implementation",
+                    )
+                self.assertEqual(["check"], result)
+                self.assertEqual(stages, add_schedule.call_args.kwargs["timing_stages"])
+
     def test_m92_dma_release_edges_are_lowered_for_dynamic_profiles(self) -> None:
         self.assertTrue(
             {
@@ -212,9 +335,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
                         slot.s2_prefetch_dma != DMA_NONE
                         and slot.s2pf_s1_overlap_steps == 0
                     ),
-                    "s2pf_starts_after_s1_dma": (
-                        slot.s2pf_starts_after_s1_dma
-                    ),
+                    "s2pf_starts_after_s1_dma": (slot.s2pf_starts_after_s1_dma),
                     "label_prefix": (
                         f"{cluster_name}_S{slot.local_slot}_E{slot.expert_id}"
                     ),
@@ -264,9 +385,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
             add_node=lambda _core, _kernel, _args, label: (
                 created_labels.append(label) or label
             ),
-            add_edge=lambda source, target: completion_edges.add(
-                (source, target)
-            ),
+            add_edge=lambda source, target: completion_edges.add((source, target)),
             add_descriptor_sequence=lambda _source, _target: None,
             make_block_args=lambda block: block,
             input_ready="INPUT_READY",
@@ -280,9 +399,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
         )
 
         self.assertFalse(any("_S1_" in label for label in created_labels))
-        self.assertIn(
-            ("INPUT_READY", chain["s2_compute"]), completion_edges
-        )
+        self.assertIn(("INPUT_READY", chain["s2_compute"]), completion_edges)
 
     def test_s2pf_phase_batches_cover_every_slice(self) -> None:
         for binding in (1, 2, 3):
@@ -296,17 +413,17 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
                     else:
                         lane = "idma" if binding == 1 else "xdma"
                         for side in range(2):
-                            actual.extend(
-                                (block, side, lane) for block in blocks
-                            )
+                            actual.extend((block, side, lane) for block in blocks)
 
                 expected = [
                     (
                         block,
                         side,
-                        "idma"
-                        if binding == 1 or (binding == 3 and side == 0)
-                        else "xdma",
+                        (
+                            "idma"
+                            if binding == 1 or (binding == 3 and side == 0)
+                            else "xdma"
+                        ),
                     )
                     for block in range(block_count)
                     for side in range(2)
@@ -371,9 +488,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
 
         chain = build_dynamic_expert_slot_chain(
             add_node=add_node,
-            add_edge=lambda source, target: completion_edges.add(
-                (source, target)
-            ),
+            add_edge=lambda source, target: completion_edges.add((source, target)),
             add_descriptor_sequence=lambda _source, _target: None,
             make_block_args=lambda block: block,
             input_ready="INPUT_READY",
@@ -397,12 +512,8 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
         )
         s3_config = "SLOT_S3_CONFIG_BLOCK0_DURING_LOAD0"
         for successor in (chain["s3_load"], s3_config):
-            self.assertIn(
-                (chain["s2_prefetch"], successor), completion_edges
-            )
-            self.assertIn(
-                (chain["s2_compute"], successor), completion_edges
-            )
+            self.assertIn((chain["s2_prefetch"], successor), completion_edges)
+            self.assertIn((chain["s2_compute"], successor), completion_edges)
 
     def test_s2pf_and_gate_up_compute_use_distinct_weight_buffers(self) -> None:
         s1 = (KERNEL_DIR / "moe_dynamic_stage_s1.h").read_text()
@@ -423,9 +534,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
 
         chain = build_dynamic_expert_slot_chain(
             add_node=add_node,
-            add_edge=lambda source, target: completion_edges.add(
-                (source, target)
-            ),
+            add_edge=lambda source, target: completion_edges.add((source, target)),
             add_descriptor_sequence=lambda source, target: (
                 descriptor_sequences.add((source, target))
             ),
@@ -441,21 +550,11 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
             label_prefix="SLOT",
         )
 
-        self.assertIn(
-            (chain["s1_load"], chain["s2_prefetch"]), completion_edges
-        )
-        self.assertNotIn(
-            (chain["s1_compute"], chain["s2_prefetch"]), completion_edges
-        )
-        self.assertIn(
-            (chain["s1_load"], chain["s2_compute"]), completion_edges
-        )
-        self.assertIn(
-            (chain["s1_compute"], chain["s2_compute"]), completion_edges
-        )
-        self.assertIn(
-            (chain["s1_load"], chain["s1_compute"]), descriptor_sequences
-        )
+        self.assertIn((chain["s1_load"], chain["s2_prefetch"]), completion_edges)
+        self.assertNotIn((chain["s1_compute"], chain["s2_prefetch"]), completion_edges)
+        self.assertIn((chain["s1_load"], chain["s2_compute"]), completion_edges)
+        self.assertIn((chain["s1_compute"], chain["s2_compute"]), completion_edges)
+        self.assertIn((chain["s1_load"], chain["s1_compute"]), descriptor_sequences)
 
     def test_fused_s2_prefetch_uses_s1_load_completion_directly(self) -> None:
         completion_edges = set()
@@ -467,9 +566,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
 
         chain = build_dynamic_expert_slot_chain(
             add_node=add_node,
-            add_edge=lambda source, target: completion_edges.add(
-                (source, target)
-            ),
+            add_edge=lambda source, target: completion_edges.add((source, target)),
             add_descriptor_sequence=lambda _source, _target: None,
             make_block_args=lambda block: block,
             input_ready="INPUT_READY",
@@ -485,9 +582,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
 
         self.assertEqual(chain["s1_load"], chain["s2_prefetch"])
         self.assertNotIn("SLOT_S2_DOWN_PREFETCH", created_labels)
-        self.assertNotIn(
-            (chain["s1_load"], chain["s1_load"]), completion_edges
-        )
+        self.assertNotIn((chain["s1_load"], chain["s1_load"]), completion_edges)
         for successor in (
             chain["s3_load"],
             "SLOT_S3_CONFIG_BLOCK0_DURING_LOAD0",
@@ -502,9 +597,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
 
         chain = build_dynamic_expert_slot_chain(
             add_node=add_node,
-            add_edge=lambda source, target: completion_edges.add(
-                (source, target)
-            ),
+            add_edge=lambda source, target: completion_edges.add((source, target)),
             add_descriptor_sequence=lambda _source, _target: None,
             make_block_args=lambda block: block,
             input_ready="INPUT_READY",
@@ -518,12 +611,8 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
             label_prefix="SLOT",
         )
 
-        self.assertIn(
-            (chain["s1_load"], chain["s2_prefetch"]), completion_edges
-        )
-        self.assertIn(
-            (chain["s1_compute"], chain["s2_prefetch"]), completion_edges
-        )
+        self.assertIn((chain["s1_load"], chain["s2_prefetch"]), completion_edges)
+        self.assertIn((chain["s1_compute"], chain["s2_prefetch"]), completion_edges)
 
     def test_s1_and_s2_use_independent_pipeline_cookies(self) -> None:
         defs = (KERNEL_DIR / "moe_dynamic_defs.h").read_text()
@@ -548,10 +637,11 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
         prefetch = (KERNEL_DIR / "moe_dynamic_stage_prefetch.h").read_text()
         compute = (KERNEL_DIR / "moe_dynamic_stage_compute.h").read_text()
         s3 = (KERNEL_DIR / "moe_dynamic_stage_s3.h").read_text()
-        s2pf = prefetch[:prefetch.index("__moe_s4pf_phase_marker")]
+        s2pf = prefetch[: prefetch.index("__moe_s4pf_phase_marker")]
         s2pf_run = s2pf[
-            s2pf.index("__moe_s2pf_submit_idma_phase("):
-            s2pf.index("SNAX_LIB_DEFINE uint32_t")
+            s2pf.index("__moe_s2pf_submit_idma_phase(") : s2pf.index(
+                "SNAX_LIB_DEFINE uint32_t"
+            )
         ]
 
         self.assertNotIn("uint32_t s1_overlap_steps;", defs)
@@ -596,8 +686,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
 
     def test_s2pf_release_mode_is_lowered_by_all_host_paths(self) -> None:
         abi = (
-            SW_DIR
-            / "host/runtime/libbingo/include/libbingo/device_kernel_args.h"
+            SW_DIR / "host/runtime/libbingo/include/libbingo/device_kernel_args.h"
         ).read_text()
         protocol = (KERNEL_DIR / "moe_dynamic_protocol.h").read_text()
         helper = (SW_DIR / "host/runtime/host_moe_s2pf_mode.h").read_text()
@@ -605,16 +694,12 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
         sw = (SW_DIR / "host/runtime/host_moe_sw_path.h").read_text()
 
         self.assertIn("BINGO_MOE_DYN_CTRL_S2PF_EARLY_BIT 20u", abi)
-        self.assertIn(
-            "BINGO_MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE_BIT 21u", abi
-        )
+        self.assertIn("BINGO_MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE_BIT 21u", abi)
         self.assertIn("MOE_DYN_CTRL_S2PF_EARLY", protocol)
         self.assertIn("MOE_DYN_CTRL_S2PF_RUNTIME_RELEASE", protocol)
         self.assertEqual(helper.count("s1_compute_ticks > s1_dma_ticks"), 1)
         for lowering in (hw, sw):
-            self.assertIn(
-                '#include "host_moe_s2pf_mode.h"', lowering
-            )
+            self.assertIn('#include "host_moe_s2pf_mode.h"', lowering)
             self.assertIn("__host_moe_s2pf_runtime_ctrl(", lowering)
             self.assertNotIn("s1_compute_ticks", lowering)
             self.assertNotIn("s1_dma_ticks", lowering)
@@ -650,18 +735,12 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
         self.assertIn("cfg->s3_call[0].valid", dma)
         self.assertIn("__moe_dyn_prepare_s2pf_xdma(blk)", s1)
         self.assertIn("__moe_prepare_slot_entry_xdma", s1)
-        self.assertIn(
-            "__moe_dyn_prepare_after_s2pf_xdma(blk, cfg, st)", s1
-        )
+        self.assertIn("__moe_dyn_prepare_after_s2pf_xdma(blk, cfg, st)", s1)
         self.assertEqual(
-            store.count(
-                "__moe_prepare_slot_entry_xdma(&next_blk, next_cfg, st)"
-            ),
+            store.count("__moe_prepare_slot_entry_xdma(&next_blk, next_cfg, st)"),
             2,
         )
-        self.assertNotIn(
-            "__moe_dyn_prepare_s1_xdma(&next_blk, next_cfg, st)", store
-        )
+        self.assertNotIn("__moe_dyn_prepare_s1_xdma(&next_blk, next_cfg, st)", store)
         self.assertIn("__moe_dyn_prepare_s2pf_both_xdma_address", dma)
         self.assertIn("__moe_dyn_prepare_s2pf_single_xdma_address", dma)
         self.assertIn("__moe_prepare_s2pf_xdma_phase_shape", protocol)
@@ -681,9 +760,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
             both_body.index("__moe_dyn_xdma_start_remote_commit(previous)"),
         )
         self.assertIn("__moe_dyn_xdma_start_remote_begin()", prefetch)
-        self.assertIn(
-            "__moe_dyn_xdma_start_remote_commit(previous)", prefetch
-        )
+        self.assertIn("__moe_dyn_xdma_start_remote_commit(previous)", prefetch)
         self.assertNotIn("xdma_start()", prefetch)
         self.assertNotIn("xdma_ready", prefetch)
         self.assertNotIn("transfers_per_step", prefetch)
@@ -697,9 +774,7 @@ class MoeDynamicSlotDfgTest(unittest.TestCase):
         self.assertNotIn("__moe_dyn_2d_pair_pending_t", prefetch)
         self.assertNotIn("wait_idma", prefetch)
         self.assertNotIn("store_prepared == 0u", store)
-        self.assertIn(
-            "MOE_S4_CSR_LAYOUT_PHASE_BATCHED, 0u", compute
-        )
+        self.assertIn("MOE_S4_CSR_LAYOUT_PHASE_BATCHED, 0u", compute)
         self.assertNotIn(
             "!__moe_csr_stage_is_prepared(blk, MOE_CSR_PREPARED_S4)",
             compute,

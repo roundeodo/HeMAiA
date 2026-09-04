@@ -3,7 +3,6 @@
 import pathlib
 import sys
 
-
 PRODUCTION_WORKLOAD_DIR = (
     pathlib.Path(__file__).resolve().parent.parent / "multi_cluster_MoE"
 )
@@ -20,6 +19,10 @@ from moe_test_schedule import (  # noqa: E402
     HIGH_TO_LOW_PROFILE,
     HIGH_TO_LOW_COUNTS,
     LOW_TO_HIGH_PROFILE,
+    M8_4_2_2_COUNTS,
+    M8_COMPARISON_PROFILE,
+    M32_COMPARISON_PROFILE,
+    M32_SCALED_SKEW_COUNTS,
     M60_HIGH_SKEW_COUNTS,
     M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
     M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
@@ -42,7 +45,6 @@ from moe_test_schedule import (  # noqa: E402
     STATIC_DESC_PROFILE,
     build_schedule_profile,
 )
-
 
 S1_SHAPE = 1
 S2_SHAPE = 2
@@ -85,6 +87,8 @@ def derive_params(config: dict, schedule_profile: str = BASELINE_PROFILE) -> dic
         DYNAMIC_DESC_PROFILE,
         DYNAMIC_TWO_ENDED_PROFILE,
         FULL_SCHEDULER_PROFILE,
+        M8_COMPARISON_PROFILE,
+        M32_COMPARISON_PROFILE,
         M70_THREE_HOT_STATIC_DESC_PROFILE,
         M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
         M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
@@ -101,31 +105,42 @@ def derive_params(config: dict, schedule_profile: str = BASELINE_PROFILE) -> dic
     ):
         queues = build_schedule_profile(schedule_profile)
         distribution = (
-            M60_HIGH_SKEW_COUNTS
-            if schedule_profile in (
-                M60_HIGH_SKEW_STATIC_DESC_PROFILE,
-                M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
-                M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
-                M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
-            )
+            M8_4_2_2_COUNTS
+            if schedule_profile == M8_COMPARISON_PROFILE
             else (
-                M70_THREE_HOT_COUNTS
-                if schedule_profile in (
-                    M70_THREE_HOT_STATIC_DESC_PROFILE,
-                    M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
-                    M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
-                    M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
-                    M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
-                )
+                M32_SCALED_SKEW_COUNTS
+                if schedule_profile == M32_COMPARISON_PROFILE
                 else (
-                    M92_PARAMETER_ORDER_COUNTS
-                    if schedule_profile in (
-                        M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
-                        M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
-                        M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
-                        M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+                    M60_HIGH_SKEW_COUNTS
+                    if schedule_profile
+                    in (
+                        M60_HIGH_SKEW_STATIC_DESC_PROFILE,
+                        M60_HIGH_SKEW_DYNAMIC_DESC_PROFILE,
+                        M60_HIGH_SKEW_DYNAMIC_TWO_ENDED_PROFILE,
+                        M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE,
                     )
-                    else HIGH_TO_LOW_COUNTS
+                    else (
+                        M70_THREE_HOT_COUNTS
+                        if schedule_profile
+                        in (
+                            M70_THREE_HOT_STATIC_DESC_PROFILE,
+                            M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
+                            M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
+                            M70_THREE_HOT_DYNAMIC_TWO_ENDED_PROFILE,
+                            M70_THREE_HOT_FULL_SCHEDULER_PROFILE,
+                        )
+                        else (
+                            M92_PARAMETER_ORDER_COUNTS
+                            if schedule_profile
+                            in (
+                                M92_PARAMETER_ORDER_STATIC_DESC_PROFILE,
+                                M92_PARAMETER_ORDER_DYNAMIC_DESC_PROFILE,
+                                M92_PARAMETER_ORDER_DYNAMIC_TWO_ENDED_PROFILE,
+                                M92_PARAMETER_ORDER_FULL_SCHEDULER_PROFILE,
+                            )
+                            else HIGH_TO_LOW_COUNTS
+                        )
+                    )
                 )
             )
         )

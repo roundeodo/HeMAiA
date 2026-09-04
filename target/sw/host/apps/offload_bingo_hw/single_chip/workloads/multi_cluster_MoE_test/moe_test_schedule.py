@@ -1,6 +1,14 @@
 """Static schedule profiles for the focused multi-cluster MoE workload."""
 
 from dataclasses import dataclass, replace
+import pathlib
+import sys
+
+
+PRODUCTION_WORKLOAD_DIR = pathlib.Path(__file__).resolve().parent.parent / "multi_cluster_MoE"
+if str(PRODUCTION_WORKLOAD_DIR) not in sys.path:
+    sys.path.insert(0, str(PRODUCTION_WORKLOAD_DIR))
+from moe_routing_cases import EXPERT_ORDER, get_routing_case  # noqa: E402
 
 
 BASELINE_PROFILE = "baseline"
@@ -35,6 +43,33 @@ LOW_TO_HIGH_PROFILE = "low_to_high"
 ENDS_INWARD_PROFILE = "ends_inward"
 C_TAIL_SMOKE_PROFILE = "c_tail_smoke"
 S1_STAGE_SMOKE_PROFILE = "s1_stage_smoke"
+M8_COMPARISON_PROFILE = "m8_4_2_2_compare"
+M8_FIXED_A_PROFILE = "m8_4_2_2_fixed_a"
+M8_FIXED_B_PROFILE = "m8_4_2_2_fixed_b"
+M8_FIXED_C_PROFILE = "m8_4_2_2_fixed_c"
+M8_DISTILLED_PROFILE = "m8_4_2_2_distilled"
+M8_COMPARISON_RUN_PROFILES = (
+    M8_FIXED_A_PROFILE,
+    M8_FIXED_B_PROFILE,
+    M8_FIXED_C_PROFILE,
+    M8_DISTILLED_PROFILE,
+)
+M32_COMPARISON_PROFILE = "m32_moe_style_compare"
+M32_FIXED_A_PROFILE = "m32_moe_style_fixed_a"
+M32_FIXED_B_PROFILE = "m32_moe_style_fixed_b"
+M32_FIXED_C_PROFILE = "m32_moe_style_fixed_c"
+M32_DISTILLED_PROFILE = "m32_moe_style_distilled"
+M32_COMPARISON_RUN_PROFILES = (
+    M32_FIXED_A_PROFILE,
+    M32_FIXED_B_PROFILE,
+    M32_FIXED_C_PROFILE,
+    M32_DISTILLED_PROFILE,
+)
+COMPARISON_PROFILES = (M8_COMPARISON_PROFILE, M32_COMPARISON_PROFILE)
+COMPARISON_RUN_PROFILES = (
+    *M8_COMPARISON_RUN_PROFILES,
+    *M32_COMPARISON_RUN_PROFILES,
+)
 SCHEDULE_PROFILES = (
     BASELINE_PROFILE,
     S2PF_BOTH_PROFILE,
@@ -60,6 +95,8 @@ SCHEDULE_PROFILES = (
     ENDS_INWARD_PROFILE,
     C_TAIL_SMOKE_PROFILE,
     S1_STAGE_SMOKE_PROFILE,
+    M8_COMPARISON_PROFILE,
+    *M32_COMPARISON_RUN_PROFILES,
 )
 
 DMA_NONE = 0
@@ -102,6 +139,14 @@ M60_HIGH_SKEW_FULL_SCHEDULER_EXPECTED_MAKESPAN_TICKS = 99
 HIGH_TO_LOW_EXPECTED_MAKESPAN_TICKS = 163
 LOW_TO_HIGH_EXPECTED_MAKESPAN_TICKS = 165
 ENDS_INWARD_EXPECTED_MAKESPAN_TICKS = 166
+M8_FIXED_A_EXPECTED_MAKESPAN_TICKS = 24
+M8_FIXED_B_EXPECTED_MAKESPAN_TICKS = 15
+M8_FIXED_C_EXPECTED_MAKESPAN_TICKS = 21
+M8_DISTILLED_EXPECTED_MAKESPAN_TICKS = 15
+M32_FIXED_A_EXPECTED_MAKESPAN_TICKS = 180
+M32_FIXED_B_EXPECTED_MAKESPAN_TICKS = 99
+M32_FIXED_C_EXPECTED_MAKESPAN_TICKS = 108
+M32_DISTILLED_EXPECTED_MAKESPAN_TICKS = 87
 # Same mandatory DFG/API allowance used for the accepted high-to-low bound:
 # three quarter-ticks per cluster-local slot.
 STRUCTURAL_API_QUARTER_TICKS_PER_SLOT = 3
@@ -188,6 +233,47 @@ M60_HIGH_SKEW_COUNTS = (
     + (1,) * 9
     + (0,) * 34
 )
+
+# M=8 deterministic Top-2 routing shared with multi_cluster_MoE/m8_4_2_2:
+#   T0..T3 -> (E0, E63)
+#   T4..T5 -> (E0, E1)
+#   T6..T7 -> (E63, E1)
+M8_4_2_2_COUNTS = (6, 4) + (0,) * 61 + (6,)
+M8_4_2_2_TOP2 = (
+    (0, 63), (0, 63), (0, 63), (0, 63),
+    (0, 1), (0, 1),
+    (63, 1), (63, 1),
+)
+M8_4_2_2_TOKEN_IDS_BY_EXPERT = tuple(
+    tuple(
+        token_id
+        for token_id, pair in enumerate(M8_4_2_2_TOP2)
+        if expert_id in pair
+    )
+    for expert_id in range(EXPERT_COUNT)
+)
+
+# Import the exact M=32 Top-2 case used by the full workload.  Keeping this as
+# one source of truth prevents the static comparison from silently testing a
+# different marginal distribution or token-to-expert mapping.
+M32_ROUTING_CASE = get_routing_case(32, EXPERT_COUNT)
+M32_SCALED_SKEW_COUNTS = M32_ROUTING_CASE.expected_counts
+M32_SCALED_SKEW_TOP2 = M32_ROUTING_CASE.token_major_top2
+M32_SCALED_SKEW_TOKEN_IDS_BY_EXPERT = tuple(
+    tuple(
+        token_id
+        for token_id, pair in enumerate(M32_SCALED_SKEW_TOP2)
+        if expert_id in pair
+    )
+    for expert_id in range(EXPERT_COUNT)
+)
+M32_ACTIVE_EIDS_HIGH_TO_LOW = tuple(
+    eid for eid in EXPERT_ORDER if M32_SCALED_SKEW_COUNTS[eid] > 0
+)
+M32_FIXED_CLUSTER_EIDS = {
+    "c0": M32_ACTIVE_EIDS_HIGH_TO_LOW[0::2],
+    "c1": M32_ACTIVE_EIDS_HIGH_TO_LOW[1::2],
+}
 
 # Exact token routing exported for
 # certified_olmoe_triple_hot_long_cold_tail. Entries E43-E63 are inactive.
@@ -373,6 +459,7 @@ class FixedOrderTask:
     s4_prefetch_dma: int = DMA_NONE
     s4_prefetch_target_eid: int = -1
     skip_s1: bool = False
+    skip_s3: bool = False
 
 
 def _case0_fixed_order_task(
@@ -1218,6 +1305,7 @@ class SlotSpec:
     s4_prefetch_dma: int = DMA_NONE
     s4_prefetch_target_eid: int = -1
     skip_s1: bool = False
+    skip_s3_override: bool = False
 
     @property
     def single_dma(self) -> int:
@@ -1225,7 +1313,7 @@ class SlotSpec:
 
     @property
     def skip_s3(self) -> bool:
-        return self.s2_prefetch_dma != DMA_NONE
+        return self.skip_s3_override or self.s2_prefetch_dma != DMA_NONE
 
     @property
     def s1_dma(self) -> int:
@@ -1477,6 +1565,7 @@ def _build_fixed_order_schedule(
                 s4_prefetch_dma=task.s4_prefetch_dma,
                 s4_prefetch_target_eid=task.s4_prefetch_target_eid,
                 skip_s1=task.skip_s1,
+                skip_s3_override=task.skip_s3,
             )
         )
     return {name: tuple(slots) for name, slots in queues.items()}
@@ -1690,7 +1779,253 @@ def build_s1_stage_smoke_schedule() -> dict[str, tuple[SlotSpec, ...]]:
     return build_c_tail_smoke_schedule()
 
 
+def build_m8_fixed_shape_schedule(
+    shape: int,
+) -> dict[str, tuple[SlotSpec, ...]]:
+    """Descending E0/E63/E1 issue order with one literal S1/S3 shape.
+
+    Every cluster starts with an empty expert-weight cache. All fixed-order
+    tasks therefore load S1 and S3 weights through the cluster-local DMA lane;
+    prefetch is disabled so the only changed physical parameter is shape.
+    """
+    if shape not in (SHAPE_A, SHAPE_B, SHAPE_C):
+        raise ValueError(f"invalid M8 fixed shape {shape}")
+    profile = f"{SHAPE_NAMES[shape]}/{SHAPE_NAMES[shape]} fixed-high-to-low"
+    queues = {"c0": [], "c1": []}
+
+    for cluster_name, cluster_index, expert_id in (
+        ("c0", 0, 0),
+        ("c1", 1, 63),
+    ):
+        first = SlotSpec(
+            cluster_name=cluster_name,
+            cluster_index=cluster_index,
+            local_slot=0,
+            expert_id=expert_id,
+            ntokens=M8_4_2_2_COUNTS[expert_id],
+            profile=profile,
+            s1_shape=shape,
+            s3_shape=shape,
+            s2_prefetch_dma=DMA_NONE,
+            reference_start_tick=0,
+            reference_end_tick=-1,
+            s1_dma_override=DMA_IDMA if cluster_index == 0 else DMA_XDMA,
+            s3_dma_override=DMA_IDMA if cluster_index == 0 else DMA_XDMA,
+        )
+        queues[cluster_name].append(
+            replace(first, reference_end_tick=_task_timeline(first, 0).task_end)
+        )
+
+    e1_start = queues["c0"][0].reference_end_tick
+    e1 = SlotSpec(
+        cluster_name="c0",
+        cluster_index=0,
+        local_slot=1,
+        expert_id=1,
+        ntokens=M8_4_2_2_COUNTS[1],
+        profile=profile,
+        s1_shape=shape,
+        s3_shape=shape,
+        s2_prefetch_dma=DMA_NONE,
+        reference_start_tick=e1_start,
+        reference_end_tick=-1,
+        s1_dma_override=DMA_IDMA,
+        s3_dma_override=DMA_IDMA,
+    )
+    e1 = replace(
+        e1,
+        reference_end_tick=_task_timeline(e1, e1_start).task_end,
+    )
+    queues["c0"].append(e1)
+    frozen = {name: tuple(slots) for name, slots in queues.items()}
+    audit_m8_comparison_schedule(frozen, {
+        SHAPE_A: M8_FIXED_A_PROFILE,
+        SHAPE_B: M8_FIXED_B_PROFILE,
+        SHAPE_C: M8_FIXED_C_PROFILE,
+    }[shape])
+    return frozen
+
+
+# Literal lowering of scheduler_rtl_distilled_policy.schedule(
+#     {0: 6, 1: 4, 63: 6}, initial_cache_c2=-1, initial_cache_c3=-1
+# ).  The deployed C mirror is checked against the same normative model.
+M8_DISTILLED_HISTORY = (
+    FixedOrderTask(
+        "c0", 0, 0, 6, 0, 9,
+        SHAPE_B, SHAPE_B, DMA_IDMA, DMA_IDMA, DMA_NONE,
+    ),
+    FixedOrderTask(
+        "c0", 1, 0, 4, 9, 15,
+        SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    FixedOrderTask(
+        "c1", 63, 0, 6, 0, 9,
+        SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+)
+
+
+def build_m8_distilled_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M8_DISTILLED_HISTORY)
+    audit_m8_comparison_schedule(frozen, M8_DISTILLED_PROFILE)
+    return frozen
+
+
+def build_m8_comparison_schedules(
+) -> dict[str, dict[str, tuple[SlotSpec, ...]]]:
+    """Return the four sequential runs emitted by the M8 comparison profile."""
+    return {
+        M8_FIXED_A_PROFILE: build_m8_fixed_shape_schedule(SHAPE_A),
+        M8_FIXED_B_PROFILE: build_m8_fixed_shape_schedule(SHAPE_B),
+        M8_FIXED_C_PROFILE: build_m8_fixed_shape_schedule(SHAPE_C),
+        M8_DISTILLED_PROFILE: build_m8_distilled_schedule(),
+    }
+
+
+def build_m32_fixed_shape_schedule(
+    shape: int,
+) -> dict[str, tuple[SlotSpec, ...]]:
+    """Issue all active M=32 experts high-to-low with one fixed shape.
+
+    The globally descending stream is distributed round-robin onto C2/C3.
+    Both clusters start empty, every task loads S1 and S3 through its local
+    DMA lane, and no prefetch is enabled.  Consequently the three runs differ
+    only in the selected A/A, B/B or C/C physical shape.
+    """
+    if shape not in (SHAPE_A, SHAPE_B, SHAPE_C):
+        raise ValueError(f"invalid M32 fixed shape {shape}")
+    profile = f"{SHAPE_NAMES[shape]}/{SHAPE_NAMES[shape]} fixed-high-to-low"
+    queues = {"c0": [], "c1": []}
+    for cluster_name in ("c0", "c1"):
+        cluster_index = 0 if cluster_name == "c0" else 1
+        dma = DMA_IDMA if cluster_index == 0 else DMA_XDMA
+        start_tick = 0
+        for expert_id in M32_FIXED_CLUSTER_EIDS[cluster_name]:
+            slot = SlotSpec(
+                cluster_name=cluster_name,
+                cluster_index=cluster_index,
+                local_slot=len(queues[cluster_name]),
+                expert_id=expert_id,
+                ntokens=M32_SCALED_SKEW_COUNTS[expert_id],
+                profile=profile,
+                s1_shape=shape,
+                s3_shape=shape,
+                s2_prefetch_dma=DMA_NONE,
+                reference_start_tick=start_tick,
+                reference_end_tick=-1,
+                s1_dma_override=dma,
+                s3_dma_override=dma,
+            )
+            end_tick = _task_timeline(slot, start_tick).task_end
+            queues[cluster_name].append(
+                replace(slot, reference_end_tick=end_tick)
+            )
+            start_tick = end_tick
+    frozen = {name: tuple(slots) for name, slots in queues.items()}
+    audit_m32_comparison_schedule(frozen, {
+        SHAPE_A: M32_FIXED_A_PROFILE,
+        SHAPE_B: M32_FIXED_B_PROFILE,
+        SHAPE_C: M32_FIXED_C_PROFILE,
+    }[shape])
+    return frozen
+
+
+# Frozen lowering of scheduler_rtl_distilled_policy.schedule() for the exact
+# production M=32 routing distribution and empty C2/C3 caches.  Keep every
+# irregular leading action explicit; the regular B/B tail is compacted below.
+M32_DISTILLED_HISTORY = (
+    FixedOrderTask(
+        "c0", 0, 0, 8, 0, 12,
+        SHAPE_A, SHAPE_B, DMA_IDMA, DMA_IDMA, DMA_NONE,
+        skip_s3=True,
+    ),
+    FixedOrderTask(
+        "c1", 3, 0, 3, 0, 6,
+        SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
+    ),
+    FixedOrderTask(
+        "c1", 27, 0, 1, 6, 9,
+        SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    FixedOrderTask(
+        "c1", 63, 0, 6, 9, 18,
+        SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
+        skip_s3=True,
+    ),
+    FixedOrderTask(
+        "c0", 26, 0, 1, 12, 15,
+        SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    FixedOrderTask(
+        "c0", 1, 0, 5, 15, 24,
+        SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
+        skip_s3=True,
+    ),
+    FixedOrderTask(
+        "c1", 25, 0, 1, 18, 21,
+        SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+    FixedOrderTask(
+        "c1", 2, 0, 4, 21, 27,
+        SHAPE_B, SHAPE_B, DMA_BOTH, DMA_BOTH, DMA_NONE,
+        skip_s3=True,
+    ),
+    FixedOrderTask(
+        "c0", 4, 0, 2, 24, 27,
+        SHAPE_C, SHAPE_C, DMA_NONE, DMA_BOTH, DMA_BOTH,
+    ),
+) + tuple(
+    task
+    for pair_index, (c0_eid, c1_eid) in enumerate(
+        zip(range(5, 24, 2), range(6, 25, 2))
+    )
+    for task in (
+        FixedOrderTask(
+            "c0", c0_eid, 0, M32_SCALED_SKEW_COUNTS[c0_eid],
+            27 + 6 * pair_index, 33 + 6 * pair_index,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_IDMA, DMA_IDMA,
+        ),
+        FixedOrderTask(
+            "c1", c1_eid, 0, M32_SCALED_SKEW_COUNTS[c1_eid],
+            27 + 6 * pair_index, 33 + 6 * pair_index,
+            SHAPE_B, SHAPE_B, DMA_NONE, DMA_XDMA, DMA_XDMA,
+        ),
+    )
+)
+
+
+def build_m32_distilled_schedule() -> dict[str, tuple[SlotSpec, ...]]:
+    frozen = _build_fixed_order_schedule(M32_DISTILLED_HISTORY)
+    audit_m32_comparison_schedule(frozen, M32_DISTILLED_PROFILE)
+    return frozen
+
+
+def build_m32_comparison_schedules(
+) -> dict[str, dict[str, tuple[SlotSpec, ...]]]:
+    """Return the four sequential runs emitted by the M=32 profile."""
+    return {
+        M32_FIXED_A_PROFILE: build_m32_fixed_shape_schedule(SHAPE_A),
+        M32_FIXED_B_PROFILE: build_m32_fixed_shape_schedule(SHAPE_B),
+        M32_FIXED_C_PROFILE: build_m32_fixed_shape_schedule(SHAPE_C),
+        M32_DISTILLED_PROFILE: build_m32_distilled_schedule(),
+    }
+
+
 def build_schedule_profile(profile: str) -> dict[str, tuple[SlotSpec, ...]]:
+    if profile == M8_COMPARISON_PROFILE:
+        # One representative queue is sufficient for generic layout sizing;
+        # main_bingo/datagen explicitly consume all four runs.
+        return build_m8_distilled_schedule()
+    if profile == M32_COMPARISON_PROFILE:
+        return build_m32_distilled_schedule()
+    if profile == M32_FIXED_A_PROFILE:
+        return build_m32_fixed_shape_schedule(SHAPE_A)
+    if profile == M32_FIXED_B_PROFILE:
+        return build_m32_fixed_shape_schedule(SHAPE_B)
+    if profile == M32_FIXED_C_PROFILE:
+        return build_m32_fixed_shape_schedule(SHAPE_C)
+    if profile == M32_DISTILLED_PROFILE:
+        return build_m32_distilled_schedule()
     if profile in (
         M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
         M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
@@ -1810,6 +2145,276 @@ def cross_cluster_dma_release_edges(
                 )
             )
     return tuple(sorted(edges))
+
+
+def audit_m8_comparison_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+    profile: str,
+) -> dict[str, object]:
+    """Audit one of the four M=8 comparison streams.
+
+    The distribution describes Top-2 routes, so eight source tokens must
+    contribute exactly sixteen routed token instances.  The four streams must
+    differ only in fixed shape or in the distilled scheduler decisions.
+    """
+    if len(M8_4_2_2_COUNTS) != EXPERT_COUNT:
+        raise AssertionError("M8 must define all 64 conceptual experts")
+    if sum(M8_4_2_2_COUNTS) != 16:
+        raise AssertionError("M8 Top-2 routing must contain 16 routes")
+    if tuple(
+        len(token_ids) for token_ids in M8_4_2_2_TOKEN_IDS_BY_EXPERT
+    ) != M8_4_2_2_COUNTS:
+        raise AssertionError("M8 routing does not match expert loads")
+
+    token_owners = [[] for _ in range(8)]
+    for expert_id, token_ids in enumerate(M8_4_2_2_TOKEN_IDS_BY_EXPERT):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError("M8 must route every source token exactly twice")
+
+    if tuple(len(queues[name]) for name in ("c0", "c1")) != (2, 1):
+        raise AssertionError("M8 comparison must contain two C2 and one C3 task")
+    all_slots = queues["c0"] + queues["c1"]
+    if {slot.expert_id for slot in all_slots} != {0, 1, 63}:
+        raise AssertionError("M8 comparison must cover E0, E1 and E63 once")
+    for slot in all_slots:
+        if slot.ntokens != M8_4_2_2_COUNTS[slot.expert_id]:
+            raise AssertionError(f"E{slot.expert_id} token count mismatch")
+        timeline = _task_timeline(slot, slot.reference_start_tick)
+        if timeline.task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{slot.expert_id} timeline ends at {timeline.task_end}, "
+                f"expected {slot.reference_end_tick}"
+            )
+        if slot.s4_prefetch_dma != DMA_NONE:
+            raise AssertionError("M8 comparison does not use S4 prefetch")
+
+    for cluster_name, slots in queues.items():
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick < previous.reference_end_tick:
+                raise AssertionError(f"{cluster_name} local tasks overlap")
+
+    fixed_profiles = {
+        M8_FIXED_A_PROFILE: (SHAPE_A, M8_FIXED_A_EXPECTED_MAKESPAN_TICKS),
+        M8_FIXED_B_PROFILE: (SHAPE_B, M8_FIXED_B_EXPECTED_MAKESPAN_TICKS),
+        M8_FIXED_C_PROFILE: (SHAPE_C, M8_FIXED_C_EXPECTED_MAKESPAN_TICKS),
+    }
+    if profile in fixed_profiles:
+        expected_shape, expected_makespan = fixed_profiles[profile]
+        if tuple(slot.expert_id for slot in queues["c0"]) != (0, 1):
+            raise AssertionError("fixed high-to-low C2 stream must be E0 then E1")
+        if tuple(slot.expert_id for slot in queues["c1"]) != (63,):
+            raise AssertionError("fixed high-to-low C3 stream must be E63")
+        if any(
+            slot.s1_shape != expected_shape or slot.s3_shape != expected_shape
+            for slot in all_slots
+        ):
+            raise AssertionError("fixed run contains a non-fixed shape")
+        for slot in all_slots:
+            expected_dma = DMA_IDMA if slot.cluster_name == "c0" else DMA_XDMA
+            if (
+                slot.skip_s1
+                or slot.skip_s3
+                or slot.s1_dma != expected_dma
+                or slot.s3_dma != expected_dma
+                or slot.s2_prefetch_dma != DMA_NONE
+            ):
+                raise AssertionError(
+                    "empty-cache fixed tasks must use local DMA without prefetch"
+                )
+    elif profile == M8_DISTILLED_PROFILE:
+        expected_makespan = M8_DISTILLED_EXPECTED_MAKESPAN_TICKS
+        if tuple(slot.expert_id for slot in queues["c0"]) != (0, 1):
+            raise AssertionError("distilled C2 stream must be E0 then E1")
+        if tuple(slot.expert_id for slot in queues["c1"]) != (63,):
+            raise AssertionError("distilled C3 stream must be E63")
+        expected = {
+            0: (SHAPE_B, SHAPE_B, DMA_IDMA, DMA_NONE, DMA_IDMA, False, True),
+            1: (SHAPE_C, SHAPE_C, DMA_BOTH, DMA_BOTH, DMA_NONE, False, False),
+            63: (SHAPE_B, SHAPE_B, DMA_XDMA, DMA_XDMA, DMA_NONE, False, False),
+        }
+        for slot in all_slots:
+            actual = (
+                slot.s1_shape,
+                slot.s3_shape,
+                slot.s1_dma,
+                slot.s3_dma,
+                slot.s2_prefetch_dma,
+                slot.skip_s1,
+                slot.skip_s3,
+            )
+            if actual != expected[slot.expert_id]:
+                raise AssertionError(
+                    f"distilled E{slot.expert_id} decision changed: {actual}"
+                )
+    else:
+        raise ValueError(f"unsupported M8 run profile {profile!r}")
+
+    queue_ticks = {
+        name: max(slot.reference_end_tick for slot in queues[name])
+        for name in ("c0", "c1")
+    }
+    makespan = max(queue_ticks.values())
+    if makespan != expected_makespan:
+        raise AssertionError(
+            f"{profile} expected {expected_makespan} ticks, got {makespan}"
+        )
+    return {
+        "distribution": M8_4_2_2_COUNTS,
+        "active_experts": 3,
+        "source_tokens": 8,
+        "routed_tokens": 16,
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": makespan,
+        "dma_release_edges": cross_cluster_dma_release_edges(queues),
+    }
+
+
+def audit_m32_comparison_schedule(
+    queues: dict[str, tuple[SlotSpec, ...]],
+    profile: str,
+) -> dict[str, object]:
+    """Audit one M=32 fixed-shape or distilled comparison stream."""
+    counts = M32_SCALED_SKEW_COUNTS
+    token_ids_by_expert = M32_SCALED_SKEW_TOKEN_IDS_BY_EXPERT
+    if len(counts) != EXPERT_COUNT or sum(counts) != 64:
+        raise AssertionError("M32 must define 64 experts and 64 Top-2 routes")
+    if tuple(len(ids) for ids in token_ids_by_expert) != counts:
+        raise AssertionError("M32 routing does not match expert loads")
+    token_owners = [[] for _ in range(32)]
+    for expert_id, token_ids in enumerate(token_ids_by_expert):
+        for token_id in token_ids:
+            if not 0 <= token_id < len(token_owners):
+                raise AssertionError(f"E{expert_id} has invalid token {token_id}")
+            token_owners[token_id].append(expert_id)
+    if any(len(owners) != 2 for owners in token_owners):
+        raise AssertionError("M32 must route every source token exactly twice")
+
+    all_slots = queues["c0"] + queues["c1"]
+    active_eids = {eid for eid, count in enumerate(counts) if count}
+    if len(all_slots) != len(active_eids):
+        raise AssertionError("M32 comparison must execute every active expert once")
+    if {slot.expert_id for slot in all_slots} != active_eids:
+        raise AssertionError("M32 comparison active-expert set changed")
+    if len({slot.expert_id for slot in all_slots}) != len(all_slots):
+        raise AssertionError("M32 comparison executes an expert more than once")
+    for slot in all_slots:
+        if slot.ntokens != counts[slot.expert_id]:
+            raise AssertionError(f"E{slot.expert_id} token count mismatch")
+        timeline = _task_timeline(slot, slot.reference_start_tick)
+        if timeline.task_end != slot.reference_end_tick:
+            raise AssertionError(
+                f"E{slot.expert_id} timeline ends at {timeline.task_end}, "
+                f"expected {slot.reference_end_tick}"
+            )
+        if slot.s4_prefetch_dma != DMA_NONE:
+            raise AssertionError("M32 comparison does not use S4 prefetch")
+    for cluster_name, slots in queues.items():
+        for previous, current in zip(slots, slots[1:]):
+            if current.reference_start_tick < previous.reference_end_tick:
+                raise AssertionError(f"{cluster_name} local tasks overlap")
+
+    fixed_profiles = {
+        M32_FIXED_A_PROFILE: (SHAPE_A, M32_FIXED_A_EXPECTED_MAKESPAN_TICKS),
+        M32_FIXED_B_PROFILE: (SHAPE_B, M32_FIXED_B_EXPECTED_MAKESPAN_TICKS),
+        M32_FIXED_C_PROFILE: (SHAPE_C, M32_FIXED_C_EXPECTED_MAKESPAN_TICKS),
+    }
+    if profile in fixed_profiles:
+        expected_shape, expected_makespan = fixed_profiles[profile]
+        for cluster_name in ("c0", "c1"):
+            if tuple(slot.expert_id for slot in queues[cluster_name]) != (
+                M32_FIXED_CLUSTER_EIDS[cluster_name]
+            ):
+                raise AssertionError(
+                    f"fixed high-to-low {cluster_name} stream changed"
+                )
+        for slot in all_slots:
+            expected_dma = DMA_IDMA if slot.cluster_name == "c0" else DMA_XDMA
+            if (
+                slot.s1_shape != expected_shape
+                or slot.s3_shape != expected_shape
+                or slot.skip_s1
+                or slot.skip_s3
+                or slot.s1_dma != expected_dma
+                or slot.s3_dma != expected_dma
+                or slot.s2_prefetch_dma != DMA_NONE
+            ):
+                raise AssertionError(
+                    "fixed M32 tasks must use one shape and empty-cache local DMA"
+                )
+    elif profile == M32_DISTILLED_PROFILE:
+        expected_makespan = M32_DISTILLED_EXPECTED_MAKESPAN_TICKS
+        expected = _build_fixed_order_schedule(M32_DISTILLED_HISTORY)
+        for cluster_name in ("c0", "c1"):
+            actual_signature = tuple(
+                (
+                    slot.expert_id,
+                    slot.ntokens,
+                    slot.reference_start_tick,
+                    slot.reference_end_tick,
+                    slot.s1_shape,
+                    slot.s3_shape,
+                    slot.s1_dma,
+                    slot.s3_dma,
+                    slot.s2_prefetch_dma,
+                    slot.skip_s1,
+                    slot.skip_s3,
+                )
+                for slot in queues[cluster_name]
+            )
+            expected_signature = tuple(
+                (
+                    slot.expert_id,
+                    slot.ntokens,
+                    slot.reference_start_tick,
+                    slot.reference_end_tick,
+                    slot.s1_shape,
+                    slot.s3_shape,
+                    slot.s1_dma,
+                    slot.s3_dma,
+                    slot.s2_prefetch_dma,
+                    slot.skip_s1,
+                    slot.skip_s3,
+                )
+                for slot in expected[cluster_name]
+            )
+            if actual_signature != expected_signature:
+                raise AssertionError(
+                    f"distilled M32 {cluster_name} action stream changed"
+                )
+        if any(slot.skip_s1 for slot in all_slots):
+            raise AssertionError("empty initial cache cannot skip any M32 S1 load")
+        prefetched_s3 = {
+            slot.expert_id for slot in all_slots if slot.s2_prefetch_dma != DMA_NONE
+        }
+        if prefetched_s3 != {0, 1, 2, 63}:
+            raise AssertionError(
+                "distilled M32 S2-prefetch set must be E0/E1/E2/E63"
+            )
+    else:
+        raise ValueError(f"unsupported M32 run profile {profile!r}")
+
+    queue_ticks = {
+        name: max(slot.reference_end_tick for slot in queues[name])
+        for name in ("c0", "c1")
+    }
+    makespan = max(queue_ticks.values())
+    if makespan != expected_makespan:
+        raise AssertionError(
+            f"{profile} expected {expected_makespan} ticks, got {makespan}"
+        )
+    return {
+        "distribution": counts,
+        "active_experts": len(active_eids),
+        "source_tokens": 32,
+        "routed_tokens": 64,
+        "queue_ticks": queue_ticks,
+        "makespan_ticks": makespan,
+        "dma_release_edges": cross_cluster_dma_release_edges(queues),
+    }
 
 
 def _audit_m70_three_hot_distribution() -> None:
@@ -4203,7 +4808,22 @@ def audit_ends_inward_schedule(
 def format_schedule_manifest(
     queues: dict[str, tuple[SlotSpec, ...]], profile: str = HIGH_TO_LOW_PROFILE
 ) -> str:
-    if profile == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
+    if profile in M8_COMPARISON_RUN_PROFILES:
+        audit = audit_m8_comparison_schedule(queues, profile)
+        title = f"{profile} schedule:"
+        detail = (
+            "  input_tokens=8 top_k=2 distribution=E0:6,E1:4,E63:6; "
+            f"dma_release_edges={len(audit['dma_release_edges'])}"
+        )
+    elif profile in M32_COMPARISON_RUN_PROFILES:
+        audit = audit_m32_comparison_schedule(queues, profile)
+        title = f"{profile} schedule:"
+        detail = (
+            "  input_tokens=32 top_k=2 distribution="
+            "8,6,5,4,3,2x14,1x10; empty_cache=1; "
+            f"dma_release_edges={len(audit['dma_release_edges'])}"
+        )
+    elif profile == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
         audit = audit_m60_high_skew_full_scheduler_schedule(queues)
         title = "M60 HIGH_SKEW FULL_SCHEDULER schedule:"
         cluster_bounds = audit["structural_cluster_quarter_ticks"]

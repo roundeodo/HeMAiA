@@ -34,14 +34,20 @@
     //   hidden_size/2 和 intermediate_size 必须能被 weight_chunk_cols 整除
     //   num_indiv_experts 必须能被 2*meshCol(8) 整除
     // ------------------------------------------------------------------
+    // Deterministic Router cases are defined for 8, 32, 64, and 128 tokens.
+    // Changing only this field selects the matching 64-expert Top-2 case.
     total_tokens: 32
     hidden_size: 2048
     intermediate_size: 1024
-    // 一个 DFG block 对应一个物理 weight chunk。当前每个 Mode0 block 和
-    // 每个 Mode1/VC block 都覆盖 128 columns；block 数由模型尺寸自动推导。
+    // 一个 DFG block 对应 256 KiB 权重：S1 合并 Gate/Up 两个 128 KiB
+    // chunk，S3 合并两个 VC half 的两个 128 KiB chunk。
     // chunk 必须是 16 columns 的整数倍，以保留 common-16 panel ABI。
     weight_chunk_cols: 128
-    num_indiv_experts: 8
+    s1_block_count: 8
+    s3_block_count: 4
+    s1_weight_chunk_cols: 128
+    s3_weight_chunk_cols: 256
+    num_indiv_experts: 64
     // FPGA performance workload 只存储 4 份实际 individual expert 权重。
     // logical eid e 使用 backing eid (e % 4)，但不同 logical eid 仍由
     // scheduler/CAM 视为不同 expert，因此仍会重新搬运完整权重。

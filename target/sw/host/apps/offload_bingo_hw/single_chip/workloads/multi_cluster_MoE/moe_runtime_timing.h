@@ -6,6 +6,10 @@
 
 #if MOE_RUNTIME_TIMING
 
+#ifndef MOE_RUNTIME_TIMING_SCOPE_RECORDS
+#define MOE_RUNTIME_TIMING_SCOPE_RECORDS 4u
+#endif
+
 static inline void __host_bingo_moe_print_runtime_timing(
     uint64_t *scratchpad_addrs, uint32_t scratchpad_count)
 {
@@ -66,7 +70,13 @@ static inline void __host_bingo_moe_print_runtime_timing_v3(
         uint32_t stage = MOE_PROFILE_META_STAGE(
             sp->reserved[MOE_SP_PROFILE_META_IDX]);
         if (stage != MOE_PROFILE_STAGE_CLUSTER_BEGIN &&
-            stage != MOE_PROFILE_STAGE_CLUSTER_END)
+            stage != MOE_PROFILE_STAGE_CLUSTER_END &&
+            stage != MOE_PROFILE_STAGE_WORKLOAD_BEGIN &&
+            stage != MOE_PROFILE_STAGE_SHARED_BEGIN &&
+            stage != MOE_PROFILE_STAGE_SHARED_END &&
+            stage != MOE_PROFILE_STAGE_WORKLOAD_END &&
+            (stage < MOE_PROFILE_STAGE_M8_FIXED_A_BEGIN ||
+             stage > MOE_PROFILE_STAGE_M32_DISTILLED_END))
             continue;
 #endif
 
@@ -96,8 +106,7 @@ static inline void __host_bingo_moe_print_runtime_timing_v3(
     }
     uint32_t expected_records = scratchpad_count;
 #if MOE_RUNTIME_TIMING == 1
-    // The focused two-cluster MoE DFG has one begin/end pair per cluster.
-    expected_records = 4u;
+    expected_records = MOE_RUNTIME_TIMING_SCOPE_RECORDS;
 #endif
     printf_safe(
         "[MOE_TIMING_END] records=%u expected=%u\r\n",

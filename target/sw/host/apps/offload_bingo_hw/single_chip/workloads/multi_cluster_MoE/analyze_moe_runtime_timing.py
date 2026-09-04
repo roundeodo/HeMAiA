@@ -8,7 +8,6 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-
 V2_RECORD_RE = re.compile(
     r"\[MOE_TIMING_RECORD\]\s+"
     r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+"
@@ -22,12 +21,8 @@ V3_RECORD_RE = re.compile(
     r"([0-9a-fA-F]+)\s+(\d+)"
 )
 VERSION_RE = re.compile(r"\[MOE_TIMING_BEGIN\]\s+version=(\d+)")
-LEVEL_RE = re.compile(
-    r"\[MOE_TIMING_BEGIN\]\s+version=\d+\s+level=(\d+)"
-)
-END_RE = re.compile(
-    r"\[MOE_TIMING_END\]\s+records=(\d+)(?:\s+expected=(\d+))?"
-)
+LEVEL_RE = re.compile(r"\[MOE_TIMING_BEGIN\]\s+version=\d+\s+level=(\d+)")
+END_RE = re.compile(r"\[MOE_TIMING_END\]\s+records=(\d+)(?:\s+expected=(\d+))?")
 
 STAGE_NAMES = {
     1: "gather_s1",
@@ -45,6 +40,28 @@ STAGE_NAMES = {
     13: "cluster_begin",
     14: "cluster_end",
     15: "load_s3_prefetch_s4",
+    16: "workload_begin",
+    17: "shared_begin",
+    18: "shared_end",
+    19: "workload_end",
+    20: "m8_fixed_a_begin",
+    21: "m8_fixed_a_end",
+    22: "m8_fixed_b_begin",
+    23: "m8_fixed_b_end",
+    24: "m8_fixed_c_begin",
+    25: "m8_fixed_c_end",
+    26: "m8_distilled_begin",
+    27: "m8_distilled_end",
+    28: "m32_fixed_a_begin",
+    29: "m32_fixed_a_end",
+    30: "m32_fixed_b_begin",
+    31: "m32_fixed_b_end",
+    32: "m32_fixed_c_begin",
+    33: "m32_fixed_c_end",
+    34: "m32_distilled_begin",
+    35: "m32_distilled_end",
+    36: "scheduler_routed_begin",
+    37: "scheduler_routed_end",
 }
 RESOURCE_NAMES = {
     0: "none",
@@ -77,6 +94,42 @@ REQUIRED_STAGE_ALTERNATIVES = (
 )
 SCOPE_BEGIN = 13
 SCOPE_END = 14
+WORKLOAD_BEGIN = 16
+SHARED_BEGIN = 17
+SHARED_END = 18
+WORKLOAD_END = 19
+SCHEDULER_ROUTED_BEGIN = 36
+SCHEDULER_ROUTED_END = 37
+M8_SCOPE_PAIRS = (
+    (20, 21, "FIXED_A_A"),
+    (22, 23, "FIXED_B_B"),
+    (24, 25, "FIXED_C_C"),
+    (26, 27, "DISTILLED"),
+)
+M32_SCOPE_PAIRS = (
+    (28, 29, "FIXED_A_A"),
+    (30, 31, "FIXED_B_B"),
+    (32, 33, "FIXED_C_C"),
+    (34, 35, "DISTILLED"),
+)
+COMPARISON_SCOPE_GROUPS = (
+    ("M8", M8_SCOPE_PAIRS),
+    ("M32", M32_SCOPE_PAIRS),
+)
+LEVEL1_SCOPE_STAGES = frozenset(
+    (
+        SCOPE_BEGIN,
+        SCOPE_END,
+        WORKLOAD_BEGIN,
+        SHARED_BEGIN,
+        SHARED_END,
+        WORKLOAD_END,
+        SCHEDULER_ROUTED_BEGIN,
+        SCHEDULER_ROUTED_END,
+        *(stage for pair in M8_SCOPE_PAIRS for stage in pair[:2]),
+        *(stage for pair in M32_SCOPE_PAIRS for stage in pair[:2]),
+    )
+)
 UINT32_MASK = (1 << 32) - 1
 
 
@@ -169,9 +222,7 @@ def parse_records(text: str, version: int) -> list[dict[str, int | None]]:
     raise SystemExit(f"unsupported MOE timing schema version {version}")
 
 
-def print_v2_rejection(
-    records: list[dict[str, int | None]], details: bool
-) -> None:
+def print_v2_rejection(records: list[dict[str, int | None]], details: bool) -> None:
     print("\nVALIDATION status=LEGACY_INCOMPLETE")
     print("  schema v2 cannot produce a valid global, slot-stage, or task report")
     print("  optimized multi-block stages overwrite one scratchpad per block")
@@ -232,6 +283,48 @@ def find_scopes(
     return scopes, errors
 
 
+def find_named_scopes(
+    records: list[dict[str, int | None]],
+    begin_stage: int,
+    end_stage: int,
+    label: str,
+) -> tuple[dict[int, dict[str, int]], list[str]]:
+    by_cluster: dict[int, list[dict[str, int | None]]] = defaultdict(list)
+    for record in records:
+        if int(record["stage"]) in (begin_stage, end_stage):
+            by_cluster[int(record["cluster"])].append(record)
+
+    scopes: dict[int, dict[str, int]] = {}
+    errors: list[str] = []
+    for cluster, group in sorted(by_cluster.items()):
+        begins = [r for r in group if int(r["stage"]) == begin_stage]
+        ends = [r for r in group if int(r["stage"]) == end_stage]
+        if len(begins) != 1 or len(ends) != 1:
+            errors.append(
+                f"{label} C{cluster}: expected one begin/end pair, "
+                f"found {len(begins)} and {len(ends)}"
+            )
+            continue
+        begin, end = begins[0], ends[0]
+        if begin["core"] != end["core"]:
+            errors.append(f"{label} C{cluster}: begin/end use different cores")
+            continue
+        epoch = int(begin["end"])
+        stop = int(end["start"])
+        scopes[cluster] = {
+            "begin_start": int(begin["start"]),
+            "epoch": epoch,
+            "stop": stop,
+            "duration": delta(stop, epoch),
+            "core": int(begin["core"]),
+            "begin_node": int(begin["node"]),
+            "end_node": int(end["node"]),
+        }
+    if not scopes:
+        errors.append(f"{label}: no valid scope found")
+    return scopes, errors
+
+
 def add_scope_offsets(
     records: list[dict[str, int | None]], scopes: dict[int, dict[str, int]]
 ) -> list[str]:
@@ -252,11 +345,9 @@ def add_scope_offsets(
     return errors
 
 
-def print_global(
-    scopes: dict[int, dict[str, int]], cycles_per_tick: float
-) -> None:
-    print("\nGLOBAL EXECUTION TIME")
-    print("  definition=max(per-cluster local mcycle scope); no cross-cluster subtraction")
+def print_global(scopes: dict[int, dict[str, int]], cycles_per_tick: float) -> None:
+    print("\nROUTED EXPERT PIPELINE TIME")
+    print("  definition=max(C2,C3 local scopes); no cross-cluster subtraction")
     for cluster, scope in sorted(scopes.items()):
         print(
             f"  C{cluster} core={scope['core']} begin_node={scope['begin_node']} "
@@ -268,11 +359,106 @@ def print_global(
             scopes.items(), key=lambda item: item[1]["duration"]
         )
         print(
+            f"  ROUTED=max(C-local) C{critical_cluster} cycles={critical['duration']} "
+            f"ticks={format_ticks(critical['duration'], cycles_per_tick)}"
+        )
+        # Keep the legacy parser key while making the routed-only scope clear.
+        print(
             f"  GLOBAL=max(C-local) C{critical_cluster} cycles={critical['duration']} "
             f"ticks={format_ticks(critical['duration'], cycles_per_tick)}"
         )
     else:
-        print("  GLOBAL=UNAVAILABLE")
+        print("  ROUTED=UNAVAILABLE")
+
+
+def print_full_workload_scopes(
+    workload_scopes: dict[int, dict[str, int]],
+    shared_scopes: dict[int, dict[str, int]],
+    cycles_per_tick: float,
+) -> None:
+    print("\nROUTER + SHARED MEASUREMENT")
+    common_clusters = sorted(set(workload_scopes) & set(shared_scopes))
+    if not common_clusters:
+        print("  ROUTER_SHARED=UNAVAILABLE")
+        return
+    cluster = common_clusters[0]
+    workload = workload_scopes[cluster]
+    shared = shared_scopes[cluster]
+    router_cycles = delta(shared["begin_start"], workload["epoch"])
+    shared_cycles = shared["duration"]
+    combined_cycles = router_cycles + shared_cycles
+    marker_overhead = workload["duration"] - combined_cycles
+    print(
+        f"  ROUTER C{cluster} cycles={router_cycles} "
+        f"ticks={format_ticks(router_cycles, cycles_per_tick)}"
+    )
+    print(
+        f"  SHARED C{cluster} cycles={shared_cycles} "
+        f"ticks={format_ticks(shared_cycles, cycles_per_tick)}"
+    )
+    print(
+        f"  ROUTER_PLUS_SHARED cycles={combined_cycles} "
+        f"ticks={format_ticks(combined_cycles, cycles_per_tick)}"
+    )
+    print(
+        f"  RAW_WORKLOAD_SCOPE cycles={workload['duration']} "
+        f"boundary_marker_cycles={marker_overhead}"
+    )
+
+
+def print_comparison_scopes(
+    scopes_by_label: dict[str, dict[int, dict[str, int]]],
+    cycles_per_tick: float,
+    token_label: str,
+    scope_pairs,
+) -> None:
+    print(f"\n{token_label} FIXED-SHAPE VS DISTILLED")
+    print("  definition=end_marker.start - begin_marker.end")
+    for _begin, _end, label in scope_pairs:
+        scopes = scopes_by_label.get(label, {})
+        if not scopes:
+            print(f"  {label}=UNAVAILABLE")
+            continue
+        cluster, scope = next(iter(sorted(scopes.items())))
+        print(
+            f"  {label} C{cluster} cycles={scope['duration']} "
+            f"ticks={format_ticks(scope['duration'], cycles_per_tick)}"
+        )
+
+
+def print_scheduler_routed_scope(
+    scopes: dict[int, dict[str, int]],
+    cycles_per_tick: float,
+    scheduler_only_cycles: int | None = None,
+    routed_only_cycles: int | None = None,
+) -> None:
+    print("\nSCHEDULER + ROUTED EXPERT LINKED TIME")
+    print("  definition=end_marker.start - begin_marker.end")
+    print("  includes=Bingo dispatch + MoEPrepare + MoEExecute + routed expert chains")
+    if not scopes:
+        print("  SCHEDULER_ROUTED=UNAVAILABLE")
+        return
+    cluster, scope = next(iter(sorted(scopes.items())))
+    print(
+        f"  SCHEDULER_ROUTED C{cluster} cycles={scope['duration']} "
+        f"ticks={format_ticks(scope['duration'], cycles_per_tick)}"
+    )
+    if scheduler_only_cycles is not None and routed_only_cycles is not None:
+        separate_sum = scheduler_only_cycles + routed_only_cycles
+        difference = int(scope["duration"]) - separate_sum
+        percent = (100.0 * difference / separate_sum) if separate_sum else 0.0
+        print(f"  SEPARATE_SUM cycles={separate_sum}")
+        print(
+            f"  LINKED_MINUS_SEPARATE cycles={difference} "
+            f"percent_of_separate={percent:.3f}%"
+        )
+
+
+def print_m8_comparison_scopes(
+    scopes_by_label: dict[str, dict[int, dict[str, int]]],
+    cycles_per_tick: float,
+) -> None:
+    print_comparison_scopes(scopes_by_label, cycles_per_tick, "M8", M8_SCOPE_PAIRS)
 
 
 def interval_union(intervals: list[tuple[int, int]]) -> int:
@@ -305,7 +491,7 @@ def active_slots(
 
 
 def validate_slots(
-    slots: dict[tuple[int, int], list[dict[str, int | None]]]
+    slots: dict[tuple[int, int], list[dict[str, int | None]]],
 ) -> list[str]:
     errors: list[str] = []
     for (cluster, slot), group in sorted(slots.items()):
@@ -320,8 +506,7 @@ def validate_slots(
             errors.append(
                 f"C{cluster} slot={slot}: missing task records "
                 + ",".join(
-                    [STAGE_NAMES[stage] for stage in missing]
-                    + missing_alternatives
+                    [STAGE_NAMES[stage] for stage in missing] + missing_alternatives
                 )
             )
         if slot == 0 and stages[1] == 0:
@@ -338,12 +523,10 @@ def validate_timing_level(
         unexpected = [
             record
             for record in records
-            if int(record["stage"]) not in (SCOPE_BEGIN, SCOPE_END)
+            if int(record["stage"]) not in LEVEL1_SCOPE_STAGES
         ]
         if unexpected:
-            return [
-                f"level 1 capture contains {len(unexpected)} non-scope records"
-            ]
+            return [f"level 1 capture contains {len(unexpected)} non-scope records"]
     return []
 
 
@@ -434,9 +617,23 @@ def main() -> None:
     parser.add_argument("--params", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--peak-mac-per-cluster-cc", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--individual-cluster-count", type=int, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--scheduler-only-cycles",
+        type=int,
+        help="previous scheduler-only continuous-interval result",
+    )
+    parser.add_argument(
+        "--routed-only-cycles",
+        type=int,
+        help="previous routed-only continuous-interval result",
+    )
     args = parser.parse_args()
     if args.cycles_per_tick <= 0:
         raise SystemExit("--cycles-per-tick must be positive")
+    if (args.scheduler_only_cycles is None) != (args.routed_only_cycles is None):
+        raise SystemExit(
+            "--scheduler-only-cycles and --routed-only-cycles must be provided together"
+        )
 
     text = args.log.read_text(errors="replace")
     version_match = VERSION_RE.search(text)
@@ -477,9 +674,44 @@ def main() -> None:
         return
 
     errors = validate_timing_level(records, timing_level)
-    scopes, scope_errors = find_scopes(records)
-    errors.extend(scope_errors)
-    errors.extend(add_scope_offsets(records, scopes))
+    stages = {int(record["stage"]) for record in records}
+    scopes = {}
+    if stages & {SCOPE_BEGIN, SCOPE_END}:
+        scopes, scope_errors = find_scopes(records)
+        errors.extend(scope_errors)
+        errors.extend(add_scope_offsets(records, scopes))
+    workload_scopes = {}
+    shared_scopes = {}
+    if stages & {WORKLOAD_BEGIN, WORKLOAD_END, SHARED_BEGIN, SHARED_END}:
+        workload_scopes, workload_errors = find_named_scopes(
+            records, WORKLOAD_BEGIN, WORKLOAD_END, "router/shared workload"
+        )
+        shared_scopes, shared_errors = find_named_scopes(
+            records, SHARED_BEGIN, SHARED_END, "shared branch"
+        )
+        errors.extend(workload_errors)
+        errors.extend(shared_errors)
+    comparison_scopes = {}
+    scheduler_routed_scopes = {}
+    if stages & {SCHEDULER_ROUTED_BEGIN, SCHEDULER_ROUTED_END}:
+        scheduler_routed_scopes, scheduler_routed_errors = find_named_scopes(
+            records,
+            SCHEDULER_ROUTED_BEGIN,
+            SCHEDULER_ROUTED_END,
+            "scheduler+routed linked",
+        )
+        errors.extend(scheduler_routed_errors)
+    for token_label, scope_pairs in COMPARISON_SCOPE_GROUPS:
+        comparison_stages = {stage for pair in scope_pairs for stage in pair[:2]}
+        if stages & comparison_stages:
+            scopes_by_label = {}
+            for begin_stage, end_stage, label in scope_pairs:
+                run_scopes, run_errors = find_named_scopes(
+                    records, begin_stage, end_stage, f"{token_label} {label}"
+                )
+                scopes_by_label[label] = run_scopes
+                errors.extend(run_errors)
+            comparison_scopes[token_label] = (scope_pairs, scopes_by_label)
     slots = active_slots(records, scopes) if timing_level == 2 else {}
     if timing_level == 2:
         errors.extend(validate_slots(slots))
@@ -498,7 +730,21 @@ def main() -> None:
     for error in errors:
         print(f"  ERROR: {error}")
 
-    print_global(scopes, args.cycles_per_tick)
+    if workload_scopes or shared_scopes:
+        print_full_workload_scopes(workload_scopes, shared_scopes, args.cycles_per_tick)
+    for token_label, (scope_pairs, scopes_by_label) in comparison_scopes.items():
+        print_comparison_scopes(
+            scopes_by_label, args.cycles_per_tick, token_label, scope_pairs
+        )
+    if scheduler_routed_scopes:
+        print_scheduler_routed_scope(
+            scheduler_routed_scopes,
+            args.cycles_per_tick,
+            args.scheduler_only_cycles,
+            args.routed_only_cycles,
+        )
+    if scopes:
+        print_global(scopes, args.cycles_per_tick)
     if timing_level == 1:
         print("\nDETAIL TIMING disabled at MOE_RUNTIME_TIMING=1")
         print("  rebuild with MOE_RUNTIME_TIMING=2 for slot/stage/task records")

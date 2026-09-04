@@ -69,8 +69,10 @@ from moe_scheduler_bench_cases import (  # noqa: E402
     SCHEDULER_BENCH_CASES,
     get_scheduler_bench_case,
 )
+from moe_routing_cases import RoutingCase, get_routing_case  # noqa: E402
 
 np.random.seed(320)
+
 
 # Legacy L15 config builders below are retained for comparison experiments.
 # (name, array_shape, meshRow, tileSize, meshCol)
@@ -85,6 +87,15 @@ def pack_int4(values_flat):
     lo = arr[0::2].astype(np.uint8) & 0x0F
     hi = arr[1::2].astype(np.uint8) & 0x0F
     return (lo | (hi << 4)).astype(np.uint8)
+
+
+def unpack_int4(packed, value_count):
+    packed = np.asarray(packed, dtype=np.uint8).reshape(-1)
+    values = np.empty(packed.size * 2, dtype=np.int8)
+    values[0::2] = (packed & 0x0F).astype(np.int8)
+    values[1::2] = ((packed >> 4) & 0x0F).astype(np.int8)
+    values[values >= 8] -= 16
+    return values[:value_count]
 
 
 def build_l15_shape_cfg_fields(shape, globals_, placement, m_tiles=1):
@@ -174,16 +185,16 @@ def build_l15_shape_cfg_fields(shape, globals_, placement, m_tiles=1):
         "mode1_output_row_stride_bytes": mode1_token_stride,
         "mode1_output_span_elems": m_tiles * mesh_row * (mode1_token_stride // 2),
     }
-    word_count = sum(len(value) if isinstance(value, list) else 1 for value in fields.values())
+    word_count = sum(
+        len(value) if isinstance(value, list) else 1 for value in fields.values()
+    )
     if word_count != L15_CFG_WORDS:
         raise ValueError(f"L15 config has {word_count} words, expected {L15_CFG_WORDS}")
     return fields
 
 
 def format_l15_cfg_definition(name, fields):
-    lines = [
-        f"static const __snax_bingo_moe_l15_shape_cfg_t {name} = {{"
-    ]
+    lines = [f"static const __snax_bingo_moe_l15_shape_cfg_t {name} = {{"]
     for field, value in fields.items():
         if isinstance(value, list):
             body = ", ".join(str(v) for v in value)
@@ -192,7 +203,7 @@ def format_l15_cfg_definition(name, fields):
             lines.append(f"    .{field} = {value},")
     lines += [
         "};",
-        f'_Static_assert(sizeof({name}) == BINGO_MOE_L15_CFG_WORDS * 4u,',
+        f"_Static_assert(sizeof({name}) == BINGO_MOE_L15_CFG_WORDS * 4u,",
         '               "generated L15 config size mismatch");',
     ]
     return "\n".join(lines)
@@ -200,6 +211,7 @@ def format_l15_cfg_definition(name, fields):
 
 def emit_moe_data(**kw):
     p = derive_mixed_workload_params(kw)
+    debug_level = int(kw.get("debug_level", 0))
     ashape = p["array_shape"]
     meshRow = p["meshRow"]
     tileSize = p["tileSize"]
@@ -265,23 +277,40 @@ def emit_moe_data(**kw):
     data_str = []
     token_payload_bytes = p["A_token_bytes"]
     token_stride_bytes = p["A_token_row_stride_bytes"]
+    scheduler_case = kw.get("scheduler_bench_case")
+    if scheduler_case is None:
+        routing_case = get_routing_case(M_total, num_indiv_experts)
+    else:
+        flat_top2 = scheduler_case.token_major_topk_indices
+        routing_case = RoutingCase(
+            scheduler_case.name,
+            scheduler_case.input_tokens,
+            scheduler_case.n_experts,
+            tuple(zip(flat_top2[0::2], flat_top2[1::2])),
+            scheduler_case.padded_counts,
+        )
+    weight_rng = np.random.RandomState(320)
 
     # Individual L3 input uses ordinary dense row-major storage. Each gather issues one 2D
     # descriptor per token and maps successive 16-byte K tiles to successive
     # 512-byte TCDM rows at that token's two-bank offset.
-    log(f"generating dense input_A: {M_total} x {token_payload_bytes}B")
-    A_phys = np.random.randint(
-        -256, 255, size=(M_total, K1_A, tileSize_A), dtype=np.int16
+    log(
+        f"generating deterministic input_A for routing case "
+        f"{routing_case.name}: {M_total} x {token_payload_bytes}B"
     )
+    if M_total > K_total:
+        raise ValueError("one-hot deterministic routing requires M <= hidden_size")
+    A_phys = np.zeros((M_total, K1_A, tileSize_A), dtype=np.int16)
+    for token in range(M_total):
+        k_tile, k_lane = divmod(token, tileSize_A)
+        A_phys[token, k_tile, k_lane] = 64
     A_token_data = A_phys.reshape(M_total, K1_A * tileSize_A).view(np.uint8)
     A_flat = A_token_data.reshape(-1)
     assert A_flat.size == M_total * token_stride_bytes
     pad = (-len(A_flat)) % 64
     if pad:
         A_flat = np.pad(A_flat, (0, pad), constant_values=0)
-    data_str += [
-        format_vector_definition("uint8_t", "input_A", A_flat, alignment=64)
-    ]
+    data_str += [format_vector_definition("uint8_t", "input_A", A_flat, alignment=64)]
 
     # The Router and shared L1.5 kernels retain the historical +32-byte row
     # stride. Keep separate copies so the individual ABI remains dense.
@@ -304,21 +333,128 @@ def emit_moe_data(**kw):
         )
     ]
 
-    log("generating router_B (INT4 packed)")
-    rB_values = np.random.randint(
-        -7, 7, size=(rN2, rK2 * rK1, rN1, tileSize, meshCol), dtype=np.int8
-    )
+    log("generating deterministic router_B (INT4 packed)")
+    rB_values = np.zeros((rN2, rK2 * rK1, rN1, tileSize, meshCol), dtype=np.int8)
+    logical_router_B = np.zeros((K_total, N_router), dtype=np.int8)
+    experts_per_n2 = rN1 * meshCol
+    for token, (first, second) in enumerate(routing_case.token_major_top2):
+        k_tile, k_lane = divmod(token, tileSize)
+        for expert, weight in ((first, 7), (second, 6)):
+            n2, in_n2 = divmod(expert, experts_per_n2)
+            n1, col = divmod(in_n2, meshCol)
+            rB_values[n2, k_tile, n1, k_lane, col] = weight
+            logical_router_B[token, expert] = weight
     # All B arrays use the streamer's physical order
     # (expert, N2, N1, K, meshCol, tileSize).
     rB_stream = np.ascontiguousarray(rB_values.transpose(0, 2, 1, 4, 3))
-    data_str += [format_vector_definition("uint8_t", "router_B", pack_int4(rB_stream))]
+    packed_router_B = pack_int4(rB_stream)
+    unpacked_router_B = unpack_int4(packed_router_B, rB_stream.size).reshape(
+        rB_stream.shape
+    )
+    if not np.array_equal(unpacked_router_B, rB_stream):
+        raise AssertionError("router INT4 pack/unpack verification failed")
+    unpacked_values = unpacked_router_B.transpose(0, 2, 1, 4, 3)
+    reconstructed_router_B = np.zeros_like(logical_router_B)
+    for expert in range(N_router):
+        n2, in_n2 = divmod(expert, experts_per_n2)
+        n1, col = divmod(in_n2, meshCol)
+        reconstructed_router_B[:, expert] = unpacked_values[n2, :, n1, :, col].reshape(
+            -1
+        )
+    if not np.array_equal(reconstructed_router_B, logical_router_B):
+        raise AssertionError("router physical layout does not reconstruct logical B")
+
+    router_scores = A_phys.reshape(M_total, K_total).astype(
+        np.int32
+    ) @ logical_router_B.astype(np.int32)
+    generated_top2 = np.argsort(-router_scores, axis=1, kind="stable")[:, :2]
+    expected_top2 = np.asarray(routing_case.token_major_top2, dtype=np.uint16)
+    if not np.array_equal(generated_top2, expected_top2):
+        raise AssertionError("constructed Router GEMM does not produce expected Top-2")
+    generated_counts = np.bincount(
+        generated_top2.reshape(-1), minlength=num_indiv_experts
+    )
+    if not np.array_equal(
+        generated_counts, np.asarray(routing_case.expected_counts, dtype=np.int64)
+    ):
+        raise AssertionError("constructed Router Top-2 does not match distribution")
+
+    # Reproduce the exact INT16 D layout consumed by the host TopK code. This
+    # catches N2/N1/meshCol or token-row indexing mistakes before C generation.
+    row_stride = rN1 * meshRow * meshCol
+    tile_stride = rM1 * row_stride
+    raw_router_D = np.zeros(rN2 * tile_stride, dtype=np.int16)
+    extracted_scores = np.zeros_like(router_scores)
+    for token in range(M_total):
+        for expert in range(N_router):
+            n2, in_n2 = divmod(expert, experts_per_n2)
+            n1, col = divmod(in_n2, meshCol)
+            index = (
+                n2 * tile_stride
+                + (token // meshRow) * row_stride
+                + n1 * meshRow * meshCol
+                + (token % meshRow) * meshCol
+                + col
+            )
+            raw_router_D[index] = router_scores[token, expert]
+            extracted_scores[token, expert] = raw_router_D[index]
+    extracted_top2 = np.argsort(-extracted_scores, axis=1, kind="stable")[:, :2]
+    if not np.array_equal(extracted_top2, expected_top2):
+        raise AssertionError("host physical Router-output extraction changes Top-2")
+
+    if debug_level >= 1:
+        log(
+            f"[ROUTING_EXPECTED] case={routing_case.name} tokens={M_total} "
+            f"experts={num_indiv_experts} top_k=2"
+        )
+        for first, second, count in routing_case.pair_histogram:
+            log(f"[ROUTING_PAIR] E{first},E{second} tokens={count}")
+        active = [
+            f"E{eid}:{count}"
+            for eid, count in enumerate(routing_case.expected_counts)
+            if count
+        ]
+        high_to_low = sorted(
+            (
+                (count, eid)
+                for eid, count in enumerate(routing_case.expected_counts)
+                if count
+            ),
+            key=lambda item: (-item[0], item[1]),
+        )
+        log("[ROUTING_COUNTS] " + " ".join(active))
+        log(
+            "[ROUTING_HIGH_TO_LOW] "
+            + " -> ".join(f"E{eid}({count})" for count, eid in high_to_low)
+        )
+        log(
+            "[ROUTING_VERIFY] PASS logical_gemm=1 int4_roundtrip=1 "
+            "physical_B=1 physical_D=1 counts=1"
+        )
+
+    data_str += [
+        f'static const char moe_expected_routing_case[] = "{routing_case.name}";',
+        format_vector_definition(
+            "uint16_t",
+            "moe_expected_top2_indices",
+            expected_top2.reshape(-1),
+            alignment=64,
+        ),
+        format_vector_definition(
+            "uint32_t",
+            "moe_expected_expert_counts",
+            np.asarray(routing_case.expected_counts, dtype=np.uint32),
+            alignment=64,
+        ),
+        format_vector_definition("uint8_t", "router_B", packed_router_B),
+    ]
 
     log(
         "generating indiv_gate_B / up_B / down_B "
         f"({num_indiv_weight_backings} physical backings for "
         f"{num_indiv_experts} logical experts)"
     )
-    gB_phys = np.random.randint(
+    gB_phys = weight_rng.randint(
         -7,
         7,
         size=(
@@ -331,9 +467,7 @@ def emit_moe_data(**kw):
         ),
         dtype=np.int8,
     )
-    gB_packed = pack_int4(
-        np.ascontiguousarray(gB_phys.transpose(0, 1, 2, 3, 5, 4))
-    )
+    gB_packed = pack_int4(np.ascontiguousarray(gB_phys.transpose(0, 1, 2, 3, 5, 4)))
     data_str += [
         format_vector_definition(
             "uint8_t",
@@ -342,7 +476,7 @@ def emit_moe_data(**kw):
             alignment=128,
         )
     ]
-    uB_phys = np.random.randint(
+    uB_phys = weight_rng.randint(
         -7,
         7,
         size=(
@@ -355,9 +489,7 @@ def emit_moe_data(**kw):
         ),
         dtype=np.int8,
     )
-    uB_packed = pack_int4(
-        np.ascontiguousarray(uB_phys.transpose(0, 1, 2, 3, 5, 4))
-    )
+    uB_packed = pack_int4(np.ascontiguousarray(uB_phys.transpose(0, 1, 2, 3, 5, 4)))
     data_str += [
         format_vector_definition(
             "uint8_t",
@@ -366,7 +498,7 @@ def emit_moe_data(**kw):
             alignment=64,
         )
     ]
-    dB_phys = np.random.randint(
+    dB_phys = weight_rng.randint(
         -7,
         7,
         size=(
@@ -380,9 +512,7 @@ def emit_moe_data(**kw):
         ),
         dtype=np.int8,
     )
-    dB_packed = pack_int4(
-        np.ascontiguousarray(dB_phys.transpose(0, 1, 2, 3, 4, 6, 5))
-    )
+    dB_packed = pack_int4(np.ascontiguousarray(dB_phys.transpose(0, 1, 2, 3, 4, 6, 5)))
     data_str += [
         format_vector_definition(
             "uint8_t",
@@ -394,7 +524,7 @@ def emit_moe_data(**kw):
 
     if num_shared > 0:
         log(f"generating shared expert weights ({num_shared} experts)")
-        sgB = np.random.randint(
+        sgB = weight_rng.randint(
             -7,
             7,
             size=(num_shared, sN2, sN1, sK2 * sK1, tileSize, meshCol),
@@ -408,7 +538,7 @@ def emit_moe_data(**kw):
                 alignment=128,
             )
         ]
-        suB = np.random.randint(
+        suB = weight_rng.randint(
             -7,
             7,
             size=(num_shared, sN2, sN1, sK2 * sK1, tileSize, meshCol),
@@ -422,7 +552,7 @@ def emit_moe_data(**kw):
                 alignment=64,
             )
         ]
-        sdB = np.random.randint(
+        sdB = weight_rng.randint(
             -7,
             7,
             size=(num_shared, 2, sdN2, sdN1, sdK2 * sdK1, tileSize, down_vc_meshCol),
@@ -448,9 +578,7 @@ def emit_moe_data(**kw):
         "delta_local_mode1_d1": p["l15_delta_local_mode1_d1"],
         "tcdm_end": p["l15_delta_cfg"],
     }
-    cfg_fields = build_l15_shape_cfg_fields(
-        s0_shape, globals_, placement, m_tiles=sdM1
-    )
+    cfg_fields = build_l15_shape_cfg_fields(s0_shape, globals_, placement, m_tiles=sdM1)
     data_str += [
         "// Shared-expert fused SwiGLU + down-projection config.\n"
         + format_l15_cfg_definition("l15_dev_shared_s0_cfg", cfg_fields)
@@ -505,12 +633,31 @@ def get_args():
         choices=tuple(SCHEDULER_BENCH_CASES),
         help="emit the minimal data header for a Prepare/Execute benchmark",
     )
+    parser.add_argument(
+        "--scheduler-bench-run-routed",
+        action="store_true",
+        help="emit full tensors so the selected scheduler case can run routed experts",
+    )
+    parser.add_argument(
+        "--debug-level",
+        type=int,
+        default=0,
+        help="print deterministic routing distribution and verification details",
+    )
+    parser.add_argument(
+        "--total-tokens",
+        type=int,
+        choices=(8, 32, 64, 128),
+        help="override params.hjson total_tokens for a deterministic routing case",
+    )
     return parser.parse_args()
 
 
 def main():
     args = get_args()
-    if args.scheduler_bench_case is not None:
+    if args.scheduler_bench_run_routed and args.scheduler_bench_case is None:
+        raise ValueError("--scheduler-bench-run-routed requires --scheduler-bench-case")
+    if args.scheduler_bench_case is not None and not args.scheduler_bench_run_routed:
         case = get_scheduler_bench_case(args.scheduler_bench_case)
         log(
             f"scheduler bench {case.name}: tokens={case.input_tokens} "
@@ -527,6 +674,16 @@ def main():
     with args.hwcfg.open() as f:
         hcfg = hjson.loads(f.read())
     merged = {**pcfg, **hcfg}
+    if args.scheduler_bench_case is not None:
+        case = get_scheduler_bench_case(args.scheduler_bench_case)
+        merged["total_tokens"] = case.input_tokens
+        merged["num_indiv_experts"] = case.n_experts
+        if int(merged["num_indiv_weight_backings"]) > case.n_experts:
+            merged["num_indiv_weight_backings"] = case.n_experts
+        merged["scheduler_bench_case"] = case
+    if args.total_tokens is not None:
+        merged["total_tokens"] = args.total_tokens
+    merged["debug_level"] = args.debug_level
     print(emit_header_file(**merged))
 
 

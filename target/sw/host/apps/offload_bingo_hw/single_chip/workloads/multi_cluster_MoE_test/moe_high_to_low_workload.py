@@ -2,6 +2,7 @@
 
 from bingo_kernel_args import (
     HostBingoKernelCheckResultArgs,
+    SnaxBingoKernelDummyArgs,
     SnaxBingoKernelIdma1dCopyArgs,
     SnaxBingoKernelMoeDynamicExpertBlockArgs,
 )
@@ -23,6 +24,16 @@ from moe_test_schedule import (
     HIGH_TO_LOW_DMA_SERIAL_EIDS,
     HIGH_TO_LOW_PROFILE,
     LOW_TO_HIGH_PROFILE,
+    M8_COMPARISON_PROFILE,
+    M8_DISTILLED_PROFILE,
+    M8_FIXED_A_PROFILE,
+    M8_FIXED_B_PROFILE,
+    M8_FIXED_C_PROFILE,
+    M32_COMPARISON_PROFILE,
+    M32_DISTILLED_PROFILE,
+    M32_FIXED_A_PROFILE,
+    M32_FIXED_B_PROFILE,
+    M32_FIXED_C_PROFILE,
     M70_THREE_HOT_STATIC_DESC_PROFILE,
     M70_THREE_HOT_DYNAMIC_DESC_PROFILE,
     M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE,
@@ -48,6 +59,8 @@ from moe_test_schedule import (
     audit_dynamic_two_ended_schedule,
     audit_full_scheduler_schedule,
     audit_low_to_high_schedule,
+    audit_m8_comparison_schedule,
+    audit_m32_comparison_schedule,
     audit_m70_three_hot_static_desc_schedule,
     audit_m70_three_hot_dynamic_desc_schedule,
     audit_m70_three_hot_dynamic_two_ended_schedule,
@@ -61,9 +74,10 @@ from moe_test_schedule import (
     audit_m92_parameter_order_full_scheduler_schedule,
     audit_m92_parameter_order_static_desc_schedule,
     audit_static_desc_schedule,
+    build_m8_comparison_schedules,
+    build_m32_comparison_schedules,
     cross_cluster_dma_release_edges,
 )
-
 
 GEMM_CORE = 0
 DMA_CORE = 1
@@ -74,6 +88,20 @@ SLOT_BYTES = 384
 STATIC_BYTES = 192
 PIPELINE_CTRL_SLOT_BYTES = 1024
 PIPELINE_CTRL_BANK_OFFSET = 448
+
+M8_COMPARISON_RUNS = (
+    (M8_FIXED_A_PROFILE, "M8_FIXED_A", "m8a", 20, 21),
+    (M8_FIXED_B_PROFILE, "M8_FIXED_B", "m8b", 22, 23),
+    (M8_FIXED_C_PROFILE, "M8_FIXED_C", "m8c", 24, 25),
+    (M8_DISTILLED_PROFILE, "M8_DISTILLED", "m8sched", 26, 27),
+)
+M32_COMPARISON_RUNS = (
+    (M32_FIXED_A_PROFILE, "M32_FIXED_A", "m32a", 28, 29),
+    (M32_FIXED_B_PROFILE, "M32_FIXED_B", "m32b", 30, 31),
+    (M32_FIXED_C_PROFILE, "M32_FIXED_C", "m32c", 32, 33),
+    (M32_DISTILLED_PROFILE, "M32_DISTILLED", "m32sched", 34, 35),
+)
+ALL_COMPARISON_RUNS = (*M8_COMPARISON_RUNS, *M32_COMPARISON_RUNS)
 
 DMA_RELEASE_EDGE_PROFILES = frozenset(
     (
@@ -116,6 +144,9 @@ def _add_dma_release_edges(dfg, slot_chains, dma_release_edges) -> None:
 
 
 def _setup_name(schedule_profile: str) -> str:
+    for profile, tag, _namespace, _begin, _end in ALL_COMPARISON_RUNS:
+        if schedule_profile == profile:
+            return f"SETUP_{tag}"
     if schedule_profile == S1_STAGE_SMOKE_PROFILE:
         return "SETUP_S1_STAGE_SMOKE"
     if schedule_profile == C_TAIL_SMOKE_PROFILE:
@@ -162,6 +193,9 @@ def _setup_name(schedule_profile: str) -> str:
 
 
 def _schedule_tag(schedule_profile: str) -> str:
+    for profile, tag, _namespace, _begin, _end in ALL_COMPARISON_RUNS:
+        if schedule_profile == profile:
+            return tag
     if schedule_profile == LOW_TO_HIGH_PROFILE:
         return "LOW_TO_HIGH"
     if schedule_profile == ENDS_INWARD_PROFILE:
@@ -211,6 +245,10 @@ def _offset(handle, byte_offset: int):
     return f"{handle.get_c_var_name()} + {byte_offset}"
 
 
+def _run_memory_key(prefix: str, stem: str, namespace: str) -> str:
+    return f"{namespace}_{prefix}_{stem}" if namespace else f"{prefix}_{stem}"
+
+
 def _pack_ctrl(slot: SlotSpec) -> int:
     skip_s2 = int(slot.s2_m_exec == 0)
     skip_s4 = int(slot.s4_m_exec == 0)
@@ -237,7 +275,7 @@ def _pack_dma_slot(valid: bool, dma: int, slot: int) -> int:
 class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
     """Initialize all runtime records for the selected fixed-order queues."""
 
-    def __init__(self, p, mh, queues):
+    def __init__(self, p, mh, queues, memory_namespace=""):
         setup_name = _setup_name(p["schedule_profile"])
         super().__init__(
             golden_data_addr=mh["input"],
@@ -248,6 +286,7 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
         self.p = p
         self.mh = mh
         self.queues = queues
+        self.memory_namespace = memory_namespace
         for prefix, _cluster in PROD_CLUSTERS:
             for name in (
                 "layout",
@@ -259,6 +298,9 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
                 "prod_output_l3",
             ):
                 setattr(self, f"_abi_memref_{prefix}_{name}", mh[f"{prefix}_{name}"])
+            for stem in ("prod_static_l3", "prod_runtime_l3"):
+                key = _run_memory_key(prefix, stem, memory_namespace)
+                setattr(self, f"_abi_memref_{key}", mh[key])
 
     def _addr(self, value, handle_name_map, as_64bit=True):
         assignments = {}
@@ -288,8 +330,14 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
             (p["base_mesh_row"] >> shape) * row_stride for shape in range(3)
         ]
 
-        static_l3 = self._addr(mh[f"{prefix}_prod_static_l3"], handle_name_map)
-        runtime_l3 = self._addr(mh[f"{prefix}_prod_runtime_l3"], handle_name_map)
+        static_l3 = self._addr(
+            mh[_run_memory_key(prefix, "prod_static_l3", self.memory_namespace)],
+            handle_name_map,
+        )
+        runtime_l3 = self._addr(
+            mh[_run_memory_key(prefix, "prod_runtime_l3", self.memory_namespace)],
+            handle_name_map,
+        )
         runtime_l1 = self._addr(
             mh[f"{prefix}_prod_runtime_l1"], handle_name_map, as_64bit=False
         )
@@ -310,8 +358,9 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
         l1_scratch = self._addr(
             mh[f"{prefix}_gate_scratch"], handle_name_map, as_64bit=False
         )
-        static_name = f"prod_{prefix}_st"
-        runtime_name = f"prod_{prefix}_rt"
+        instance = f"{self.memory_namespace}_" if self.memory_namespace else ""
+        static_name = f"prod_{instance}{prefix}_st"
+        runtime_name = f"prod_{instance}{prefix}_rt"
         runtime_bytes = HEADER_BYTES + len(slots) * SLOT_BYTES
         output_bytes = (max(slot.expert_id for slot in slots) + 1) * p[
             "prod_output_expert_stride_bytes"
@@ -324,9 +373,7 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
             f"memset({runtime_name}, 0, {runtime_bytes}u);",
         ]
         if p["prod_clear_output"]:
-            lines.append(
-                f"memset((void *)(uintptr_t){output_l3}, 0, {output_bytes}u);"
-            )
+            lines.append(f"memset((void *)(uintptr_t){output_l3}, 0, {output_bytes}u);")
         lines += [
             f"{static_name}->token_refs_addr = {token_refs_l1};",
             f"{static_name}->input_A_l3_base = {input_l3};",
@@ -381,25 +428,20 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
 
     def _slot_init_lines(self, slot, runtime_name, l1_d):
         p = self.p
-        slot_name = f"prod_{slot.cluster_name}_slot{slot.local_slot}"
+        instance = f"{self.memory_namespace}_" if self.memory_namespace else ""
+        slot_name = f"prod_{instance}{slot.cluster_name}_slot{slot.local_slot}"
         slot_offset = HEADER_BYTES + slot.local_slot * SLOT_BYTES
-        s1_n = p["indiv_N_per_block"] // (
-            p["base_mesh_col"] << slot.s1_shape
-        )
+        s1_n = p["indiv_N_per_block"] // (p["base_mesh_col"] << slot.s1_shape)
         s2_n = (p["s1_block_count"] * p["indiv_N_per_block"]) // (
             p["base_mesh_col"] << SHAPE_C
         )
-        s3_n = p["indiv_down_N_per_block"] // (
-            p["base_mesh_col"] << slot.s3_shape
-        )
+        s3_n = p["indiv_down_N_per_block"] // (p["base_mesh_col"] << slot.s3_shape)
         s4_n = (p["s3_block_count"] * p["indiv_down_N_per_block"]) // (
             p["base_mesh_col"] << SHAPE_C
         )
         dma_slot_vd = _pack_dma_slot(
             slot.s2_prefetch_dma != DMA_NONE, slot.s2_prefetch_dma, 2
-        ) | _pack_dma_slot(
-            slot.s4_prefetch_dma != DMA_NONE, slot.s4_prefetch_dma, 3
-        )
+        ) | _pack_dma_slot(slot.s4_prefetch_dma != DMA_NONE, slot.s4_prefetch_dma, 3)
         lines = [
             f"__snax_bingo_kernel_moe_dynamic_expert_args_t *{slot_name} = "
             f"(__snax_bingo_kernel_moe_dynamic_expert_args_t *)"
@@ -464,15 +506,32 @@ class HighToLowSetupArgs(HostBingoKernelCheckResultArgs):
         return lines
 
 
-def define_high_to_low_memory(p, queues):
+def define_high_to_low_memory(
+    p, queues, comparison_schedules=None, comparison_runs=None
+):
+    if comparison_schedules is not None and comparison_runs is None:
+        comparison_runs = (
+            M32_COMPARISON_RUNS
+            if p["schedule_profile"] == M32_COMPARISON_PROFILE
+            else M8_COMPARISON_RUNS
+        )
     mh = {
         "input": BingoMemSymbol("moe_test_input_A"),
         "prod_slot_token_refs": BingoMemSymbol("moe_test_prod_slot_token_refs"),
+        "pipeline_ctrl_zero": BingoMemSymbol("moe_test_pipeline_ctrl_zero"),
     }
     for prefix, cluster in PROD_CLUSTERS:
-        for slot in queues[prefix]:
-            mh[f"{prefix}_e{slot.expert_id:02d}_golden"] = BingoMemSymbol(
-                f"moe_test_{prefix}_e{slot.expert_id:02d}_golden"
+        schedules = (
+            tuple(comparison_schedules.values())
+            if comparison_schedules is not None
+            else (queues,)
+        )
+        expert_ids = sorted(
+            {slot.expert_id for schedule in schedules for slot in schedule[prefix]}
+        )
+        for expert_id in expert_ids:
+            mh[f"{prefix}_e{expert_id:02d}_golden"] = BingoMemSymbol(
+                f"moe_test_{prefix}_e{expert_id:02d}_golden"
             )
         mh[f"{prefix}_gate_src"] = BingoMemSymbol(f"moe_test_{prefix}_gate_B")
         mh[f"{prefix}_up_src"] = BingoMemSymbol(f"moe_test_{prefix}_up_B")
@@ -503,13 +562,27 @@ def define_high_to_low_memory(p, queues):
             cluster_id=cluster,
             alignment=64,
         )
-        runtime_bytes = HEADER_BYTES + len(queues[prefix]) * SLOT_BYTES
-        mh[f"{prefix}_prod_static_l3"] = BingoMemAlloc(
-            f"moe_test_{prefix}_prod_static_l3", size=STATIC_BYTES, mem_level="L3"
+        max_slots = max(len(schedule[prefix]) for schedule in schedules)
+        runtime_bytes = HEADER_BYTES + max_slots * SLOT_BYTES
+        run_namespaces = (
+            tuple(run[2] for run in comparison_runs)
+            if comparison_schedules is not None
+            else ("",)
         )
-        mh[f"{prefix}_prod_runtime_l3"] = BingoMemAlloc(
-            f"moe_test_{prefix}_prod_runtime_l3", size=runtime_bytes, mem_level="L3"
-        )
+        for namespace in run_namespaces:
+            static_key = _run_memory_key(prefix, "prod_static_l3", namespace)
+            runtime_key = _run_memory_key(prefix, "prod_runtime_l3", namespace)
+            suffix = f"_{namespace}" if namespace else ""
+            mh[static_key] = BingoMemAlloc(
+                f"moe_test_{prefix}{suffix}_prod_static_l3",
+                size=STATIC_BYTES,
+                mem_level="L3",
+            )
+            mh[runtime_key] = BingoMemAlloc(
+                f"moe_test_{prefix}{suffix}_prod_runtime_l3",
+                size=runtime_bytes,
+                mem_level="L3",
+            )
         mh[f"{prefix}_prod_static_l1"] = BingoMemAlloc(
             f"moe_test_{prefix}_prod_static_l1",
             size=STATIC_BYTES,
@@ -528,16 +601,14 @@ def define_high_to_low_memory(p, queues):
         )
         mh[f"{prefix}_pipeline_ctrl"] = BingoMemAlloc(
             f"moe_test_{prefix}_pipeline_ctrl",
-            size=len(queues[prefix]) * PIPELINE_CTRL_SLOT_BYTES,
+            size=max_slots * PIPELINE_CTRL_SLOT_BYTES,
             mem_level="L1",
             chip_id=0,
             cluster_id=cluster,
             alignment=p["bank_tcdm_row_bytes"],
         )
         if p["prod_clear_output"]:
-            output_bytes = (
-                max(slot.expert_id for slot in queues[prefix]) + 1
-            ) * p["prod_output_expert_stride_bytes"]
+            output_bytes = (max(expert_ids) + 1) * p["prod_output_expert_stride_bytes"]
         else:
             output_bytes = p["prod_output_bytes"]
         mh[f"{prefix}_prod_output_l3"] = BingoMemAlloc(
@@ -579,7 +650,17 @@ def _add_scope_marker(dfg, cluster, args, begin, node_name):
     return _add_node(dfg, cluster, DMA_CORE, kernel, args, node_name)
 
 
-def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
+def add_high_to_low_schedule(
+    dfg,
+    p,
+    mh,
+    queues,
+    slot_implementation,
+    *,
+    start_dependencies=(),
+    timing_stages=None,
+    memory_namespace="",
+):
     if p["schedule_profile"] == HIGH_TO_LOW_PROFILE:
         audit_high_to_low_schedule(queues)
     elif p["schedule_profile"] == LOW_TO_HIGH_PROFILE:
@@ -621,6 +702,20 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
         audit_m60_high_skew_dynamic_two_ended_schedule(queues)
     elif p["schedule_profile"] == M60_HIGH_SKEW_FULL_SCHEDULER_PROFILE:
         audit_m60_high_skew_full_scheduler_schedule(queues)
+    elif p["schedule_profile"] in (
+        M8_FIXED_A_PROFILE,
+        M8_FIXED_B_PROFILE,
+        M8_FIXED_C_PROFILE,
+        M8_DISTILLED_PROFILE,
+    ):
+        audit_m8_comparison_schedule(queues, p["schedule_profile"])
+    elif p["schedule_profile"] in (
+        M32_FIXED_A_PROFILE,
+        M32_FIXED_B_PROFILE,
+        M32_FIXED_C_PROFILE,
+        M32_DISTILLED_PROFILE,
+    ):
+        audit_m32_comparison_schedule(queues, p["schedule_profile"])
     dma_release_edges = cross_cluster_dma_release_edges(queues)
     tag = _schedule_tag(p["schedule_profile"])
     setup = _add_node(
@@ -628,9 +723,11 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
         0,
         HOST_CORE,
         "__host_bingo_kernel_check_result",
-        HighToLowSetupArgs(p, mh, queues),
+        HighToLowSetupArgs(p, mh, queues, memory_namespace),
         _setup_name(p["schedule_profile"]),
     )
+    for dependency in start_dependencies:
+        dfg.bingo_add_edge(dependency, setup)
     runtime_ready = {}
     gathers = {}
     scope_begins = {}
@@ -647,7 +744,7 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
         static_to_l1 = _add_copy(
             dfg,
             cluster,
-            mh[f"{prefix}_prod_static_l3"],
+            mh[_run_memory_key(prefix, "prod_static_l3", memory_namespace)],
             mh[f"{prefix}_prod_static_l1"],
             STATIC_BYTES,
             f"{prefix.upper()}_{tag}_LOAD_STATIC_ABI",
@@ -656,15 +753,30 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
         runtime_to_l1 = _add_copy(
             dfg,
             cluster,
-            mh[f"{prefix}_prod_runtime_l3"],
+            mh[_run_memory_key(prefix, "prod_runtime_l3", memory_namespace)],
             mh[f"{prefix}_prod_runtime_l1"],
             runtime_bytes,
             f"{prefix.upper()}_{tag}_LOAD_DYNAMIC_ABI",
         )
+        pipeline_ctrl_reset = _add_copy(
+            dfg,
+            cluster,
+            mh["pipeline_ctrl_zero"],
+            mh[f"{prefix}_pipeline_ctrl"],
+            len(queues[prefix]) * PIPELINE_CTRL_SLOT_BYTES,
+            f"{prefix.upper()}_{tag}_RESET_PIPELINE_CTRL",
+        )
         dfg.bingo_add_edge(setup, refs_to_l1)
         dfg.bingo_add_edge(refs_to_l1, static_to_l1)
         dfg.bingo_add_edge(static_to_l1, runtime_to_l1)
-        runtime_ready[prefix] = runtime_to_l1
+        dfg.bingo_add_edge(runtime_to_l1, pipeline_ctrl_reset)
+        # The M8 comparison deliberately starts from an empty expert cache.
+        # No weight warm-up or resident-state preload precedes the begin marker.
+        # Reset every active pipeline-control page before timing starts.  The
+        # device-side next-slot path uses a magic cookie to detect an already
+        # initialized page, so carrying these pages across runs would reuse
+        # stale DMA bindings and prepared-stage state.
+        runtime_ready[prefix] = pipeline_ctrl_reset
 
         slot0_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
             _offset(mh[f"{prefix}_prod_runtime_l1"], HEADER_BYTES),
@@ -673,13 +785,14 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
             0,
         )
         scope_args[prefix] = slot0_args
-        scope_begins[prefix] = _add_scope_marker(
-            dfg,
-            cluster,
-            slot0_args,
-            True,
-            f"{prefix.upper()}_{tag}_SCOPE_BEGIN",
-        )
+        if timing_stages is None:
+            scope_begins[prefix] = _add_scope_marker(
+                dfg,
+                cluster,
+                slot0_args,
+                True,
+                f"{prefix.upper()}_{tag}_SCOPE_BEGIN",
+            )
         gathers[prefix] = _add_node(
             dfg,
             cluster,
@@ -691,11 +804,26 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
 
     # This one-time common release starts both cluster-local streams together.
     # Their task chains then advance independently except at explicit DMA edges.
-    for ready in runtime_ready.values():
-        for scope_begin in scope_begins.values():
-            dfg.bingo_add_edge(ready, scope_begin)
-    for prefix in gathers:
-        dfg.bingo_add_edge(scope_begins[prefix], gathers[prefix])
+    if timing_stages is None:
+        for ready in runtime_ready.values():
+            for scope_begin in scope_begins.values():
+                dfg.bingo_add_edge(ready, scope_begin)
+        for prefix in gathers:
+            dfg.bingo_add_edge(scope_begins[prefix], gathers[prefix])
+    else:
+        begin_stage, _end_stage = timing_stages
+        global_begin = _add_node(
+            dfg,
+            0,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dyn_opt_timing_marker",
+            SnaxBingoKernelDummyArgs(begin_stage),
+            f"{tag}_GLOBAL_BEGIN",
+        )
+        for ready in runtime_ready.values():
+            dfg.bingo_add_edge(ready, global_begin)
+        for gather in gathers.values():
+            dfg.bingo_add_edge(global_begin, gather)
 
     final_stores = {}
     slot_chains = {}
@@ -709,8 +837,7 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
             )
             pipeline_ctrl_addr = _offset(
                 mh[f"{prefix}_pipeline_ctrl"],
-                PIPELINE_CTRL_BANK_OFFSET
-                + slot.local_slot * PIPELINE_CTRL_SLOT_BYTES,
+                PIPELINE_CTRL_BANK_OFFSET + slot.local_slot * PIPELINE_CTRL_SLOT_BYTES,
             )
             static_addr = mh[f"{prefix}_prod_static_l1"]
 
@@ -728,8 +855,7 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
                 )
 
             skip_s1_elided = (
-                p["schedule_profile"]
-                == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE
+                p["schedule_profile"] == M70_THREE_HOT_DYNAMIC_DESC_SKIP_ELIDED_PROFILE
                 and slot.skip_s1
             )
             chain_builder = (
@@ -738,9 +864,7 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
                 else build_dynamic_expert_slot_chain
             )
             chain_options = (
-                {}
-                if skip_s1_elided
-                else {"implementation": slot_implementation}
+                {} if skip_s1_elided else {"implementation": slot_implementation}
             )
             chain = chain_builder(
                 add_node=lambda core, kernel, args, label, cluster=cluster: _add_node(
@@ -757,12 +881,9 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
                 dma_core_id=DMA_CORE,
                 gemm_core_id=GEMM_CORE,
                 emit_s2_prefetch_task=(
-                    slot.s2_prefetch_dma != DMA_NONE
-                    and slot.s2pf_s1_overlap_steps == 0
+                    slot.s2_prefetch_dma != DMA_NONE and slot.s2pf_s1_overlap_steps == 0
                 ),
-                s2pf_starts_after_s1_dma=(
-                    slot.s2pf_starts_after_s1_dma
-                ),
+                s2pf_starts_after_s1_dma=(slot.s2pf_starts_after_s1_dma),
                 label_prefix=(
                     f"{prefix.upper()}_{tag}_SLOT{slot.local_slot}_"
                     f"E{slot.expert_id}_T{slot.ntokens}"
@@ -775,25 +896,35 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
         final_stores[prefix] = predecessor
 
     scope_ends = {}
-    for prefix, cluster in PROD_CLUSTERS:
-        scope_ends[prefix] = _add_scope_marker(
+    if timing_stages is None:
+        for prefix, cluster in PROD_CLUSTERS:
+            scope_ends[prefix] = _add_scope_marker(
+                dfg,
+                cluster,
+                scope_args[prefix],
+                False,
+                f"{prefix.upper()}_{tag}_SCOPE_END",
+            )
+            dfg.bingo_add_edge(final_stores[prefix], scope_ends[prefix])
+    else:
+        _begin_stage, end_stage = timing_stages
+        global_end = _add_node(
             dfg,
-            cluster,
-            scope_args[prefix],
-            False,
-            f"{prefix.upper()}_{tag}_SCOPE_END",
+            0,
+            DMA_CORE,
+            "__snax_bingo_kernel_moe_dyn_opt_timing_marker",
+            SnaxBingoKernelDummyArgs(end_stage),
+            f"{tag}_GLOBAL_END",
         )
-        dfg.bingo_add_edge(final_stores[prefix], scope_ends[prefix])
+        for store in final_stores.values():
+            dfg.bingo_add_edge(store, global_end)
+        scope_ends["global"] = global_end
 
     # The descending reference has one global BOTH-DMA tail.  Constrain only
     # the DMA release/acquire boundary; the next cluster may still configure
     # block0 while it waits, and neither cluster waits for the peer's store.
     present_serial_eids = (
-        tuple(
-            eid
-            for eid in HIGH_TO_LOW_DMA_SERIAL_EIDS
-            if eid in slot_chains_by_eid
-        )
+        tuple(eid for eid in HIGH_TO_LOW_DMA_SERIAL_EIDS if eid in slot_chains_by_eid)
         if p["schedule_profile"] == HIGH_TO_LOW_PROFILE
         else ()
     )
@@ -809,7 +940,10 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
             current_s1_load = current_s1_load[0]
         dfg.bingo_add_edge(previous_s3_load, current_s1_load)
 
-    if p["schedule_profile"] in DMA_RELEASE_EDGE_PROFILES:
+    if p["schedule_profile"] in DMA_RELEASE_EDGE_PROFILES or p["schedule_profile"] in (
+        M8_DISTILLED_PROFILE,
+        M32_DISTILLED_PROFILE,
+    ):
         _add_dma_release_edges(dfg, slot_chains, dma_release_edges)
 
     if p["schedule_profile"] == LOW_TO_HIGH_PROFILE:
@@ -826,6 +960,15 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
             for entry in entries:
                 dfg.bingo_add_edge(peer_store, entry)
             dfg.bingo_add_edge(peer_store, split_chain["s1_config"])
+
+    if timing_stages is not None:
+        # Fixed-A/B/C and distilled are performance-only profiles.  Their
+        # global end marker already depends on both clusters' final stores and
+        # is therefore the complete-workload barrier.  Returning it as the
+        # chain tail preserves sequential comparison-suite ordering without
+        # running per-expert host golden checks, which are outside the measured
+        # interval and can terminate timing collection on a numerical mismatch.
+        return list(scope_ends.values())
 
     checks = []
     previous_check = None
@@ -869,6 +1012,73 @@ def add_high_to_low_schedule(dfg, p, mh, queues, slot_implementation):
     return checks
 
 
+def add_m8_comparison_suite(dfg, p, mh, slot_implementation):
+    """Run fixed A/B/C and distilled streams sequentially in one DFG."""
+    schedules = build_m8_comparison_schedules()
+    previous_checks = ()
+    all_checks = []
+    for profile, _tag, namespace, begin_stage, end_stage in M8_COMPARISON_RUNS:
+        run_params = {**p, "schedule_profile": profile}
+        checks = add_high_to_low_schedule(
+            dfg,
+            run_params,
+            mh,
+            schedules[profile],
+            slot_implementation,
+            start_dependencies=previous_checks,
+            timing_stages=(begin_stage, end_stage),
+            memory_namespace=namespace,
+        )
+        all_checks.extend(checks)
+        # Checks are already one Host-core chain.  Depending on every check
+        # creates an N-way fan-in into the next run's setup and consumes one
+        # dependency tag per active expert (29 for M32, hardware limit 16).
+        # The chain tail transitively represents completion of all checks.
+        previous_checks = (checks[-1],) if checks else ()
+    return all_checks
+
+
+def add_m32_comparison_suite(dfg, p, mh, slot_implementation):
+    """Run M=32 fixed A/B/C and distilled streams sequentially in one DFG."""
+    schedules = build_m32_comparison_schedules()
+    previous_checks = ()
+    all_checks = []
+    for profile, _tag, namespace, begin_stage, end_stage in M32_COMPARISON_RUNS:
+        run_params = {**p, "schedule_profile": profile}
+        checks = add_high_to_low_schedule(
+            dfg,
+            run_params,
+            mh,
+            schedules[profile],
+            slot_implementation,
+            start_dependencies=previous_checks,
+            timing_stages=(begin_stage, end_stage),
+            memory_namespace=namespace,
+        )
+        all_checks.extend(checks)
+        previous_checks = (checks[-1],) if checks else ()
+    return all_checks
+
+
+def add_m32_comparison_run(dfg, p, mh, queues, slot_implementation):
+    """Run one M=32 comparison stream with one global begin/end pair."""
+    timing_stages = {
+        profile: (begin_stage, end_stage)
+        for profile, _tag, _namespace, begin_stage, end_stage in M32_COMPARISON_RUNS
+    }
+    profile = p["schedule_profile"]
+    if profile not in timing_stages:
+        raise ValueError(f"unsupported standalone M32 profile {profile!r}")
+    return add_high_to_low_schedule(
+        dfg,
+        p,
+        mh,
+        queues,
+        slot_implementation,
+        timing_stages=timing_stages[profile],
+    )
+
+
 def add_s1_stage_smoke_schedule(dfg, p, mh, queues):
     """Build only gather + S1 load/config/compute for the C/C tail smoke test."""
     setup = _add_node(
@@ -907,10 +1117,19 @@ def add_s1_stage_smoke_schedule(dfg, p, mh, queues):
             runtime_bytes,
             f"{prefix.upper()}_S1_SMOKE_LOAD_DYNAMIC_ABI",
         )
+        pipeline_ctrl_reset = _add_copy(
+            dfg,
+            cluster,
+            mh["pipeline_ctrl_zero"],
+            mh[f"{prefix}_pipeline_ctrl"],
+            len(queues[prefix]) * PIPELINE_CTRL_SLOT_BYTES,
+            f"{prefix.upper()}_S1_SMOKE_RESET_PIPELINE_CTRL",
+        )
         dfg.bingo_add_edge(setup, refs_to_l1)
         dfg.bingo_add_edge(refs_to_l1, static_to_l1)
         dfg.bingo_add_edge(static_to_l1, runtime_to_l1)
-        runtime_ready[prefix] = runtime_to_l1
+        dfg.bingo_add_edge(runtime_to_l1, pipeline_ctrl_reset)
+        runtime_ready[prefix] = pipeline_ctrl_reset
 
         slot0_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
             _offset(mh[f"{prefix}_prod_runtime_l1"], HEADER_BYTES),
@@ -942,8 +1161,7 @@ def add_s1_stage_smoke_schedule(dfg, p, mh, queues):
             )
             pipeline_ctrl_addr = _offset(
                 mh[f"{prefix}_pipeline_ctrl"],
-                PIPELINE_CTRL_BANK_OFFSET
-                + slot.local_slot * PIPELINE_CTRL_SLOT_BYTES,
+                PIPELINE_CTRL_BANK_OFFSET + slot.local_slot * PIPELINE_CTRL_SLOT_BYTES,
             )
             block_args = SnaxBingoKernelMoeDynamicExpertBlockArgs(
                 slot_addr,

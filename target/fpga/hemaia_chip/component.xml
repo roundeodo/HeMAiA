@@ -52,7 +52,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>c2d2f1d8</spirit:value>
+            <spirit:value>43e2ce7c</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -68,7 +68,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>991f230e</spirit:value>
+            <spirit:value>c12f0f5f</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -759,6 +759,76 @@
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/include/mem_interface/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/include/snitch_vm/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/include/floo_noc/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/include/hpdcache_typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/rvfi_types.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/cvxif_types.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/idma-4a77559befb1bbed/src/include/idma/guard.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/assign.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../hw/vendor/pulp_platform_axi_tlb/include/axi_tlb/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/assign.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/assign.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
         <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/include/snitch_ssr/typedef.svh</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
@@ -804,11 +874,6 @@
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/include/mem_interface/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
         <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/include/tcdm_interface/typedef.svh</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
@@ -844,77 +909,12 @@
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../hw/vendor/pulp_platform_axi/include/axi/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/include/snitch_vm/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/include/floo_noc/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/include/hpdcache_typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/rvfi_types.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/cvxif_types.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/idma-4a77559befb1bbed/src/include/idma/guard.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../hw/vendor/pulp_platform_axi_tlb/include/axi_tlb/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
         <spirit:name>../../../hw/vendor/pulp_platform_axi/include/axi/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../hw/vendor/pulp_platform_axi/include/axi/assign.svh</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
@@ -2132,19 +2132,19 @@
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_pkg.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_pkg.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_pkg.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_pkg.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/moe_scheduler_core.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/moe_scheduler_core.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/moe_scheduler_reg_wrapper.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/moe_scheduler_reg_wrapper.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
@@ -2416,39 +2416,47 @@
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_bandwidth_check.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_bandwidth_check.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_best_candidate.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_bound_score.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_evaluator.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_pair_compare.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_generator.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_profile_decode.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_continuation_score.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_regime_classify.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_pair_shape_select.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_round_engine.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_s2pf_search.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_start_iter.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_task_timeline.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_target_s4pf.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_task_word_pack.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_timeline.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_transition_eval.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../../Scheduler_hw/sched_task_word_pack.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
@@ -3216,6 +3224,76 @@
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/include/mem_interface/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/include/snitch_vm/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/include/floo_noc/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/include/hpdcache_typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/rvfi_types.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/cvxif_types.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/idma-4a77559befb1bbed/src/include/idma/guard.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/assign.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../hw/vendor/pulp_platform_axi_tlb/include/axi_tlb/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/assign.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/assign.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
         <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch_ssr/include/snitch_ssr/typedef.svh</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
@@ -3261,11 +3339,6 @@
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/mem_interface/include/mem_interface/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
         <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/tcdm_interface/include/tcdm_interface/typedef.svh</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
@@ -3301,77 +3374,12 @@
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../hw/vendor/pulp_platform_axi/include/axi/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/snitch/include/snitch_vm/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/floo_noc-551059d307ca7d26/hw/include/floo_noc/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/cache_subsystem/hpdcache/rtl/include/hpdcache_typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/rvfi_types.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/cva6-9085b713cd7e9f8b/core/include/cvxif_types.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/idma-4a77559befb1bbed/src/include/idma/guard.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/snitch_cluster-4da1c399497ad72a/hw/reqrsp_interface/include/reqrsp_interface/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../hw/vendor/pulp_platform_axi_tlb/include/axi_tlb/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/axi_stream-683bf88f199f0ed8/include/axi_stream/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/typedef.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/register_interface-126aa152b770f2ca/include/register_interface/assign.svh</spirit:name>
-        <spirit:fileType>systemVerilogSource</spirit:fileType>
-        <spirit:isIncludeFile>true</spirit:isIncludeFile>
-      </spirit:file>
-      <spirit:file>
         <spirit:name>../../../hw/vendor/pulp_platform_axi/include/axi/typedef.svh</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile>true</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../hw/vendor/pulp_platform_axi/include/axi/assign.svh</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
@@ -4584,19 +4592,19 @@
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_pkg.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_pkg.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_pkg.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_pkg.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/moe_scheduler_core.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/moe_scheduler_core.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/moe_scheduler_reg_wrapper.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/moe_scheduler_reg_wrapper.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
@@ -4868,39 +4876,47 @@
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_bandwidth_check.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_bandwidth_check.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_best_candidate.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_bound_score.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_evaluator.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_pair_compare.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_candidate_generator.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_profile_decode.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_continuation_score.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_regime_classify.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_pair_shape_select.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_round_engine.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_s2pf_search.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_start_iter.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_task_timeline.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_target_s4pf.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
-        <spirit:name>../../../.bender/git/checkouts/hw_scheduler-748e60d6d7a1b932/sched_task_word_pack.sv</spirit:name>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_timeline.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../../Scheduler_hw/sched_distilled_transition_eval.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>../../../../Scheduler_hw/sched_task_word_pack.sv</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
       </spirit:file>
       <spirit:file>
@@ -5580,12 +5596,12 @@
         <xilinx:xpmLibrary>XPM_MEMORY</xilinx:xpmLibrary>
       </xilinx:xpmLibraries>
       <xilinx:coreRevision>1</xilinx:coreRevision>
-      <xilinx:coreCreationDateTime>2026-07-25T07:47:15Z</xilinx:coreCreationDateTime>
+      <xilinx:coreCreationDateTime>2026-08-07T14:52:41Z</xilinx:coreCreationDateTime>
     </xilinx:coreExtensions>
     <xilinx:packagingInfo>
       <xilinx:xilinxVersion>2025.2</xilinx:xilinxVersion>
       <xilinx:checksum xilinx:scope="busInterfaces" xilinx:value="065a6ecc"/>
-      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="6aa04d2a"/>
+      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="c94fefe1"/>
       <xilinx:checksum xilinx:scope="ports" xilinx:value="ae46fb01"/>
       <xilinx:checksum xilinx:scope="parameters" xilinx:value="7ad86bd0"/>
     </xilinx:packagingInfo>
